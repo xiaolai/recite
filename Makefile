@@ -3,7 +3,7 @@ GOLANGCI_LINT := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 GOVULNCHECK   := golang.org/x/vuln/cmd/govulncheck@v1.9.0
 FUZZTIME      := 60s
 
-.PHONY: build test check fuzz bench live qualify calibrate
+.PHONY: build test check fuzz bench live qualify calibrate release
 
 BUILDINFO := github.com/xiaolai/recite/internal/buildinfo
 VERSION   ?= $(shell git describe --always --dirty 2>/dev/null)
@@ -17,6 +17,11 @@ build:
 
 test:
 	go test -race ./...
+
+# Four CGO_ENABLED=0 binaries and SHA256SUMS in dist/ (REL-01). Signing is separate:
+# scripts/sign-notarize.sh.
+release:
+	VERSION='$(VERSION)' COMMIT='$(COMMIT)' DATE='$(DATE)' ./scripts/build-release.sh
 
 # The merge gate (FND-03). Each recipe line fails the target on a non-zero exit.
 check:

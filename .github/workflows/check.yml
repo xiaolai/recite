@@ -28,6 +28,47 @@ jobs:
           go-version-file: go.mod
       - run: make check
 
+  # REL-01: every runner cross-builds all four binaries with `make release`, then runs the
+  # one native to it. Runners: macos-15 (Apple silicon), macos-15-intel (the last x86_64
+  # macOS image), ubuntu-24.04 (x64) and ubuntu-24.04-arm (arm64).
+  release-build:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            binary: recite-darwin-arm64
+          - runner: macos-15-intel
+            binary: recite-darwin-amd64
+          - runner: ubuntu-24.04
+            binary: recite-linux-amd64
+          - runner: ubuntu-24.04-arm
+            binary: recite-linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make release
+      - name: all four binaries and their checksums exist
+        run: |
+          for b in recite-darwin-arm64 recite-darwin-amd64 recite-linux-amd64 recite-linux-arm64; do
+            test -s "dist/$b"
+            grep -q " $b\$" dist/SHA256SUMS
+          done
+      - name: the native binary runs version with the injected commit
+        env:
+          BINARY: ${{ matrix.binary }}
+        run: |
+          out="$("dist/$BINARY" version)"
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -q "^commit: ${GITHUB_SHA}\$"
+
   fuzz-bench:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
