@@ -467,6 +467,13 @@ type unit struct {
 
 // units is ordered so a longer abbreviation is tried before its prefix.
 var units = []unit{
+	{"hPa", "hectopascal", "hectopascals", true}, {"kPa", "kilopascal", "kilopascals", true},
+	{"MPa", "megapascal", "megapascals", true}, {"Pa", "pascal", "pascals", true},
+	{"mbar", "millibar", "millibars", true},
+	{"N·m", "newton meter", "newton meters", true}, {"N⋅m", "newton meter", "newton meters", true},
+	{"Nm", "newton meter", "newton meters", true}, {"kN", "kilonewton", "kilonewtons", true},
+	{"dB", "decibel", "decibels", true},
+	{"µm", "micrometer", "micrometers", true}, {"μm", "micrometer", "micrometers", true},
 	{"km/h", "kilometer per hour", "kilometers per hour", true},
 	{"km/s", "kilometer per second", "kilometers per second", true},
 	{"m/s", "meter per second", "meters per second", true},
