@@ -288,7 +288,7 @@ Plate number 7XYZ-418 was seen.	Plate number seven XYZ four hundred eighteen was
 Ticket JIRA-10442 blocks JIRA-10439.	Ticket JIRA ten thousand four hundred forty-two blocks JIRA ten thousand four hundred thirty-nine.
 Invoice INV-2026-00917 is due.	Invoice INV two thousand twenty-six zero zero nine one seven is due.
 Use SHA-256, not MD5.	Use SHA two hundred fifty-six, not MD5.
-Model RTX-5090 draws 575 W.	Model RTX five thousand ninety draws five hundred seventy-five W.
+Model RTX-5090 draws 575 W.	Model RTX five thousand ninety draws five hundred seventy-five watts.
 error code E-5031	error code E five thousand thirty-one
 COVID-19 cases	COVID nineteen cases
 order A7-2291-ZK	order A seven two thousand two hundred ninety-one ZK
@@ -310,3 +310,8 @@ v1.0-alpha	version one point oh dash alpha
 1.4.2+build.5	one point four point two plus build point five
 3.1.0-rc2	three point one point oh dash R C two
 1.2.3-4 stays	one point two point three-four stays
+The lamp draws 60 W and runs at 12 V.	The lamp draws sixty watts and runs at twelve volts.
+It is at 455 W 57th St.	It is at four hundred fifty-five W fifty-seventh Street.
+A 9 V battery	A nine volt battery
+The charger gives 500 mA at 5 V.	The charger gives five hundred milliamps at five volts.
+The line runs at 11 kV.	The line runs at eleven kilovolts.

@@ -577,6 +577,9 @@ var units = []unit{
 	{"GHz", "gigahertz", "gigahertz", true}, {"MHz", "megahertz", "megahertz", true},
 	{"kHz", "kilohertz", "kilohertz", true}, {"Hz", "hertz", "hertz", true},
 	{"kW", "kilowatt", "kilowatts", true}, {"MW", "megawatt", "megawatts", true},
+	{"GW", "gigawatt", "gigawatts", true}, {"mW", "milliwatt", "milliwatts", true},
+	{"kV", "kilovolt", "kilovolts", true}, {"mV", "millivolt", "millivolts", true},
+	{"mA", "milliamp", "milliamps", true},
 	{"TB", "terabyte", "terabytes", true}, {"GB", "gigabyte", "gigabytes", true},
 	{"MB", "megabyte", "megabytes", true}, {"KB", "kilobyte", "kilobytes", true},
 	{"kB", "kilobyte", "kilobytes", true},
@@ -594,7 +597,9 @@ var units = []unit{
 	{"ms", "millisecond", "milliseconds", true}, {"min", "minute", "minutes", true},
 	{"hrs", "hour", "hours", true}, {"hr", "hour", "hours", true},
 	{"g", "gram", "grams", false}, {"m", "meter", "meters", false}, {"L", "liter", "liters", false},
-	{"W", "watt", "watts", false}, {"V", "volt", "volts", false},
+	// A spaced single capital is a unit only when no number follows: "455 W 57th St" is West.
+	// A (amp), N (newton) and J (joule) stay out: "5 A" is a grade or a flat, "45 N" a latitude.
+	{"W", "watt", "watts", true}, {"V", "volt", "volts", true},
 	{"h", "hour", "hours", false},
 	{"x", "times", "times", false},
 }
@@ -620,6 +625,11 @@ func enUnit(s string, i int, _ *Options) (Match, bool) {
 		j := k + len(u.abbr)
 		if !wordEnd(s, j) || nextRune(s, j) == '/' && !strings.Contains(u.abbr, "/") {
 			continue
+		}
+		if k > n.End && len(u.abbr) == 1 && singleCapital(u.abbr) {
+			if w := nextWord(s, j); byteAt(s, j) == ' ' && w != "" && isDigit(w[0]) {
+				continue
+			}
 		}
 		name := u.many
 		if n.isOne() || hyphen || adjectival(s, i, j) {
