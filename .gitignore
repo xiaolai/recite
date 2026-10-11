@@ -1,0 +1,15 @@
+# Probe output and Python caches
+__pycache__/
+*.pyc
+*.wav
+*.mp3
+*.m4a
+# Go build output
+/bin/
+/dist/
+# Local env and editor files
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
