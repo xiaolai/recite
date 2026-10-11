@@ -95,7 +95,7 @@
             "path": { "type": "string", "minLength": 1 },
             "format": { "enum": ["wav", "pcm"] },
             "duration_s": { "type": "number", "minimum": 0 },
-            "sample_rate": { "const": 24000 },
+            "sample_rate": { "enum": [16000, 22050, 24000, 44100, 48000] },
             "loudness": { "type": "string", "minLength": 1 }
           }
         }

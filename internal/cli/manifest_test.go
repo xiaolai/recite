@@ -113,6 +113,17 @@ func TestManifestValidatesAgainstSchema(t *testing.T) {
 		t.Fatalf("ok manifest: %+v", got)
 	}
 
+	// A resampled output records its own rate, which the schema must accept (AUD-05).
+	look, _ := fakeEncoder(t)
+	m.look = look
+	if r := m.run(threeParagraphs, "-o", "rs.wav", "--sample-rate", "16000"); r.code != exitcode.OK {
+		t.Fatalf("resampled: %+v", r)
+	}
+	if got := validManifest(t, sch, m.path("rs.wav.json")); got.Output == nil || got.Output.SampleRate != 16000 {
+		t.Fatalf("resampled manifest output: %+v", got.Output)
+	}
+	m.look = nil
+
 	m.tr.mishear("c0002", unrelated)
 	if r := m.run(threeParagraphs, "-o", "unv.wav", "--max-attempts", "2"); r.code != exitcode.VerifyFailed {
 		t.Fatalf("unverified: %+v", r)
