@@ -71,7 +71,8 @@ func TestSayInstructionsVersionHidden(t *testing.T) {
 
 // The M1 marker precondition is gone: markers reach the guard, which escapes them.
 func TestSayGuardFlags(t *testing.T) {
-	r := run("say", "a <<< b", "--guard", "strict", "--guard-action", "url=full", "--guard-action", "G-EMOJI=keep")
+	cfg := writeConfig(t, "[guard]\nurl = \"full\"\nemoji = \"keep\"\n")
+	r := run("say", "a <<< b", "--guard", "strict", "--config", cfg)
 	if r.code != ExitOK || len(r.says) != 1 {
 		t.Fatalf("%+v", r)
 	}
@@ -80,6 +81,7 @@ func TestSayGuardFlags(t *testing.T) {
 		t.Fatalf("guard options %+v", g)
 	}
 	rejected(t, "--guard must be fix, strict, warn or off", "--guard", "loud")
-	rejected(t, "G-URL takes host, full, drop, fail", "--guard-action", "G-URL=keep")
-	rejected(t, "CODE=ACTION", "--guard-action", "G-URL")
+	rejected(t, `:2: guard.url: G-URL takes host, full, drop, fail, not "keep"`, "--config", writeConfig(t, "[guard]\nurl = \"keep\"\n"))
+	// The [guard] table replaced the M2 flag form (TXT-09).
+	rejected(t, "guard-action", "--guard-action", "G-URL=full")
 }

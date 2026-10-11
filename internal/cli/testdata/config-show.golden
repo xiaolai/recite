@@ -1,0 +1,33 @@
+KEY                   VALUE              SOURCE
+profile               narrator           env (RECITE_PROFILE)
+voice                 marin              profile narrator ($DIR/recite/config.toml:8)
+model                 gpt-realtime-2.1   default
+effort                low                env (RECITE_EFFORT)
+speed                 0.9                profile narrator ($DIR/recite/config.toml:9)
+jobs                  2                  user ($DIR/recite/config.toml:2)
+verify.mode           normal             default
+verify.max_attempts   3                  default
+gaps.sentence         200ms..350ms       default
+gaps.list             350ms..500ms       default
+gaps.paragraph        550ms..800ms       default
+gaps.section          1.1s..1.5s         default
+gaps.seed             9                  flag (--gap-seed)
+guard.policy          fix                default
+guard.control         remove             default
+guard.whitespace      collapse           default
+guard.repeat-punct    collapse           default
+guard.markup          strip              default
+guard.url             full               user ($DIR/recite/config.toml:5)
+guard.email           speak              default
+guard.path            drop               default
+guard.code            keep               default
+guard.long-token      drop               default
+guard.footnote        remove             default
+guard.emoji           remove             default
+guard.symbol          remove             default
+guard.homoglyph       replace            default
+normalize.mode        auto               default
+normalize.date_style  us                 default
+normalize.disable     ""                 default
+codex_bin             ""                 default
+cache_dir             /xdg-cache/recite  default

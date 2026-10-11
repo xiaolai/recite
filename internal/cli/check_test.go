@@ -142,7 +142,7 @@ func TestCheckExitCodes(t *testing.T) {
 		{"warn finding strict", "Hello\u200b there.\n", []string{"--guard", "strict"}, exitcode.Usage},
 		{"ambiguous fix", "Take 1/2 now.\n", nil, exitcode.OK},
 		{"ambiguous strict", "Take 1/2 now.\n", []string{"--guard", "strict"}, exitcode.Usage},
-		{"fail action", "Edit /etc/nginx/nginx.conf now.\n", []string{"--guard-action", "G-PATH=fail"}, exitcode.Usage},
+		{"fail action", "Edit /etc/nginx/nginx.conf now.\n", []string{"--config", writeConfig(t, "[guard]\npath = \"fail\"\n")}, exitcode.Usage},
 		{"nothing speakable", "🎉 🎉\n", nil, exitcode.Usage},
 	} {
 		in := writeInput(t, tc.body)

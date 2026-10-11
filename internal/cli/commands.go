@@ -49,7 +49,7 @@ func (c *CLI) commands() []command {
 		{"auth", "status|login", "Login state, or sign in through codex", setupAuth},
 		{"usage", "", "Local ledger summary and Codex plan status", stub("usage")},
 		{"cache", "ls|prune|clear", "Manage the take cache", stub("cache")},
-		{"config", "show|path", "Effective merged config and its sources", stub("config")},
+		{"config", "show|path", "Effective merged config and its sources", setupConfig},
 		{"version", "", "Version, commit, build date and Go version", setupVersion},
 		{"help", "[COMMAND]", "Show help for recite or a command", setupHelp},
 	}
@@ -143,7 +143,6 @@ func (f *sayFlags) settings() (realtime.Settings, error) {
 type textFlags struct {
 	maxInput     int64
 	policy       string
-	actionSpecs  []string
 	normalize    string
 	dateStyle    string
 	disableSpecs []string
@@ -155,32 +154,27 @@ func (f *textFlags) register(fs *flag.FlagSet) {
 	fs.Int64Var(&f.maxInput, "max-input", f.maxInput, "input size limit in `BYTES`")
 	f.policy = string(guard.PolicyFix)
 	fs.StringVar(&f.policy, "guard", f.policy, "text guard `POLICY`: fix, strict, warn or off")
-	fs.Func("guard-action", "set a guard rule's action, `CODE=ACTION` (repeatable)", func(s string) error {
-		f.actionSpecs = append(f.actionSpecs, s)
-		return nil
-	})
 	f.normalize, f.dateStyle = string(spoken.ModeAuto), string(spoken.DateUS)
 	fs.StringVar(&f.normalize, "normalize", f.normalize, "spoken-form `MODE`: auto or off")
-	fs.Func("normalize-disable", "turn off spoken-form rules, `RULE,…` (repeatable)", func(s string) error {
-		f.disableSpecs = append(f.disableSpecs, s)
-		return nil
-	})
+	fs.Var(listFlag{&f.disableSpecs}, "normalize-disable", "turn off spoken-form rules, `RULE,…` (repeatable)")
 	fs.StringVar(&f.dateStyle, "date-style", f.dateStyle, "spoken date `STYLE`: us, uk or iso")
 	f.chunkSeconds = text.DefaultChunkSeconds
 	fs.Float64Var(&f.chunkSeconds, "chunk-seconds", f.chunkSeconds, "segmentation budget in `SECONDS` per chunk")
 }
 
-func (f *textFlags) resolve() (guard.Options, spoken.Options, error) {
+// resolve validates the text flags; actions are the per-code guard actions of [guard].
+func (f *textFlags) resolve(actions map[guard.Code]guard.Action) (guard.Options, spoken.Options, error) {
 	if f.maxInput <= 0 {
 		return guard.Options{}, spoken.Options{}, errors.New("--max-input must be a positive number of bytes")
 	}
 	if !(f.chunkSeconds > 0) || math.IsInf(f.chunkSeconds, 0) {
 		return guard.Options{}, spoken.Options{}, fmt.Errorf("--chunk-seconds %v: want a positive number of seconds", f.chunkSeconds)
 	}
-	g, err := guardOptions(f.policy, f.actionSpecs)
+	p, err := guard.ParsePolicy(f.policy)
 	if err != nil {
 		return guard.Options{}, spoken.Options{}, err
 	}
+	g := guard.Options{Policy: p, Actions: actions}
 	so, err := spokenOptions(f.normalize, f.dateStyle, f.disableSpecs)
 	if err != nil {
 		return guard.Options{}, spoken.Options{}, err
@@ -259,11 +253,37 @@ func (f *runFlags) apply(req *SayRequest) error {
 	return nil
 }
 
+// settingFlags are the flags of every setting `say` takes; `config show` registers them too,
+// so it reports exactly what `say` would use.
+type settingFlags struct {
+	sf sayFlags
+	tf textFlags
+	rf runFlags
+}
+
+func (s *settingFlags) register(fs *flag.FlagSet) {
+	s.sf.register(fs)
+	s.tf.register(fs)
+	s.rf.register(fs)
+}
+
+// textSettings resolves every layer into fs (CFG-04) and validates the text-stage settings.
+func (c *CLI) textSettings(fs *flag.FlagSet, tf *textFlags) (guard.Options, spoken.Options, error) {
+	st, err := c.resolveSettings(fs)
+	if err != nil {
+		return guard.Options{}, spoken.Options{}, err
+	}
+	actions, err := guardActions(st)
+	if err != nil {
+		return guard.Options{}, spoken.Options{}, err
+	}
+	return tf.resolve(actions)
+}
+
 func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	var file string
-	var sf sayFlags
-	var tf textFlags
-	var rf runFlags
+	var all settingFlags
+	sf, tf, rf := &all.sf, &all.tf, &all.rf
 	fs.StringVar(&file, "f", "", "read text from `PATH`")
 	fs.StringVar(&file, "file", "", "read text from `PATH`")
 	var output string
@@ -271,11 +291,9 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.StringVar(&output, "o", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
 	fs.StringVar(&output, "output", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
 	fs.BoolVar(&force, "force", false, "overwrite the output")
-	sf.register(fs)
-	tf.register(fs)
-	rf.register(fs)
+	all.register(fs)
 	return func(args []string) int {
-		g, so, err := tf.resolve()
+		g, so, err := c.textSettings(fs, tf)
 		if err != nil {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
@@ -293,26 +311,6 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 		}
 		return c.Say(req)
 	}
-}
-
-// guardOptions resolves --guard and the --guard-action values (TXT-09).
-func guardOptions(policy string, specs []string) (guard.Options, error) {
-	p, err := guard.ParsePolicy(policy)
-	if err != nil {
-		return guard.Options{}, err
-	}
-	o := guard.Options{Policy: p}
-	for _, spec := range specs {
-		code, act, err := guard.ParseActionSpec(spec)
-		if err != nil {
-			return guard.Options{}, err
-		}
-		if o.Actions == nil {
-			o.Actions = map[guard.Code]guard.Action{}
-		}
-		o.Actions[code] = act
-	}
-	return o, nil
 }
 
 // spokenOptions resolves --normalize, --date-style and --normalize-disable (TXT-10).

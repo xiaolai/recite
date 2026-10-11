@@ -441,7 +441,7 @@ func TestSayGuardAndNormalizeReachChunks(t *testing.T) {
 		!strings.Contains(tasks[1].Chunk.Spoken, "fifty percent") {
 		t.Fatalf("spoken %q / %q", tasks[0].Chunk.Spoken, tasks[1].Chunk.Spoken)
 	}
-	if r := m.run(text, "-o", "b.wav", "--normalize", "off", "--guard-action", "G-EMOJI=keep"); r.code != 0 {
+	if r := m.run(text, "-o", "b.wav", "--normalize", "off", "--config", writeConfig(t, "[guard]\nemoji = \"keep\"\n")); r.code != 0 {
 		t.Fatalf("%+v", r)
 	}
 	tasks = m.lastTasks()

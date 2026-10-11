@@ -37,6 +37,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	isolateConfig(dir)
 	code := 1
 	fakeCodex, err = codexfake.BuildTo(dir)
 	if err != nil {
@@ -46,6 +47,23 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// isolateConfig points every config and cache location at dir and clears the RECITE_*
+// settings, so no test reads the real home or the developer's environment. RECITE_LIVE is
+// kept: it gates the live suites.
+func isolateConfig(dir string) {
+	for _, k := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"} {
+		if err := os.Setenv(k, filepath.Join(dir, "home", k)); err != nil {
+			panic(err)
+		}
+	}
+	for _, k := range []string{"RECITE_VOICE", "RECITE_MODEL", "RECITE_EFFORT", "RECITE_SPEED", "RECITE_JOBS",
+		"RECITE_PROFILE", "RECITE_CODEX_BIN", "RECITE_CACHE_DIR"} {
+		if err := os.Unsetenv(k); err != nil {
+			panic(err)
+		}
+	}
 }
 
 var cliNow = time.Unix(1_700_000_000, 0)

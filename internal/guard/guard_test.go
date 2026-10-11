@@ -205,24 +205,23 @@ func TestActions(t *testing.T) {
 	}
 }
 
-func TestParseActionSpec(t *testing.T) {
-	if c, a, err := ParseActionSpec("url=full"); err != nil || c != URL || a != ActFull {
-		t.Fatalf("url=full: %s %s %v", c, a, err)
+func TestParseAction(t *testing.T) {
+	if a, err := ParseAction(URL, "full"); err != nil || a != ActFull {
+		t.Fatalf("G-URL full: %s %v", a, err)
 	}
-	if c, a, err := ParseActionSpec("G-EMOJI=keep"); err != nil || c != Emoji || a != ActKeep {
-		t.Fatalf("G-EMOJI=keep: %s %s %v", c, a, err)
-	}
-	for spec, want := range map[string]string{
-		"G-URL":           "CODE=ACTION",
-		"G-NOPE=keep":     "unknown code",
-		"G-URL=keep":      "G-URL takes host, full, drop, fail",
-		"G-REQUEST=drop":  "G-REQUEST takes flag",
-		"G-TYPO=report":   "INT-04",
-		"G-MARKER=keep":   "G-MARKER takes escape",
-		"G-ENCODING=keep": "G-ENCODING takes fail",
+	for _, tc := range []struct {
+		code      Code
+		act, want string
+	}{
+		{"G-NOPE", "keep", "unknown guard code"},
+		{URL, "keep", "G-URL takes host, full, drop, fail"},
+		{Request, "drop", "G-REQUEST takes flag"},
+		{Typo, "report", "INT-04"},
+		{Marker, "keep", "G-MARKER takes escape"},
+		{Encoding, "keep", "G-ENCODING takes fail"},
 	} {
-		if _, _, err := ParseActionSpec(spec); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%s: %v, want %q", spec, err, want)
+		if _, err := ParseAction(tc.code, tc.act); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s=%s: %v, want %q", tc.code, tc.act, err, tc.want)
 		}
 	}
 	if _, err := ParsePolicy("loud"); err == nil {

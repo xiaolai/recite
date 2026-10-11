@@ -29,8 +29,6 @@ Flags:
     	gap after a sentence, DUR or MIN..MAX (default "200ms..350ms")
   -guard POLICY
     	text guard POLICY: fix, strict, warn or off (default "fix")
-  -guard-action CODE=ACTION
-    	set a guard rule's action, CODE=ACTION (repeatable)
   -jobs N
     	render N chunks at once, 1 to 6 (default 3)
   -max-attempts N

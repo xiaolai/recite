@@ -177,31 +177,23 @@ func ParsePolicy(s string) (Policy, error) {
 	return "", fmt.Errorf("--guard must be fix, strict, warn or off, not %q", s)
 }
 
-// ParseActionSpec parses one --guard-action CODE=ACTION value.
-func ParseActionSpec(spec string) (Code, Action, error) {
-	k, v, ok := strings.Cut(spec, "=")
-	if !ok {
-		return "", "", fmt.Errorf("--guard-action wants CODE=ACTION, not %q", spec)
-	}
-	code, act := Code(strings.ToUpper(strings.TrimSpace(k))), Action(strings.ToLower(strings.TrimSpace(v)))
-	if !strings.HasPrefix(string(code), "G-") {
-		code = "G-" + code
-	}
+// ParseAction validates a per-code action from config [guard] (TXT-09).
+func ParseAction(code Code, s string) (Action, error) {
 	if code == Typo {
-		return "", "", fmt.Errorf("--guard-action: G-TYPO is not detected; its report action needs the Codex proofreading pass (INT-04)")
+		return "", fmt.Errorf("G-TYPO is not detected; its report action needs the Codex proofreading pass (INT-04)")
 	}
 	allowed := Allowed(code)
 	if allowed == nil {
-		return "", "", fmt.Errorf("--guard-action: unknown code %q", k)
+		return "", fmt.Errorf("unknown guard code %q", code)
 	}
-	if !slices.Contains(allowed, act) {
-		names := make([]string, len(allowed))
-		for i, a := range allowed {
-			names[i] = string(a)
-		}
-		return "", "", fmt.Errorf("--guard-action: %s takes %s, not %q", code, strings.Join(names, ", "), v)
+	if act := Action(s); slices.Contains(allowed, act) {
+		return act, nil
 	}
-	return code, act, nil
+	names := make([]string, len(allowed))
+	for i, a := range allowed {
+		names[i] = string(a)
+	}
+	return "", fmt.Errorf("%s takes %s, not %q", code, strings.Join(names, ", "), s)
 }
 
 // Error is a guard failure: a finding whose action is fail, a strict policy

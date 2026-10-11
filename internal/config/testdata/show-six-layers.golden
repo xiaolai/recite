@@ -1,0 +1,9 @@
+KEY                VALUE         SOURCE
+profile            narrator      env (RECITE_PROFILE)
+voice              alloy         user (user.toml:1)
+model              m-prof        profile narrator (user.toml:5)
+jobs               6             env (RECITE_JOBS)
+speed              1.0           default
+verify.mode        strict        project (project.toml:3)
+gaps.sentence      250ms..300ms  flag (--gap-sentence)
+normalize.disable  ""            default

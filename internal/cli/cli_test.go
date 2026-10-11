@@ -186,7 +186,8 @@ func TestInterspersedFlags(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 	// Global flags before the command survive the command's own parse.
-	if r := run("--config", "c.toml", "say", "Hi"); r.says[0].Globals.Config != "c.toml" {
+	cfg := writeConfig(t, "")
+	if r := run("--config", cfg, "say", "Hi"); len(r.says) != 1 || r.says[0].Globals.Config != cfg {
 		t.Errorf("global lost: %+v", r.says[0])
 	}
 	if r := run("say", "Hi", "--auth-source", "nope"); r.code != ExitUsage {
@@ -199,7 +200,7 @@ func TestInterspersedFlags(t *testing.T) {
 
 func TestStubs(t *testing.T) {
 	for _, cmd := range New(nil, nil).commands() {
-		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" || cmd.name == "check" {
+		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" || cmd.name == "check" || cmd.name == "config" {
 			continue
 		}
 		r := run(cmd.name)

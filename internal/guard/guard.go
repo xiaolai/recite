@@ -20,7 +20,7 @@ type TypoChecker interface {
 // Options configures one guard run.
 type Options struct {
 	Policy Policy // "" means fix
-	// Actions overrides the default action per code (--guard-action).
+	// Actions overrides the default action per code (config [guard]).
 	Actions map[Code]Action
 	// Markdown says the input is Markdown, so ** ## ` are syntax, not residue.
 	Markdown bool

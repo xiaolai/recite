@@ -30,7 +30,7 @@ func TestSayGuardStrictExit2BeforeNetwork(t *testing.T) {
 		t.Fatalf("%d mints and %d client events reached the fake", n, m)
 	}
 	// A failing action stops the run the same way, under the default policy.
-	r = e.run("Edit /etc/nginx/nginx.conf now.", "--guard-action", "G-PATH=fail", "-o", "h.wav")
+	r = e.run("Edit /etc/nginx/nginx.conf now.", "--config", writeConfig(t, "[guard]\npath = \"fail\"\n"), "-o", "h.wav")
 	if r.code != exitcode.Usage || !strings.Contains(r.stderr, "G-PATH fail") || len(e.srv.MintRequests()) != 0 {
 		t.Fatalf("fail action: %+v", r)
 	}
