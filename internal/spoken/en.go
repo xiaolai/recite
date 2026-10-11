@@ -26,6 +26,7 @@ var English = Table{
 	{"en.currency", enCurrency},
 	{"en.ipv4", enIPv4},
 	{"en.version", enVersion},
+	{"en.ident", enIdent},
 	{"en.year", enYear},
 	{"en.range", enRange},
 	{"en.fraction", enFraction},

@@ -21,6 +21,7 @@ var Chinese = Table{
 	{"zh.ratio", zhRatio},
 	{"zh.currency", zhCurrency},
 	{"zh.version", zhVersion},
+	{"zh.ident", zhIdent},
 	{"zh.range", zhRange},
 	{"zh.year", zhYear},
 	{"zh.fraction", zhFraction},
