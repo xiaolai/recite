@@ -48,7 +48,7 @@ func (c *CLI) commands() []command {
 		{"voices", "", "List voices; --preview DIR renders a sample of each", setupVoices},
 		{"doctor", "", "Check the environment and the route", setupDoctor},
 		{"auth", "status|login", "Login state, or sign in through codex", setupAuth},
-		{"usage", "", "Local ledger summary and Codex plan status", stub("usage")},
+		{"usage", "", "Local ledger summary and Codex plan status", setupUsage},
 		{"cache", "ls|prune|clear", "Manage the take cache", setupCache},
 		{"config", "show|path", "Effective merged config and its sources", setupConfig},
 		{"version", "", "Version, commit, build date and Go version", setupVersion},

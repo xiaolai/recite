@@ -1,0 +1,14 @@
+day         model                   renders    audio s  stt calls     stt s    est. USD
+2026-09-30  gpt-realtime-2.1              1        5.0          0         0      0.0064
+2026-10-10  gpt-realtime-2.1              2       35.0          0         0      0.0448
+2026-10-10  gpt-transcribe                0        0.0          1        20      0.0015
+2026-10-11  gpt-live-transcribe           0        0.0          1        31      0.0000
+2026-10-11  gpt-realtime-2.1-mini         1       10.0          0         0      0.0040
+total                                     4       50.0          2        51      0.0567
+Estimates: list price, not billed; OpenAI list prices as recorded in design D3 and §2, 2026-10-11.
+Audio seconds are estimated from output audio tokens at 20 per second.
+Not in the estimate (no list-price rate): 1 ledger lines.
+
+Codex plan: pro
+  primary window (7 d): 41% used, resets 2027-01-15 08:00 UTC
+  ordinary usage allowed: yes

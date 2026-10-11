@@ -1,0 +1,6 @@
+{"time":"2026-10-10T08:00:00Z","command":"say","kind":"render","model":"gpt-realtime-2.1","chunk":"c0001","attempt":1,"input_tokens":200,"output_tokens":420,"input_text_tokens":200,"output_text_tokens":20,"output_audio_tokens":400,"estimate_usd":0.0256,"price_note":"list price, not billed"}
+{"time":"2026-10-10T08:00:05Z","command":"say","kind":"stt","model":"gpt-transcribe","chunk":"c0001","attempt":1,"stt_seconds":20,"estimate_usd":0.0015,"price_note":"list price, not billed"}
+{"time":"2026-10-10T09:00:00Z","command":"say","kind":"render","model":"gpt-realtime-2.1","chunk":"c0002","attempt":2,"output_tokens":300,"estimate_usd":0.0192,"price_note":"list price, not billed"}
+this line is not JSON
+{"time":"2026-10-11T23:59:59Z","command":"say","kind":"stt","model":"gpt-live-transcribe","chunk":"c0001","attempt":1,"stt_seconds":31,"estimate_usd":null,"price_note":"list price, not billed"}
+{"time":"2026-10-11T10:00:00Z","command":"say","kind":"render","model":"gpt-realtime-2.1-mini","chunk":"c0001","attempt":1,"output_tokens":210,"output_text_tokens":10,"output_audio_tokens":200,"estimate_usd":0.004,"price_note":"list price, not billed"}

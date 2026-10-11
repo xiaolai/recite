@@ -27,6 +27,72 @@ func maintainRun(t *testing.T, env map[string]string, args ...string) result {
 	return result{code: code, stdout: out.String(), stderr: errb.String()}
 }
 
+// usageEnv is a state directory holding the usage package's fixture ledger.
+func usageEnv(t *testing.T) map[string]string {
+	t.Helper()
+	state := t.TempDir()
+	dir := filepath.Join(state, "recite")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join("..", "usage", "testdata", "ledger")
+	names, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names {
+		b, err := os.ReadFile(filepath.Join(src, n.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, n.Name()), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return map[string]string{"XDG_STATE_HOME": state}
+}
+
+// accept: CLI-09#1
+func TestUsageGoldenWithPlanStatus(t *testing.T) {
+	r := maintainRun(t, usageEnv(t), "usage")
+	if r.code != ExitOK {
+		t.Fatalf("exit %d: %s", r.code, r.stderr)
+	}
+	golden(t, "usage", r.stdout)
+	if !strings.Contains(r.stderr, "1 ledger lines could not be read") {
+		t.Fatalf("the unreadable line is not reported: %q", r.stderr)
+	}
+	// The plan status comes from the fake app-server; its account email and IDs never print.
+	if !strings.Contains(r.stdout, "Codex plan: pro") || !strings.Contains(r.stdout, "41% used") {
+		t.Fatalf("no plan status:\n%s", r.stdout)
+	}
+	for _, leak := range []string{"canary", "@", "account"} {
+		if strings.Contains(r.stdout+r.stderr, leak) {
+			t.Fatalf("output contains %q:\n%s%s", leak, r.stdout, r.stderr)
+		}
+	}
+}
+
+func TestUsageSinceAndJSON(t *testing.T) {
+	env := usageEnv(t)
+	r := maintainRun(t, env, "--json", "usage", "--since", "7d")
+	if r.code != ExitOK {
+		t.Fatalf("exit %d: %s", r.code, r.stderr)
+	}
+	validateEvents(t, r.stdout)
+	var ev usageEvent
+	if err := json.Unmarshal([]byte(r.stdout), &ev); err != nil {
+		t.Fatal(err)
+	}
+	// cliNow is 2023-11-14; every fixture line is later, so 7d keeps them all.
+	if len(ev.Rows) != 5 || ev.Plan == nil || ev.Plan.PlanType != "pro" || len(ev.Plan.Windows) != 1 || ev.PlanError != "" {
+		t.Fatalf("event %+v", ev)
+	}
+	if r := maintainRun(t, env, "usage", "--since", "7x"); r.code != ExitUsage {
+		t.Fatalf("bad --since: exit %d", r.code)
+	}
+}
+
 func validateEvents(t *testing.T, stdout string) {
 	t.Helper()
 	sch := eventsSchema(t)

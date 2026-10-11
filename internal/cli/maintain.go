@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,8 +12,114 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/cache"
+	"github.com/xiaolai/recite/internal/codexapp"
 	"github.com/xiaolai/recite/internal/exitcode"
+	"github.com/xiaolai/recite/internal/logx"
+	"github.com/xiaolai/recite/internal/usage"
 )
+
+// setupUsage is `recite usage` (CLI-09): the ledger summary by day and model, then the Codex
+// plan status. The plan status prints the plan type and windows only, never an account
+// identifier.
+func setupUsage(fs *flag.FlagSet, c *CLI) func([]string) int {
+	var since string
+	fs.StringVar(&since, "since", "", "only usage in this last period, such as 7d or 12h (default: all)")
+	return func(args []string) int {
+		if len(args) > 0 {
+			c.errorf("recite usage: takes no arguments")
+			return ExitUsage
+		}
+		var from time.Time
+		if since != "" {
+			d, err := parseAge(since)
+			if err != nil {
+				c.errorf("recite usage: --since: %v", err)
+				return ExitUsage
+			}
+			from = c.Now().Add(-d)
+		}
+		dir := c.stateDir()
+		var res usage.ReadResult
+		if dir != "" {
+			var err error
+			if res, err = usage.Read(dir); err != nil {
+				c.errorf("recite usage: %v", err)
+				return exitcode.Internal
+			}
+		}
+		if res.Bad > 0 {
+			c.errorf("recite usage: %d ledger lines could not be read and are left out", res.Bad)
+		}
+		rows := usage.Summarize(res.Entries, from)
+		rl, planErr := c.codexPlan()
+		if c.globals.JSON {
+			ev := usageEvent{Event: "usage", Rows: rows, PriceNote: usage.ListPrices.Label(), PlanError: planErr}
+			if planErr == "" {
+				ev.Plan = planJSON(rl)
+			}
+			return c.emit(ev, ExitOK)
+		}
+		out := usage.FormatSummary(rows, usage.ListPrices.Label()) + "\n"
+		if planErr != "" {
+			out += "Codex plan: " + planErr + "\n"
+		} else {
+			out += usage.FormatPlan(rl)
+		}
+		_, err := io.WriteString(c.Stdout, logx.Scrub(out))
+		return c.writeResult(err)
+	}
+}
+
+type usageEvent struct {
+	Event     string      `json:"event"`
+	Rows      []usage.Row `json:"rows"`
+	PriceNote string      `json:"price_note"`
+	Plan      *planStatus `json:"plan,omitempty"`
+	PlanError string      `json:"plan_error,omitempty"`
+}
+
+// planStatus is the Codex plan status of `usage --json`: plan type and windows only.
+type planStatus struct {
+	PlanType             string       `json:"plan_type"`
+	OrdinaryUsageAllowed bool         `json:"ordinary_usage_allowed"`
+	Windows              []planWindow `json:"windows"`
+}
+
+type planWindow struct {
+	Name        string     `json:"name"`
+	UsedPercent float64    `json:"used_percent"`
+	WindowMins  int        `json:"window_mins"`
+	ResetsAt    *time.Time `json:"resets_at"`
+}
+
+func planJSON(rl codexapp.RateLimits) *planStatus {
+	p := &planStatus{PlanType: orUnknown(rl.PlanType), OrdinaryUsageAllowed: rl.OrdinaryUsageAllowed, Windows: []planWindow{}}
+	for _, w := range rl.Windows {
+		pw := planWindow{Name: w.Name, UsedPercent: w.UsedPercent, WindowMins: w.WindowMins}
+		if !w.ResetsAt.IsZero() {
+			t := w.ResetsAt.UTC()
+			pw.ResetsAt = &t
+		}
+		p.Windows = append(p.Windows, pw)
+	}
+	return p
+}
+
+// codexPlan reads the plan status through the Codex app-server. A failure is reported in the
+// output, not as an exit code: the local summary is still the answer.
+func (c *CLI) codexPlan() (codexapp.RateLimits, string) {
+	ctx := context.Background()
+	st := c.probe(ctx)
+	defer func() { _ = st.Close() }()
+	rl, ok, err := st.PlanStatus(ctx)
+	switch {
+	case err != nil:
+		return rl, "not read: " + errMessage(err)
+	case !ok:
+		return rl, "not read: it comes from the Codex app-server, which the current sign-in does not use (" + string(st.State) + ")"
+	}
+	return rl, ""
+}
 
 // setupCache is `recite cache ls|prune|clear` (CLI-08). It never prompts: clear needs --yes.
 func setupCache(fs *flag.FlagSet, c *CLI) func([]string) int {
