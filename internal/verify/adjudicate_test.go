@@ -358,6 +358,10 @@ func TestContentWordGuard(t *testing.T) {
 		t.Fatalf("Chinese chunk has %d runes, want 60", n)
 	}
 	zhNoNot := strings.Replace(zh.Spoken, "不", "", 1)
+	// A connective carries the clause's logic: its deletion is a content-word mismatch.
+	because := chunk(strings.Join(filler[:29], " ") + " because " + strings.Join(filler[30:], " ") + " approved.")
+	noBecause := strings.Replace(because.Spoken, " because", "", 1)
+	butFor := strings.Replace(because.Spoken, " because ", " but ", 1)
 	cases := []struct {
 		name  string
 		c     verify.Chunk
@@ -370,6 +374,9 @@ func TestContentWordGuard(t *testing.T) {
 		{"inserted not heard twice", approved, []string{midNot, midNot}, verify.StateUnverified, 2},
 		{"inserted not heard once", approved, []string{midNot, approved.Spoken}, verify.StateVerified, 2},
 		{"Chinese 不 deleted twice", zh, []string{zhNoNot, zhNoNot}, verify.StateUnverified, 2},
+		{"because deleted twice", because, []string{noBecause, noBecause}, verify.StateUnverified, 2},
+		{"because deleted once", because, []string{noBecause, because.Spoken}, verify.StateVerified, 2},
+		{"because heard as but twice", because, []string{butFor, butFor}, verify.StateUnverified, 2},
 		{"function word", chunk(sixty("a")), []string{sixty("the")}, verify.StateVerified, 1},
 	}
 	for _, tc := range cases {

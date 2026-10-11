@@ -27,14 +27,20 @@ const (
 	ReasonLanguage      Reason = "language"
 	ReasonProtected     Reason = "protected-token"
 	ReasonEdgeInsertion Reason = "edge-insertion"
+	ReasonWordOrder     Reason = "word-order"
 	ReasonContentWord   Reason = "content-word"
 	ReasonScore         Reason = "score"
 )
 
 // GuardVersion identifies the behaviour of the guard set (pre-STT and post-STT guards and
 // their limits). Bump it on any change that can turn a guard's verdict: cached verification
-// records it, and a cached take judged by another version is re-verified (RUN-04).
-const GuardVersion = 1
+// records it, and a cached take judged by another version is re-verified (RUN-04). It also
+// covers the scorer's comparison units (spelling variants, folded Han pronouns), which change
+// scores without changing Canon.
+//
+// 2: spelling variants and compounds, 她/他/它 folded, the word-order guard, and causal
+// connectives taken off the function-word list.
+const GuardVersion = 2
 
 // Pre-STT guard limits (design §8.1).
 const (
@@ -153,6 +159,10 @@ func judge(c Chunk, t stt.Transcript) judgement {
 	}
 	if lead >= limit || trail >= limit {
 		j.rejection = &Rejection{ReasonEdgeInsertion, fmt.Sprintf("%d inserted before, %d after the text", lead, trail)}
+		return j
+	}
+	if exp, heard, ok := transposition(al, metric); ok {
+		j.rejection = &Rejection{ReasonWordOrder, fmt.Sprintf("expected %q / heard %q", exp, heard)}
 		return j
 	}
 	j.content = contentMismatches(al, primaryTag(c.Language.Code))
@@ -284,11 +294,13 @@ var ordinalWords = func() map[string]bool {
 }()
 
 // functionWords are the per-language words whose mismatch is left to the score (VER-06).
-// Semantic operators (negations, can/must, quantifiers) are deliberately absent.
+// Semantic operators (negations, can/must, quantifiers) are deliberately absent, and so are the
+// connectives that carry a clause's logic (because, so, but, although, though): dropping
+// "because" turns a reason into a bare statement, which the score alone lets through.
 var functionWords = map[string]map[string]bool{
 	"en": set(`a an the of in on at to for from by with about as into onto over under up down out
-		off through between among after before during until upon and or but so yet if than that
-		then because while although though is am are was were be been being do does did have has
+		off through between among after before during until upon and or yet if than that
+		then while is am are was were be been being do does did have has
 		had will would shall should may might could i me my mine we us our ours you your yours he
 		him his she her hers it its they them their theirs this these those there here what which
 		who whom whose`),

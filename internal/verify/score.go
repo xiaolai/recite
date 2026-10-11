@@ -95,7 +95,21 @@ type unit struct {
 }
 
 func units(src string, metric text.Metric) []unit {
-	toks := CanonTokens(src)
+	return foldPronouns(rawUnits(src, metric))
+}
+
+// foldPronouns gives the Han pronouns read alike one comparison form (see hanPronouns).
+func foldPronouns(us []unit) []unit {
+	for i, u := range us {
+		if v, ok := hanPronouns[u.text]; ok {
+			us[i].text = v
+		}
+	}
+	return us
+}
+
+func rawUnits(src string, metric text.Metric) []unit {
+	toks := foldVariants(CanonTokens(src))
 	if metric == text.MetricCER {
 		var out []unit
 		for _, t := range toks {

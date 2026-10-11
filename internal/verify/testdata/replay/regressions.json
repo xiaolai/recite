@@ -1,0 +1,86 @@
+[
+  {
+    "id": "ver07-s06", "kind": "good", "want": "verified",
+    "note": "harbour master heard as harbormaster",
+    "spoken": "Six lamps were lit along the quay each evening, and the harbour master counted them twice because the first count was always wrong.",
+    "heard": ["Six lamps were lit along the quay each evening, and the harbormaster counted them twice, because the first count was always wrong."]
+  },
+  {
+    "id": "ver07-s20", "kind": "good", "want": "verified",
+    "note": "draught heard as draft",
+    "spoken": "Every new tenant of the corner house complained about the draught, and every one of them stayed longer than they had planned.",
+    "heard": ["Every new tenant of the corner house complained about the draft, and every one of them stayed longer than they had planned."]
+  },
+  {
+    "id": "latin-s028", "kind": "good", "want": "verified",
+    "note": "colour heard as color",
+    "spoken": "The lighthouse keeper at Gannet Point, a widower called Osric Penhale, painted the stairs a different colour every spring for twenty years.",
+    "heard": ["The lighthouse keeper at Gannet Point, a widower called Osric Penhale, painted the stairs a different color every spring for twenty years."]
+  },
+  {
+    "id": "latin-s066", "kind": "good", "want": "verified",
+    "note": "weathervane heard as weather vane",
+    "spoken": "The church at Upper Sedley had a weathervane shaped like a fish, and the old men swore it pointed toward rain more truly than any forecast.",
+    "heard": ["The church at Upper Sedley had a weather vane shaped like a fish, and the old men swore it pointed toward rain more truly than any forecast."]
+  },
+  {
+    "id": "latin-s100", "kind": "good", "want": "verified",
+    "note": "travellers heard as travelers",
+    "spoken": "On the coldest night of the winter, the pub at Brackenford stayed open until dawn, and seven travellers slept beside its fire on the stone floor.",
+    "heard": ["On the coldest night of the winter, the pub at Brackenford stayed open until dawn, and seven travelers slept beside its fire on the stone floor."]
+  },
+  {
+    "id": "latin-s103", "kind": "good", "want": "verified",
+    "note": "neighbour heard as neighbor",
+    "spoken": "Rosalind Thackeray grew roses for the county show, and she won second prize twelve years running, always behind the same quiet neighbour.",
+    "heard": ["Rosalind Thackeray grew roses for the county show, and she won second prize twelve years running, always behind the same quiet neighbor."]
+  },
+  {
+    "id": "han-s025-derived", "kind": "good", "want": "verified",
+    "note": "她 heard as 他. Derived: the recorded transcript also wrote the place name 云溪 as 云西, a homophone that stays a mismatch; it is restored here so only the pronoun differs. The recorded transcript is the next case. 他 and 她 are function words, so this take passed before the fold too, at a lower score; TestHanPronounFold checks the fold itself.",
+    "spoken": "何小满老师认为每一张地图都是一种主张，所以她要求学生先凭记忆画出整个云溪县，然后才能看真正的地图，画得最不像的那张，常常最能说明画图的人住在哪里。",
+    "heard": ["何小满老师认为，每一张地图都是一种主张，所以他要求学生先凭记忆画出整个云溪县，然后才能看真正的地图。画得最不像的那张，常常最能说明画图的人住在哪里。"]
+  },
+  {
+    "id": "han-s025", "kind": "good", "want": "unverified",
+    "note": "as recorded: 云溪 heard as 云西 twice. Name homophones are checked as written unless the lexicon says otherwise, so this good take still rejects.",
+    "spoken": "何小满老师认为每一张地图都是一种主张，所以她要求学生先凭记忆画出整个云溪县，然后才能看真正的地图，画得最不像的那张，常常最能说明画图的人住在哪里。",
+    "heard": ["何小满老师认为，每一张地图都是一种主张，所以他要求学生先凭记忆画出整个云西县，然后才能看真正的地图。画得最不像的那张，常常最能说明画图的人住在哪里。"]
+  },
+  {
+    "id": "ver07-s14-literal", "kind": "corrupted", "want": "unverified", "reason": "word-order",
+    "note": "rendered with \"four the of nine\"; the recorded transcript restored the order, so the transcript here is the rendered text as a literal recogniser would write it",
+    "spoken": "In the spring of that year the council voted to rebuild the old granary, though only four of the nine members had ever seen it full.",
+    "heard": ["In the spring of that year the council voted to rebuild the old granary, though only four the of nine members had ever seen it full."]
+  },
+  {
+    "id": "ver07-s14", "kind": "corrupted", "want": "verified",
+    "note": "as recorded: the recogniser wrote the original order back, so the verifier cannot see the swap. Kept to document the limit, not as a target.",
+    "spoken": "In the spring of that year the council voted to rebuild the old granary, though only four of the nine members had ever seen it full.",
+    "heard": ["In the spring of that year, the council voted to rebuild the old granary, though only four of the nine members had ever seen it full."]
+  },
+  {
+    "id": "ver07-s40-literal", "kind": "corrupted", "want": "unverified", "reason": "word-order",
+    "note": "rendered with \"a of kind argument\", heard literally",
+    "spoken": "Professor Hale believed that every map was a kind of argument, and he made his students redraw the county from memory before they saw a real one.",
+    "heard": ["Professor Hale believed that every map was a of kind argument, and he made his students redraw the county from memory before they saw a real one."]
+  },
+  {
+    "id": "latin-s070-literal", "kind": "corrupted", "want": "unverified", "reason": "content-word",
+    "note": "rendered with \"only unjust begun\", heard literally twice; the recorded transcript wrote \"only just begun\", which nothing downstream can tell from a good take",
+    "spoken": "The market at Brindle opened at dawn on Thursdays, and by eight o'clock the best cheese had gone and the gossip had only just begun.",
+    "heard": [
+      "The market at Brindle opened at dawn on Thursdays, and by eight o'clock the best cheese had gone and the gossip had only unjust begun.",
+      "The market at Brindle opened at dawn on Thursdays, and by eight o'clock the best cheese had gone and the gossip had only unjust begun."
+    ]
+  },
+  {
+    "id": "latin-s079", "kind": "corrupted", "want": "unverified", "reason": "content-word",
+    "note": "clause drop: \"because\" not rendered; transcript as recorded, assumed heard the same on the second pass",
+    "spoken": "The ferryman at Rookwater charged one penny to cross the river and two to come back, because, he said, the return journey was uphill.",
+    "heard": [
+      "The ferryman at Rookwater charged one penny to cross the river and two to come back, he said. The return journey was uphill.",
+      "The ferryman at Rookwater charged one penny to cross the river and two to come back, he said. The return journey was uphill."
+    ]
+  }
+]
