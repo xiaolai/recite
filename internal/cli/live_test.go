@@ -34,6 +34,7 @@ func TestLiveSayHello(t *testing.T) {
 	}
 	wav := filepath.Join(dir, "h.wav")
 	cmd := exec.Command(bin, "say", "Hello", "-o", wav)
+	cmd.Env = realEnv // TestMain isolated this process from the real sign-in
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -41,7 +42,7 @@ func TestLiveSayHello(t *testing.T) {
 	}
 	readWAV(t, wav)
 
-	st := auth.Probe(context.Background(), auth.ProbeConfig{Source: auth.SourceAuto, Getenv: os.Getenv})
+	st := auth.Probe(context.Background(), auth.ProbeConfig{Source: auth.SourceAuto, Getenv: realGetenv, CodexHome: realCodexHome()})
 	t.Cleanup(func() { _ = st.Close() })
 	if st.Creds == nil {
 		t.Fatalf("auth not ready: %s", st.State)
@@ -110,3 +111,22 @@ var nonWord = regexp.MustCompile(`[\W_]+`)
 
 // fold lower-cases and drops punctuation and spaces.
 func fold(s string) string { return nonWord.ReplaceAllString(strings.ToLower(s), "") }
+
+// realGetenv reads the environment as it was before TestMain isolated this process.
+func realGetenv(key string) string {
+	for _, kv := range realEnv {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			return v
+		}
+	}
+	return ""
+}
+
+// realCodexHome is the real sign-in's Codex home: the probe's child app-server would
+// otherwise inherit the isolated HOME of this process.
+func realCodexHome() string {
+	if h := realGetenv("CODEX_HOME"); h != "" {
+		return h
+	}
+	return filepath.Join(realGetenv("HOME"), ".codex")
+}
