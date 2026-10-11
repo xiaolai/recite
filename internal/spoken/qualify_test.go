@@ -4,11 +4,11 @@ package spoken_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,11 +27,15 @@ import (
 	"github.com/xiaolai/recite/internal/verify"
 )
 
-// probeCorpus is the 21 items of dev-docs/probe_textnorm.py, Chinese included.
+// probeCorpus is the 21 items of dev-docs/probe_textnorm.py, Chinese included, with three
+// replaced by owner decision (2026-10-11): "Take 1/2 cup on 1/2." and "第1/2季度…" end in an
+// N-AMBIGUOUS span, which TXT-11#2 requires and which can never verify, and the deliberately
+// misspelled sentence is auto-corrected by STT. Their behaviour stays covered by the
+// deterministic tests (en_test.go, zh_test.go, the guard tests).
 var probeCorpus = []string{
 	"The deal was worth $3.5M, or about €3.2 million.",
 	"The meeting is on 2026-10-11 at 3:45pm.",
-	"Take 1/2 cup on 1/2.",
+	"Measure 1/2 cup of milk and 3/4 cup of water.",
 	"Growth hit 50% (up from 12.5%).",
 	"Read pages 3–5 and chapters 10-12.",
 	"Upgrade to v1.2.3 before Friday.",
@@ -45,11 +49,11 @@ var probeCorpus = []string{
 	"Henry VIII ruled in the 16th century; see Chapter IV.",
 	"Great job 🎉👍 see you soon 😀",
 	"This was proven [1] and later disputed.[2]",
-	"Ths   is  ,,a  sentnce with typos!!!  and​ zero-width chars",
+	"The 2nd shipment contains 48 boxes of 250ml bottles and costs $1,200.",
 	"It weighs 5kg, runs at 120km/h, and costs 3¥.",
 	"2026年10月11日下午3点45分，价格是¥1,280.50，增长了12.5%。",
 	"请在iPhone 17上打开App Store，下载版本v2.0。",
-	"第1/2季度，温度是-5℃到30℃。",
+	"In the 2nd quarter, the temperature ranged from -5℃ to 30℃.",
 }
 
 // Qualification (TXT-11#3): the 51 chunks, normalised, one take each: at least 49 verify on
@@ -67,14 +71,14 @@ func TestQualifyEnglishSpokenForm(t *testing.T) {
 	if len(corpus) != 51 {
 		t.Fatalf("corpus has %d chunks, want 51", len(corpus))
 	}
-	qualifyCorpus(t, "TXT-11#3", "txt11", corpus, raw, 49)
+	qualifyCorpus(t, "TXT-11#3", "txt11", corpus, 49)
 }
 
 // qualifyCorpus renders and verifies corpus, one chunk per item and one take each, in
 // budgeted shards (RECITE_SHARD); once every shard has run it requires minFirst items
 // verified on the first attempt and all of them within the attempt limit. Shard results
-// and transcripts go to $TMPDIR/recite-live/<tag>-<hash of raw>/.
-func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, raw []byte, minFirst int) {
+// and transcripts go to $TMPDIR/recite-live/<tag>-<evidence ID>/.
+func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, minFirst int) {
 	t.Helper()
 	total := len(corpus)
 	set := realtime.DefaultSettings()
@@ -127,8 +131,8 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, raw []byte
 	if err := livebudget.Preflight(est, attempts, liveBudget); err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(raw)
-	dir := filepath.Join(os.TempDir(), "recite-live", fmt.Sprintf("%s-%x", tag, sum[:6]))
+	evidence := evidenceID(tasks, opts, spec, revision())
+	dir := filepath.Join(os.TempDir(), "recite-live", tag+"-"+evidence)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +178,7 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, raw []byte
 		}
 		outcomes[i] = o
 	}
-	data, err := json.Marshal(outcomes)
+	data, err := json.Marshal(shardFile{Evidence: evidence, Outcomes: outcomes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,14 +196,23 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, raw []byte
 		if err != nil {
 			t.Fatal(err)
 		}
-		var o []outcome
-		if err := json.Unmarshal(data, &o); err != nil {
+		var sf shardFile
+		if err := json.Unmarshal(data, &sf); err != nil {
 			t.Fatal(err)
 		}
-		all = append(all, o...)
+		if sf.Evidence != evidence {
+			t.Fatalf("shard %d of %d belongs to evidence %q, not %q", j, len(shards), sf.Evidence, evidence)
+		}
+		all = append(all, sf.Outcomes...)
 	}
-	if len(all) != len(corpus) {
-		t.Fatalf("the shards hold %d results, want %d", len(all), len(corpus))
+	// Exactly the planned chunks, each once and in order: no missing, duplicate or foreign result.
+	if len(all) != len(tasks) {
+		t.Fatalf("the shards hold %d results, want %d", len(all), len(tasks))
+	}
+	for i, o := range all {
+		if o.ID != tasks[i].Chunk.ID {
+			t.Fatalf("result %d is %s, want %s", i+1, o.ID, tasks[i].Chunk.ID)
+		}
 	}
 	first, verified := 0, 0
 	for i, o := range all {
@@ -222,6 +235,22 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, raw []byte
 
 // liveBudget is the per-invocation cap of `make qualify` (implementation plan §1.4).
 const liveBudget = 30 * time.Minute
+
+// shardFile is one shard's results with the identity of the evidence they belong to.
+type shardFile struct {
+	Evidence string    `json:"evidence"`
+	Outcomes []outcome `json:"outcomes"`
+}
+
+// revision is the implementation revision for the evidence identity; a dirty tree is marked
+// so, since its results do not belong to any commit.
+func revision() string {
+	out, err := exec.Command("git", "describe", "--always", "--dirty", "--abbrev=12").Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // outcome is one chunk's result as a shard records it.
 type outcome struct {
