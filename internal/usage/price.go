@@ -1,5 +1,7 @@
 package usage
 
+import "math"
+
 // Tokens is the token usage of one render (realtime.TokenUsage, kept separate so this package
 // does not depend on the realtime client).
 type Tokens struct {
@@ -84,4 +86,25 @@ func (p PriceTable) STTEntry(e Entry, seconds int) Entry {
 		e.EstimateUSD = &usd
 	}
 	return e
+}
+
+// AudioTokensPerSecond is the output audio token rate used to price audio not yet rendered
+// (RUN-06). The design records prices per token, not a token rate; 20 per second is what the
+// recorded speak fixture reports (36 audio tokens for 1.8 s, testdata/realtime/speak.jsonl),
+// and a live 17.45 s gpt-realtime-2.1 take on 2026-10-11 reported 357 (20.5 per second).
+const AudioTokensPerSecond = 20
+
+// EstimateSpeech prices seconds of speech not yet rendered, and transcribing it once when
+// sttModel is not empty. ok is false when the speech model has no recorded rate.
+func (p PriceTable) EstimateSpeech(model, sttModel string, seconds float64) (float64, bool) {
+	usd, ok := p.Render(model, Tokens{OutputAudio: int(math.Round(seconds * AudioTokensPerSecond)), Detailed: true})
+	if !ok {
+		return 0, false
+	}
+	if sttModel != "" {
+		if s, ok := p.STT(sttModel, int(math.Ceil(seconds))); ok {
+			usd += s
+		}
+	}
+	return usd, true
 }

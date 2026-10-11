@@ -224,3 +224,17 @@ func TestLedgerRefusesSymlink(t *testing.T) {
 		t.Fatalf("symlink destination touched: %v", err)
 	}
 }
+
+func TestEstimateSpeechMatchesHandCalculation(t *testing.T) {
+	// 60 s → 1200 audio tokens at $64/1M = 0.0768, plus one minute of gpt-transcribe 0.0045.
+	got, ok := ListPrices.EstimateSpeech("gpt-realtime-2.1", "gpt-transcribe", 60)
+	if !ok || math.Abs(got-0.0813) > 1e-9 {
+		t.Fatalf("EstimateSpeech = %v, %v; want 0.0813", got, ok)
+	}
+	if got, ok := ListPrices.EstimateSpeech("gpt-realtime-2.1", "", 60); !ok || math.Abs(got-0.0768) > 1e-9 {
+		t.Fatalf("without STT = %v, %v; want 0.0768", got, ok)
+	}
+	if _, ok := ListPrices.EstimateSpeech("unknown-model", "gpt-transcribe", 60); ok {
+		t.Fatal("a model without a rate was priced")
+	}
+}
