@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -65,23 +63,9 @@ func WriteWAV(w io.Writer, p PCM) error {
 	if err := CheckWAVSize(uint64(len(p))); err != nil {
 		return err
 	}
-	var h [wavHeaderSize]byte
-	le := binary.LittleEndian
-	copy(h[0:], "RIFF")
-	le.PutUint32(h[4:], uint32(wavHeaderSize-8+len(p)))
-	copy(h[8:], "WAVEfmt ")
-	le.PutUint32(h[16:], 16)
-	le.PutUint16(h[20:], formatPCM)
-	le.PutUint16(h[22:], Channels)
-	le.PutUint32(h[24:], SampleRate)
-	le.PutUint32(h[28:], BytesPerSecond)
-	le.PutUint16(h[32:], BytesPerSample)
-	le.PutUint16(h[34:], BitsPerSample)
-	copy(h[36:], "data")
-	le.PutUint32(h[40:], uint32(len(p)))
 	bw := bufio.NewWriter(w)
-	if _, err := bw.Write(h[:]); err != nil {
-		return fmt.Errorf("audio: write WAV header: %w", err)
+	if err := writeWAVHeader(bw, uint32(wavHeaderSize-8+len(p)), uint32(len(p))); err != nil {
+		return err
 	}
 	if _, err := bw.Write(p); err != nil {
 		return fmt.Errorf("audio: write WAV data: %w", err)
@@ -152,28 +136,8 @@ func ReadWAV(r io.Reader) (PCM, error) {
 	}
 }
 
-// Format is an output container recite writes natively.
-type Format string
-
-// Native formats (M1). Encoded formats arrive with the encoder drivers (M4).
-const (
-	FormatWAV Format = "wav"
-	FormatPCM Format = "pcm"
-)
-
-// FormatFor returns the native format of path's extension.
-func FormatFor(path string) (Format, error) {
-	switch ext := strings.ToLower(filepath.Ext(path)); ext {
-	case ".wav":
-		return FormatWAV, nil
-	case ".pcm":
-		return FormatPCM, nil
-	default:
-		return "", fmt.Errorf("unsupported output format %q: this version writes .wav and .pcm", ext)
-	}
-}
-
-// Write encodes p in format f.
+// Write encodes p in a native format (wav or pcm at the internal rate). Encoded formats go
+// through an [Encoding].
 func Write(w io.Writer, f Format, p PCM) error {
 	switch f {
 	case FormatWAV:
@@ -181,5 +145,31 @@ func Write(w io.Writer, f Format, p PCM) error {
 	case FormatPCM:
 		return WritePCM(w, p)
 	}
-	return fmt.Errorf("audio: unknown format %q", f)
+	return fmt.Errorf("audio: %q is not a native format", f)
+}
+
+// streamSize fills the size fields of a streaming WAV header: the length is unknown when
+// the header is written, so the fields hold the maximum (design §9, AUD-07).
+const streamSize = 0xFFFFFFFF
+
+// writeWAVHeader writes the 44-byte header of a PCM WAV with the given data size.
+func writeWAVHeader(w io.Writer, riffSize, dataSize uint32) error {
+	var h [wavHeaderSize]byte
+	le := binary.LittleEndian
+	copy(h[0:], "RIFF")
+	le.PutUint32(h[4:], riffSize)
+	copy(h[8:], "WAVEfmt ")
+	le.PutUint32(h[16:], 16)
+	le.PutUint16(h[20:], formatPCM)
+	le.PutUint16(h[22:], Channels)
+	le.PutUint32(h[24:], SampleRate)
+	le.PutUint32(h[28:], BytesPerSecond)
+	le.PutUint16(h[32:], BytesPerSample)
+	le.PutUint16(h[34:], BitsPerSample)
+	copy(h[36:], "data")
+	le.PutUint32(h[40:], dataSize)
+	if _, err := w.Write(h[:]); err != nil {
+		return fmt.Errorf("audio: write WAV header: %w", err)
+	}
+	return nil
 }

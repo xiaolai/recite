@@ -100,6 +100,7 @@ func TestHelpGolden(t *testing.T) {
 func sayDefaults(r *SayRequest) {
 	r.ChunkSeconds = text.DefaultChunkSeconds
 	r.Gaps = audio.DefaultGaps()
+	r.SampleRate = audio.SampleRate
 	r.Jobs, r.SessionChunks = pipeline.DefaultJobs, realtime.DefaultSessionChunks
 	r.Verify = verify.DefaultOptions()
 	r.CacheDir = defaultCacheDir(os.Getenv) // the process environment, which run passes on

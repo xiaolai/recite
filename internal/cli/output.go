@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,15 +20,15 @@ func (e *usageError) Error() string { return e.msg }
 func usagef(format string, a ...any) error { return &usageError{fmt.Sprintf(format, a...)} }
 
 // defaultOutput derives the output path (OUT-01): the input file's stem with
-// .wav in the current directory, or speech-YYYYMMDD-HHMMSS.wav for text and stdin.
-func defaultOutput(file string, now time.Time) string {
+// ext in the current directory, or speech-YYYYMMDD-HHMMSS<ext> for text and stdin.
+func defaultOutput(file string, now time.Time, ext string) string {
 	if file != "" && file != "-" {
 		base := filepath.Base(file)
 		if stem := strings.TrimSuffix(base, filepath.Ext(base)); stem != "" && stem != "." {
-			return stem + ".wav"
+			return stem + ext
 		}
 	}
-	return "speech-" + now.Format("20060102-150405") + ".wav"
+	return "speech-" + now.Format("20060102-150405") + ext
 }
 
 // preflight fails fast, before any network call, when the target exists and
@@ -60,8 +59,9 @@ var errTargetAppeared = errors.New("output appeared after the pre-flight check")
 // (or its previous content) or the complete file, even after SIGKILL. Without
 // force, link(2) refuses an existing target; the audio is then kept at the
 // reported temp path. With force, rename(2) replaces the target, including a
-// symlink, which is replaced rather than followed.
-func publishOutput(target string, force bool, write func(io.Writer) error) error {
+// symlink, which is replaced rather than followed. write gets the open temp file; an
+// external encoder may write to it by name instead.
+func publishOutput(target string, force bool, write func(*os.File) error) error {
 	f, tmp, err := createTemp(target)
 	if err != nil {
 		return err

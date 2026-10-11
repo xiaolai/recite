@@ -102,7 +102,7 @@ func TestPCMOutput(t *testing.T) {
 			t.Errorf("%s: %q %v", path, f, err)
 		}
 	}
-	if _, err := FormatFor("a.mp3"); err == nil {
-		t.Error("mp3 accepted")
+	if _, err := FormatFor("a.xyz"); err == nil {
+		t.Error("xyz accepted")
 	}
 }

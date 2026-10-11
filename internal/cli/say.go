@@ -91,19 +91,11 @@ func stdinIsTTY() bool {
 // output target — runs before the login probe, and the probe before any request. The chunks
 // are rendered and verified by the scheduler and assembled in order (design §10).
 func (c *CLI) runSay(req SayRequest) int {
-	target := req.Output
-	if target == "" {
-		target = defaultOutput(req.File, c.Now())
+	target, enc, code := c.outputEncoding(req)
+	if code != ExitOK {
+		return code
 	}
-	if target == "-" {
-		c.errorf("recite say: -o - (audio on stdout) is not supported yet; give an output path")
-		return ExitUsage
-	}
-	format, err := audio.FormatFor(target)
-	if err != nil {
-		c.errorf("recite say: %v", err)
-		return ExitUsage
-	}
+	stream := target == stdoutTarget
 	input, err := text.Read(text.Source{Args: req.Text, File: req.File, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, req.MaxInput)
 	if err != nil {
 		c.errorf("recite say: %v", err)
@@ -141,14 +133,16 @@ func (c *CLI) runSay(req SayRequest) int {
 		return ExitUsage
 	}
 	tasks := tasksFor(plan, spec)
-	if err := preflight(target, req.Force); err != nil {
-		return c.reportFailure(err)
+	if !stream {
+		if err := preflight(target, req.Force); err != nil {
+			return c.reportFailure(err)
+		}
 	}
 	mpath, mreplace, err := manifestTarget(req, target)
 	if err != nil {
 		return c.reportFailure(err)
 	}
-	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, format: format,
+	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc,
 		manifest: mpath, replaceManifest: mreplace}
 	if job.cache, err = c.takeCache(req); err == nil {
 		if err = keepRejectedDir(req.KeepRejected); err == nil {
@@ -168,6 +162,49 @@ func (c *CLI) runSay(req SayRequest) int {
 	})
 }
 
+// stdoutTarget is the -o value that streams the audio to stdout (AUD-07).
+const stdoutTarget = "-"
+
+// outputEncoding resolves the output path, format, sample rate and encoder, before anything
+// touches the network (AUD-04, AUD-05). Streaming takes no bytes back, so -o - excludes
+// --json (stdout carries audio only) and --strict-output (AUD-07).
+func (c *CLI) outputEncoding(req SayRequest) (string, audio.Encoding, int) {
+	target, format := req.Output, req.Format
+	if target == stdoutTarget {
+		for _, bad := range []struct {
+			on   bool
+			flag string
+		}{{c.globals.JSON, "--json"}, {req.Policy.StrictOutput, "--strict-output"}} {
+			if bad.on {
+				c.errorf("recite say: -o - and %s exclude each other: a stream cannot take bytes back, and stdout carries audio only", bad.flag)
+				return "", audio.Encoding{}, ExitUsage
+			}
+		}
+	}
+	if format == "" {
+		switch target {
+		case "", stdoutTarget:
+			format = audio.FormatWAV
+		default:
+			f, err := audio.FormatFor(target)
+			if err != nil {
+				c.errorf("recite say: %v", err)
+				return "", audio.Encoding{}, ExitUsage
+			}
+			format = f
+		}
+	}
+	if target == "" {
+		target = defaultOutput(req.File, c.Now(), format.Ext())
+	}
+	enc, err := audio.ChooseEncoding(format, req.SampleRate, target == stdoutTarget, runtime.GOOS, c.LookPath)
+	if err != nil {
+		c.errorf("recite say: %v", err)
+		return "", audio.Encoding{}, ExitUsage
+	}
+	return target, enc, ExitOK
+}
+
 // sayJob is a planned `say` run: everything decided before the first request.
 type sayJob struct {
 	input           string
@@ -176,8 +213,8 @@ type sayJob struct {
 	cache           *pipeline.TakeCache
 	ledger          *usage.Ledger
 	gaps            []int
-	target          string
-	format          audio.Format
+	target          string // stdoutTarget streams (AUD-07)
+	enc             audio.Encoding
 	manifest        string // "" under --no-manifest
 	replaceManifest bool
 }
@@ -220,7 +257,17 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		rec.watch(tr)
 	}
 	var pcm bytes.Buffer
-	asm := audio.NewAssembler(&pcm, job.gaps)
+	var sink io.Writer = &pcm
+	var stream *audio.StreamWriter
+	if job.target == stdoutTarget {
+		// Each ordered prefix goes to stdout as soon as it is assembled (AUD-07).
+		if stream, err = audio.NewStreamWriter(ctx, job.enc, c.Stdout); err != nil {
+			return err
+		}
+		defer func() { _ = stream.Close() }() // ends the stream on every path; Close is idempotent
+		sink = stream
+	}
+	asm := audio.NewAssembler(sink, job.gaps)
 	cfg := pipeline.Config{
 		Jobs: req.Jobs, VerifyJobs: req.VerifyJobs, SessionChunks: req.SessionChunks,
 		Verify: req.Verify, Synth: synth, Transcriber: tr, Cache: job.cache,
@@ -253,18 +300,38 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		status = manifest.StatusFailed
 	}
 	var out *manifest.Output
+	if stream != nil {
+		// A stream cannot take bytes back: whatever prefix was assembled has been sent, and
+		// the exit code reports a failure after it (AUD-07).
+		if cerr := stream.Close(); cerr != nil && err == nil {
+			err = cerr
+			write = false
+		}
+	}
 	if write {
 		if err := asm.Close(); err != nil {
 			return err
 		}
-		audioOut := audio.PCM(pcm.Bytes())
-		if err := publishOutput(job.target, req.Force, func(w io.Writer) error { return audio.Write(w, job.format, audioOut) }); err != nil {
-			return err
+		var seconds float64
+		if stream != nil {
+			seconds = float64(asm.Written()) / audio.BytesPerSecond
+			c.Logger.Info("streamed output", "seconds", seconds)
+		} else {
+			audioOut := audio.PCM(pcm.Bytes())
+			seconds = audioOut.Duration().Seconds()
+			if err := publishOutput(job.target, req.Force, func(f *os.File) error {
+				if job.enc.Native() {
+					return audio.Write(f, job.enc.Format, audioOut)
+				}
+				return audio.EncodeFile(ctx, job.enc, audioOut, f.Name())
+			}); err != nil {
+				return err
+			}
+			c.Logger.Info("wrote output", "path", job.target, "seconds", seconds)
 		}
-		c.Logger.Info("wrote output", "path", job.target, "seconds", audioOut.Duration().Seconds())
 		status = manifest.StatusComplete
-		out = &manifest.Output{Path: job.target, Format: string(job.format), DurationS: audioOut.Duration().Seconds(),
-			SampleRate: audio.SampleRate, Loudness: "none"}
+		out = &manifest.Output{Path: job.target, Format: string(job.enc.Format), DurationS: seconds,
+			SampleRate: job.enc.Rate, Loudness: "none"}
 	}
 	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out); merr != nil {
 		if err == nil {

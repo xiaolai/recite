@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -44,6 +45,8 @@ type CLI struct {
 	// DrainTimeout bounds the graceful drain after the first interrupt; 0 means
 	// pipeline.DrainTimeout (RUN-03).
 	DrainTimeout time.Duration
+	// LookPath finds an external encoder (ffmpeg, afconvert) on PATH; tests replace it.
+	LookPath func(string) (string, error)
 
 	globals Globals
 	intr    *pipeline.Interrupt // set while a command with credentials runs
@@ -51,7 +54,7 @@ type CLI struct {
 
 // New returns a CLI writing to stdout and stderr.
 func New(stdout, stderr io.Writer) *CLI {
-	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now, Stdin: os.Stdin, StdinIsTTY: stdinIsTTY, Signals: notifySignals}
+	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now, Stdin: os.Stdin, StdinIsTTY: stdinIsTTY, Signals: notifySignals, LookPath: exec.LookPath}
 	c.Say = c.runSay
 	c.NewSynth = productionSynth(c)
 	c.NewTranscriber = productionTranscriber(c)

@@ -300,7 +300,7 @@ func TestSayFlagsReachComponents(t *testing.T) {
 		t.Fatalf("max-input: %+v", r)
 	}
 	// Unsupported outputs fail before anything else.
-	for _, o := range []string{"x.mp3", "-", "missing-dir/x.wav"} {
+	for _, o := range []string{"x.wma", "noext", "missing-dir/x.wav"} {
 		if r := e.run("Hi", "-o", o); r.code != 2 {
 			t.Errorf("-o %s: %+v", o, r)
 		}
@@ -465,7 +465,7 @@ const publishHelperEnv = "RECITE_TEST_PUBLISH_HELPER"
 // publishHelper publishes to target with a writer that stops half way, says
 // "ready" and blocks until the parent kills the process.
 func publishHelper(target string) int {
-	err := publishOutput(target, false, func(w io.Writer) error {
+	err := publishOutput(target, false, func(w *os.File) error {
 		if _, err := w.Write(make([]byte, 1<<20)); err != nil {
 			return err
 		}
@@ -518,7 +518,7 @@ func TestDefaultOutputName(t *testing.T) {
 		"/tmp/a.b.txt":      "a.b.wav",
 		".":                 "speech-20260102-030405.wav",
 	} {
-		if got := defaultOutput(in, now); got != want {
+		if got := defaultOutput(in, now, ".wav"); got != want {
 			t.Errorf("defaultOutput(%q) = %q, want %q", in, got, want)
 		}
 	}

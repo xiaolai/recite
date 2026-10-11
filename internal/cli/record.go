@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"sync"
 	"unicode/utf8"
@@ -18,9 +17,10 @@ import (
 
 // manifestTarget is where the manifest goes ("" under --no-manifest), and whether an existing
 // file there may be replaced: with --force, or when it is the partial manifest of an earlier
-// interrupted or failed run, so re-running the same command resumes (RUN-05).
+// interrupted or failed run, so re-running the same command resumes (RUN-05). Audio streamed
+// to stdout has a manifest only when --manifest names one (design §12.2).
 func manifestTarget(req SayRequest, output string) (path string, replace bool, err error) {
-	if req.NoManifest {
+	if req.NoManifest || (output == stdoutTarget && req.Manifest == "") {
 		return "", false, nil
 	}
 	path = req.Manifest
@@ -193,5 +193,5 @@ func settingsOf(req SayRequest) manifest.Settings {
 // writeManifest publishes m at path atomically (OUT-02). Like the audio, the manifest is an
 // output and follows the umask (design §14.2).
 func writeManifest(path string, replace bool, m manifest.Manifest) error {
-	return publishOutput(path, replace, func(w io.Writer) error { return m.Encode(w) })
+	return publishOutput(path, replace, func(f *os.File) error { return m.Encode(f) })
 }

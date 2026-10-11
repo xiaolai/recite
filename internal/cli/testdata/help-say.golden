@@ -17,6 +17,8 @@ Flags:
     	read text from PATH
   -force
     	overwrite the output
+  -format FMT
+    	output FMT: wav pcm mp3 m4a m4b opus ogg flac (default from the extension, else wav)
   -gap-list DUR
     	gap after a list item, DUR or MIN..MAX (default "350ms..500ms")
   -gap-paragraph DUR
@@ -54,13 +56,15 @@ Flags:
   -normalize-disable RULE,…
     	turn off spoken-form rules, RULE,… (repeatable)
   -o PATH
-    	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
+    	write audio to PATH, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)
   -output PATH
-    	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
+    	write audio to PATH, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)
   -refresh
     	render every chunk anew; the takes still go to the cache
   -request-extra-attempts N
     	extra renders for a request-like chunk, N (default 1)
+  -sample-rate HZ
+    	output sample rate HZ: 16000, 22050, 24000, 44100, 48000 (default "24000")
   -session-chunks N
     	renders per speech session before it is replaced, N (default 50)
   -speed SPEED

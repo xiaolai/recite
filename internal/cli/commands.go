@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/xiaolai/recite/internal/audio"
@@ -77,15 +78,17 @@ func (c *CLI) notImplemented(name string) int {
 
 // SayRequest is what the router resolved for `say`.
 type SayRequest struct {
-	Globals  Globals
-	File     string
-	Text     []string
-	Output   string
-	Force    bool
-	MaxInput int64
-	Settings realtime.Settings
-	Guard    guard.Options
-	Spoken   spoken.Options
+	Globals    Globals
+	File       string
+	Text       []string
+	Output     string
+	Format     audio.Format // --format; "" means from the output's extension
+	SampleRate int          // --sample-rate (AUD-05)
+	Force      bool
+	MaxInput   int64
+	Settings   realtime.Settings
+	Guard      guard.Options
+	Spoken     spoken.Options
 
 	ChunkSeconds  float64 // segmentation budget (TXT-03)
 	Gaps          audio.Gaps
@@ -300,9 +303,13 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.StringVar(&file, "file", "", "read text from `PATH`")
 	var output string
 	var force bool
-	fs.StringVar(&output, "o", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
-	fs.StringVar(&output, "output", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
+	fs.StringVar(&output, "o", "", "write audio to `PATH`, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)")
+	fs.StringVar(&output, "output", "", "write audio to `PATH`, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)")
 	fs.BoolVar(&force, "force", false, "overwrite the output")
+	var format string
+	var sampleRate string
+	fs.StringVar(&format, "format", "", "output `FMT`: wav pcm mp3 m4a m4b opus ogg flac (default from the extension, else wav)")
+	fs.StringVar(&sampleRate, "sample-rate", strconv.Itoa(audio.SampleRate), "output sample rate `HZ`: 16000, 22050, 24000, 44100, 48000")
 	var manifestPath, keepRejected string
 	var noManifest bool
 	fs.StringVar(&manifestPath, "manifest", "", "write the manifest to `PATH` (default <output>.json)")
@@ -331,6 +338,16 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			return ExitUsage
 		}
 		req.Manifest, req.NoManifest, req.KeepRejected = manifestPath, noManifest, keepRejected
+		if format != "" {
+			if req.Format, err = audio.ParseFormat(format); err != nil {
+				c.errorf("recite say: --format: %v", err)
+				return ExitUsage
+			}
+		}
+		if req.SampleRate, err = audio.ParseSampleRate(sampleRate); err != nil {
+			c.errorf("recite say: %v", err)
+			return ExitUsage
+		}
 		return c.Say(req)
 	}
 }

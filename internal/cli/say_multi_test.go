@@ -41,8 +41,9 @@ type multiEnv struct {
 	env map[string]string // the environment Getenv sees; nil is empty
 	// wrapTr, when set, wraps the transcriber the run gets (a verifier chain, for VER-02).
 	wrapTr func(stt.Transcriber) stt.Transcriber
-	sigs   chan os.Signal // when set, the run's interrupts come from here
-	drain  time.Duration  // CLI.DrainTimeout; 0 is the default
+	sigs   chan os.Signal               // when set, the run's interrupts come from here
+	drain  time.Duration                // CLI.DrainTimeout; 0 is the default
+	look   func(string) (string, error) // CLI.LookPath when set
 }
 
 func newMultiEnv(t *testing.T) *multiEnv {
@@ -65,6 +66,9 @@ func (m *multiEnv) run(args ...string) result {
 	c.Now = func() time.Time { return cliNow }
 	c.StdinIsTTY = func() bool { return true }
 	c.DrainTimeout = m.drain
+	if m.look != nil {
+		c.LookPath = m.look
+	}
 	if m.sigs != nil {
 		c.Signals = func() (<-chan os.Signal, func()) { return m.sigs, func() {} }
 	}
