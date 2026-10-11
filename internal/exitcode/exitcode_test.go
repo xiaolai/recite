@@ -21,3 +21,30 @@ func TestWorstFollowsSeverityOrder(t *testing.T) {
 		t.Errorf("Worst(2, 42) = %d, want %d", got, Internal)
 	}
 }
+
+// Simultaneous auth, route-denied, verification and network failures report 3,
+// in every arrival order.
+// accept: CLI-03#3
+func TestSimultaneousFailuresReportAuth(t *testing.T) {
+	codes := []int{Auth, RouteDenied, VerifyFailed, Failure}
+	var permute func(k int)
+	n := 0
+	permute = func(k int) {
+		if k == len(codes) {
+			n++
+			if got := Worst(codes...); got != Auth {
+				t.Errorf("Worst(%v) = %d, want %d", codes, got, Auth)
+			}
+			return
+		}
+		for i := k; i < len(codes); i++ {
+			codes[k], codes[i] = codes[i], codes[k]
+			permute(k + 1)
+			codes[k], codes[i] = codes[i], codes[k]
+		}
+	}
+	permute(0)
+	if n != 24 {
+		t.Fatalf("checked %d orders, want 24", n)
+	}
+}

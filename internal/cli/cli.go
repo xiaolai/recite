@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/logx"
+	"github.com/xiaolai/recite/internal/realtime"
 )
 
 // CLI is one invocation of recite. Say is injectable so tests can observe how
@@ -24,14 +26,20 @@ type CLI struct {
 	// Getenv and Now are the environment and clock; tests replace them.
 	Getenv func(string) string
 	Now    func() time.Time
+	// Stdin and StdinIsTTY are the input stream and whether it is a terminal.
+	Stdin      io.Reader
+	StdinIsTTY func() bool
+	// NewSynth builds the speech synthesizer over the probed credentials.
+	NewSynth func(*auth.Credentials) (realtime.Synthesizer, error)
 
 	globals Globals
 }
 
 // New returns a CLI writing to stdout and stderr.
 func New(stdout, stderr io.Writer) *CLI {
-	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now}
-	c.Say = c.defaultSay
+	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now, Stdin: os.Stdin, StdinIsTTY: stdinIsTTY}
+	c.Say = c.runSay
+	c.NewSynth = productionSynth(c)
 	return c
 }
 

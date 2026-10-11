@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/xiaolai/recite/internal/realtime"
+	"github.com/xiaolai/recite/internal/text"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -107,6 +108,7 @@ func TestDefaultCommandResolution(t *testing.T) {
 			}
 			tc.want.Globals = defaultGlobals()
 			tc.want.Settings = realtime.DefaultSettings()
+			tc.want.MaxInput = text.DefaultMaxInput
 			if got := r.says[0]; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %+v, want %+v", got, tc.want)
 			}
@@ -153,6 +155,7 @@ func TestInterspersedFlags(t *testing.T) {
 	want := SayRequest{File: "x.md", Text: []string{"Hello", "world"}}
 	want.Globals = defaultGlobals()
 	want.Settings = realtime.DefaultSettings()
+	want.MaxInput = text.DefaultMaxInput
 	want.Globals.JSON, want.Globals.Verbose, want.Globals.AuthSource = true, 2, "codex"
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -169,12 +172,7 @@ func TestInterspersedFlags(t *testing.T) {
 	}
 }
 
-func TestStubsAndDefaultSay(t *testing.T) {
-	var out, errb bytes.Buffer
-	if code := New(&out, &errb).Run([]string{"Hello"}); code != ExitUsage ||
-		errb.String() != "recite say: not implemented yet\n" {
-		t.Errorf("say: code %d, %q", code, errb.String())
-	}
+func TestStubs(t *testing.T) {
 	for _, cmd := range New(nil, nil).commands() {
 		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" {
 			continue

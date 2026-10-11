@@ -9,10 +9,18 @@ Flags:
     	read text from PATH
   -file PATH
     	read text from PATH
+  -force
+    	overwrite the output
+  -max-input BYTES
+    	input size limit in BYTES (default 10485760)
   -model MODEL
     	speech MODEL: gpt-realtime-2.1, gpt-realtime-2, gpt-realtime-2.1-mini (default "gpt-realtime-2.1")
   -model-unchecked
     	accept any --model name
+  -o PATH
+    	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
+  -output PATH
+    	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
   -speed SPEED
     	SPEED from 0.25 to 1.5 in steps of 0.01 (default "1.0")
   -voice VOICE

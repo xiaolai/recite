@@ -180,6 +180,11 @@ func (c *CLI) reportFailure(err error) int {
 	if err == nil {
 		return ExitOK
 	}
+	var ue *usageError
+	if errors.As(err, &ue) {
+		c.errorf("recite: %v", err)
+		return ExitUsage
+	}
 	var e *openai.Error
 	if !errors.As(err, &e) {
 		c.errorf("recite: %v", err)

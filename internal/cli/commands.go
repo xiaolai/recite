@@ -6,12 +6,14 @@ import (
 
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/realtime"
+	"github.com/xiaolai/recite/internal/text"
 )
 
 // Exit codes used by the router; the values live in internal/exitcode (design §12.3).
 const (
-	ExitOK    = exitcode.OK
-	ExitUsage = exitcode.Usage
+	ExitOK       = exitcode.OK
+	ExitInternal = exitcode.Internal
+	ExitUsage    = exitcode.Usage
 )
 
 // command is one entry of the registry. setup registers the command's own
@@ -67,6 +69,9 @@ type SayRequest struct {
 	Globals  Globals
 	File     string
 	Text     []string
+	Output   string
+	Force    bool
+	MaxInput int64
 	Settings realtime.Settings
 }
 
@@ -117,8 +122,19 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	var sf sayFlags
 	fs.StringVar(&file, "f", "", "read text from `PATH`")
 	fs.StringVar(&file, "file", "", "read text from `PATH`")
+	var output string
+	var force bool
+	var maxInput int64
+	fs.StringVar(&output, "o", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
+	fs.StringVar(&output, "output", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
+	fs.BoolVar(&force, "force", false, "overwrite the output")
+	fs.Int64Var(&maxInput, "max-input", text.DefaultMaxInput, "input size limit in `BYTES`")
 	sf.register(fs)
 	return func(args []string) int {
+		if maxInput <= 0 {
+			c.errorf("recite say: --max-input must be a positive number of bytes")
+			return ExitUsage
+		}
 		settings, err := sf.settings()
 		if err != nil {
 			c.errorf("recite say: %v", err)
@@ -131,12 +147,9 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 				return ExitUsage
 			}
 		}
-		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Settings: settings})
+		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: maxInput, Settings: settings})
 	}
 }
-
-// defaultSay is the `say` runner until CLI-02 lands.
-func (c *CLI) defaultSay(SayRequest) int { return c.notImplemented("say") }
 
 func setupHelp(_ *flag.FlagSet, c *CLI) func([]string) int {
 	return func(args []string) int {

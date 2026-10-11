@@ -14,6 +14,23 @@ const (
 	Interrupted  = 130 // SIGINT/SIGTERM
 )
 
+// Meanings documents every code, in code order; `--help` and the README table
+// are generated from or checked against it (CLI-03).
+var Meanings = []struct {
+	Code    int
+	Meaning string
+}{
+	{OK, "Success"},
+	{Internal, "Internal error (bug)"},
+	{Usage, "Usage or input error: bad flag, bad input encoding, missing encoder, unknown voice"},
+	{Auth, "Auth: not signed in, not a ChatGPT sign-in, refresh failed"},
+	{RouteDenied, "Route denied: the token was refused for this model or endpoint"},
+	{VerifyFailed, "Verification failed for at least one chunk after all attempts"},
+	{RateLimited, "Rate-limited or quota exhausted after backoff"},
+	{Failure, "Network, server or protocol failure after retries"},
+	{Interrupted, "Interrupted"},
+}
+
 // severity ranks codes for Worst: 130 > 3 > 4 > 1 > 7 > 6 > 5 > 2 (> 0).
 var severity = map[int]int{
 	Interrupted:  8,

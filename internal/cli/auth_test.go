@@ -26,6 +26,9 @@ import (
 var fakeCodex string
 
 func TestMain(m *testing.M) {
+	if target := os.Getenv(publishHelperEnv); target != "" {
+		os.Exit(publishHelper(target)) // a subprocess of TestPublicationSurvivesSIGKILL
+	}
 	dir, err := os.MkdirTemp("", "cli-codex-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

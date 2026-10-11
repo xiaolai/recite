@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/xiaolai/recite/internal/exitcode"
 )
 
 func (c *CLI) writeHelp(w io.Writer) {
@@ -19,6 +21,11 @@ func (c *CLI) writeHelp(w io.Writer) {
 	}
 	b.WriteString("\nGlobal flags:\n")
 	b.WriteString(globalDefaults())
+	b.WriteString("\nExit codes:\n")
+	for _, m := range exitcode.Meanings {
+		fmt.Fprintf(&b, "  %-4d %s\n", m.Code, m.Meaning)
+	}
+	b.WriteString("When several failures occur, the most severe is reported: 130 > 3 > 4 > 1 > 7 > 6 > 5 > 2.\n")
 	b.WriteString("\nRun \"recite help <command>\" for a command's flags.\n")
 	_, _ = io.WriteString(w, b.String()) // help output has no error channel
 }
