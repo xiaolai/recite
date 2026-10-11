@@ -3,6 +3,8 @@ package guard
 import (
 	"slices"
 	"strings"
+
+	"github.com/xiaolai/recite/internal/text"
 )
 
 // piece is a run of the current text. An unedited piece is a verbatim slice
@@ -14,6 +16,9 @@ type piece struct {
 	o0, o1 int
 	edited bool
 	codes  []Code
+	// mark is 1 + the index of the speech mark this piece holds; such a piece
+	// is protected: no detector match may touch it (design §7.8).
+	mark int
 }
 
 // spanDoc is the current text as pieces over the original.
@@ -24,6 +29,51 @@ type spanDoc struct {
 
 func newSpanDoc(s string) *spanDoc {
 	return &spanDoc{orig: s, pieces: []piece{{text: s, o0: 0, o1: len(s)}}}
+}
+
+// newMarkedDoc replaces each mark with its display text as a protected piece.
+func newMarkedDoc(s string, marks []text.Mark) *spanDoc {
+	d := &spanDoc{orig: s}
+	pos := 0
+	for i, m := range marks {
+		if m.Start > pos {
+			d.pieces = append(d.pieces, piece{text: s[pos:m.Start], o0: pos, o1: m.Start})
+		}
+		d.pieces = append(d.pieces, piece{text: m.Text, o0: m.Start, o1: m.End, edited: true, mark: i + 1})
+		pos = m.End
+	}
+	if pos < len(s) || len(d.pieces) == 0 {
+		d.pieces = append(d.pieces, piece{text: s[pos:], o0: pos, o1: len(s)})
+	}
+	return d
+}
+
+// touchesMark reports whether match m overlaps a protected piece, or strictly
+// contains an empty one (a pause).
+func (d *spanDoc) touchesMark(m match) bool {
+	pos := 0
+	for _, p := range d.pieces {
+		pend := pos + len(p.text)
+		if p.mark > 0 && overlaps(pos, pend, m) {
+			return true
+		}
+		pos = pend
+	}
+	return false
+}
+
+// marks lists the protected pieces as (mark index, current range).
+func (d *spanDoc) marks() []PlacedMark {
+	var out []PlacedMark
+	pos := 0
+	for _, p := range d.pieces {
+		pend := pos + len(p.text)
+		if p.mark > 0 {
+			out = append(out, PlacedMark{Index: p.mark - 1, Start: pos, End: pend})
+		}
+		pos = pend
+	}
+	return out
 }
 
 func (d *spanDoc) String() string {

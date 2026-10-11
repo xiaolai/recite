@@ -60,6 +60,33 @@ type Chunk struct {
 	RequestLike bool          // flagged G-REQUEST: one extra attempt
 	Lexicon     []string
 	Protected   []spoken.Range // {{spell}}, {{digits}} and {{say}} spans, in Spoken coordinates
+	LangSpans   []LangSpan     // {{lang}} spans, in Spoken coordinates, sorted, not overlapping
+}
+
+// LangSpan is a {{lang}} span (design §7.8): it is scored under its own language and adds
+// that language to the STT hint.
+type LangSpan struct {
+	Spoken spoken.Range
+	Lang   string
+}
+
+// HintLanguages is the STT languages[] hint of a chunk: its own language when TXT-04 sends
+// one, then each distinct {{lang}} tag. An uncertain chunk language sends no hint at all.
+func HintLanguages(c Chunk) []string {
+	out := text.STTHint(c.Language)
+	if out == nil {
+		return nil
+	}
+	for _, s := range c.LangSpans {
+		dup := false
+		for _, l := range out {
+			dup = dup || primaryTag(l) == primaryTag(s.Lang)
+		}
+		if !dup && s.Lang != "" {
+			out = append(out, s.Lang)
+		}
+	}
+	return out
 }
 
 // Options are the adjudication settings.
@@ -171,7 +198,7 @@ func Check(ctx context.Context, c Chunk, o Options, n int, take realtime.Take, t
 	a.PCM, a.Rejection, a.Eligible = pcm, rej, rej == nil
 	a.SaidMismatch = o.BypassSaid && !Equivalent(take.Said, c.Spoken)
 	if a.Eligible && o.Mode != ModeOff {
-		hint := stt.Hint{Languages: text.STTHint(c.Language), Keywords: Keywords(c.Spoken, c.Lexicon)}
+		hint := stt.Hint{Languages: HintLanguages(c), Keywords: Keywords(c.Spoken, c.Lexicon)}
 		if err := verifyTake(ctx, c, o.Mode.Thresholds(), hint, tr, &a, &calls); err != nil {
 			return a, calls, fmt.Errorf("chunk %s attempt %d: %w", c.ID, n, err)
 		}

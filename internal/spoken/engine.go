@@ -69,8 +69,43 @@ type Options struct {
 	Disabled  []RuleID
 	DateStyle DateStyle // "" means us
 	// Protected display ranges are copied as written (speech marks, §7.8).
-	// They must be sorted, non-overlapping, in bounds and on rune boundaries.
+	// Overrides replace their display range with a fixed spoken form. Together
+	// they must be sorted, non-overlapping, in bounds and on rune boundaries.
 	Protected []Range
+	Overrides []Override
+}
+
+// Override is a display range whose spoken form is decided outside the rules:
+// a speech mark (§7.8). An override with a non-empty Ambiguous is copied as
+// written and reported as N-AMBIGUOUS under its Rule.
+type Override struct {
+	Range
+	Spoken    string
+	Rule      RuleID
+	Ambiguous string
+}
+
+// fixed is one protected range or override, in order.
+type fixed struct {
+	Range
+	ov *Override
+}
+
+func (o *Options) fixed() []fixed {
+	out := make([]fixed, 0, len(o.Protected)+len(o.Overrides))
+	for _, p := range o.Protected {
+		out = append(out, fixed{Range: p})
+	}
+	for i := range o.Overrides {
+		out = append(out, fixed{Range: o.Overrides[i].Range, ov: &o.Overrides[i]})
+	}
+	slices.SortStableFunc(out, func(a, b fixed) int {
+		if a.Start != b.Start {
+			return a.Start - b.Start
+		}
+		return a.End - b.End
+	})
+	return out
 }
 
 // AmbiguousCode is the finding code for a span no rule could decide.
@@ -169,20 +204,40 @@ func Run(s string, t Table, o Options) (Result, error) {
 	// "number" and the St. decision changes). Run passes until the output is stable and
 	// compose the span maps, so the result is a fixed point by construction.
 	res := runOnce(s, t, o)
+	// Later passes see an override's spoken form as protected text.
+	var prot []Range
+	for _, f := range o.fixed() {
+		prot = append(prot, f.Range)
+	}
 	for pass := 1; pass < maxPasses; pass++ {
 		next := runOnce(res.Spoken, t, Options{Mode: o.Mode, Disabled: o.Disabled, DateStyle: o.DateStyle,
-			Protected: mapProtected(o.Protected, res.Segments)})
+			Protected: mapProtected(prot, res.Segments)})
 		if next.Spoken == res.Spoken {
-			res.Findings = mapFindings(next.Findings, res)
+			res.Findings = withOverrideFindings(mapFindings(next.Findings, res), s, o)
 			return res, nil
 		}
 		res = Result{Display: s, Spoken: next.Spoken, Segments: compose(res.Segments, next.Segments)}
 	}
 	// No fixed point within maxPasses: report the last pass's ambiguities and stop.
 	last := runOnce(res.Spoken, t, Options{Mode: o.Mode, Disabled: o.Disabled, DateStyle: o.DateStyle,
-		Protected: mapProtected(o.Protected, res.Segments)})
-	res.Findings = mapFindings(last.Findings, res)
+		Protected: mapProtected(prot, res.Segments)})
+	res.Findings = withOverrideFindings(mapFindings(last.Findings, res), s, o)
 	return res, nil
+}
+
+// withOverrideFindings adds an N-AMBIGUOUS finding for each override that could
+// not be decided, in text order with the rules' findings.
+func withOverrideFindings(fs []Finding, s string, o Options) []Finding {
+	for _, ov := range o.Overrides {
+		if ov.Ambiguous == "" {
+			continue
+		}
+		line, col := position(s, ov.Start)
+		fs = append(fs, Finding{Code: AmbiguousCode, Rule: ov.Rule, Line: line, Col: col,
+			Text: s[ov.Start:ov.End], Reason: ov.Ambiguous, off: ov.Start})
+	}
+	slices.SortStableFunc(fs, func(a, b Finding) int { return a.off - b.off })
+	return fs
 }
 
 // maxPasses bounds the fixed-point loop; real text settles in two or three.
@@ -191,7 +246,13 @@ const maxPasses = 8
 // runOnce is one left-to-right pass of the rules over s.
 func runOnce(s string, t Table, o Options) Result {
 	b := builder{display: s}
+	fx := o.fixed()
 	if o.Mode == ModeOff || len(t) == 0 {
+		// No rules, but overrides still apply.
+		for _, f := range fx {
+			b.copy(f.Start)
+			b.fixed(f)
+		}
 		b.copy(len(s))
 		return b.result()
 	}
@@ -202,12 +263,12 @@ func runOnce(s string, t Table, o Options) Result {
 		}
 	}
 	pi := 0
-	for b.pos < len(s) {
+	for b.pos < len(s) || pi < len(fx) {
 		limit := len(s)
-		if pi < len(o.Protected) {
-			p := o.Protected[pi]
+		if pi < len(fx) {
+			p := fx[pi]
 			if b.pos >= p.Start {
-				b.copy(p.End)
+				b.fixed(p)
 				pi++
 				continue
 			}
@@ -331,7 +392,8 @@ func (o *Options) validate(n int, s string) error {
 		return fmt.Errorf("spoken form: unknown date style %q", o.DateStyle)
 	}
 	prev := 0
-	for _, p := range o.Protected {
+	for _, f := range o.fixed() {
+		p := f.Range
 		if p.Start < prev || p.End < p.Start || p.End > n {
 			return fmt.Errorf("spoken form: protected range [%d,%d) is out of order or out of bounds", p.Start, p.End)
 		}
@@ -405,6 +467,19 @@ func (b *builder) padded(m Match) string {
 		}
 	}
 	return out
+}
+
+// fixed copies a protected range as written, or writes an override's spoken
+// form as one segment under its rule.
+func (b *builder) fixed(f fixed) {
+	if f.ov == nil || f.ov.Ambiguous != "" {
+		b.copy(f.End)
+		return
+	}
+	start := b.spoken.Len()
+	b.spoken.WriteString(f.ov.Spoken)
+	b.segs = append(b.segs, Segment{Display: f.Range, Spoken: Range{start, b.spoken.Len()}, Rule: f.ov.Rule})
+	b.pos = f.End
 }
 
 // copy copies the display text up to end as written, extending the previous

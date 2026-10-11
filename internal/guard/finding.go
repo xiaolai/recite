@@ -28,6 +28,7 @@ const (
 	Homoglyph   Code = "G-HOMOGLYPH"
 	Request     Code = "G-REQUEST"
 	Marker      Code = "G-MARKER"
+	Mark        Code = "G-MARK"
 	Typo        Code = "G-TYPO"
 	Empty       Code = "G-EMPTY"
 )
@@ -102,13 +103,14 @@ var rules = map[Code]rule{
 	Homoglyph:   {ActReplace, []Action{ActFail}, Warn},
 	Request:     {ActFlag, nil, Info},
 	Marker:      {ActEscape, nil, Warn},
+	Mark:        {ActStrip, nil, Warn},
 	Empty:       {ActSkip, nil, Warn},
 }
 
 // Codes lists every code in report order.
 func Codes() []Code {
 	return []Code{Encoding, Control, Whitespace, RepeatPunct, Markup, URL, Email, Path, CodeToken,
-		LongToken, Footnote, Emoji, Symbol, Homoglyph, Request, Marker, Typo, Empty}
+		LongToken, Footnote, Emoji, Symbol, Homoglyph, Request, Marker, Mark, Typo, Empty}
 }
 
 // Allowed lists the actions code may be set to, default first.

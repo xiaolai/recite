@@ -99,6 +99,7 @@ func TestHelpGolden(t *testing.T) {
 // sayDefaults sets the M2 rendering defaults of a SayRequest.
 func sayDefaults(r *SayRequest) {
 	r.ChunkSeconds = text.DefaultChunkSeconds
+	r.InputFormat = formatText
 	r.Gaps = audio.DefaultGaps()
 	r.SampleRate = audio.SampleRate
 	r.Jobs, r.SessionChunks = pipeline.DefaultJobs, realtime.DefaultSessionChunks
@@ -202,7 +203,7 @@ func TestInterspersedFlags(t *testing.T) {
 
 func TestStubs(t *testing.T) {
 	for _, cmd := range New(nil, nil).commands() {
-		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" || cmd.name == "check" || cmd.name == "config" {
+		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" || cmd.name == "check" || cmd.name == "config" || cmd.name == "prepare" {
 			continue
 		}
 		r := run(cmd.name)

@@ -104,20 +104,9 @@ func (c *CLI) runSay(req SayRequest) int {
 		}
 		return ExitInternal
 	}
-	g, code := c.guardText(req, input)
+	plan, seg, code := c.planText(req, input)
 	if code != ExitOK {
 		return code
-	}
-	// The spoken form is what the model is asked to say; form.Display keeps
-	// the cleaned text for the plan, the manifest and subtitles.
-	form, code := c.spokenForm(req, g.Text)
-	if code != ExitOK {
-		return code
-	}
-	plan, seg, err := planChunks(input, g, form, req.ChunkSeconds, req.Settings)
-	if err != nil {
-		c.errorf("recite say: %v", err)
-		return ExitInternal
 	}
 	for _, w := range seg.Warnings {
 		c.Logger.Warn("segmentation", "code", w.Code, "chunk", plan.Chunks[w.Chunk].ID, "detail", w.Msg)
@@ -433,6 +422,49 @@ func verdictError(res pipeline.Result, code int, written bool) error {
 	return &exitError{code: code, msg: msg}
 }
 
+// planText runs the text stages of `say` and plans the chunks. A spoken script (TXT-15)
+// skips the guard and the spoken-form rules: its text is the spoken form.
+func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmentation, int) {
+	if req.InputFormat == formatSpoken {
+		plan, doc, err := spokenScriptPlan(input, req.Marks, req.Spoken, planSettings(req.Settings), req.Settings.Speed)
+		if err != nil {
+			c.errorf("recite say: %v", err)
+			return plan, doc.Seg, textErrorCode(err)
+		}
+		return plan, doc.Seg, ExitOK
+	}
+	g, code := c.guardText(req, input)
+	if code != ExitOK {
+		return pipeline.Plan{}, text.Segmentation{}, code
+	}
+	if err := checkPauses(g); err != nil {
+		c.errorf("recite say: %v", err)
+		return pipeline.Plan{}, text.Segmentation{}, ExitUsage
+	}
+	// The spoken form is what the model is asked to say; form.Display keeps
+	// the cleaned text for the plan, the manifest and subtitles.
+	form, code := c.spokenForm(req, g)
+	if code != ExitOK {
+		return pipeline.Plan{}, text.Segmentation{}, code
+	}
+	plan, seg, err := planChunks(input, g, form, req.ChunkSeconds, req.Settings)
+	if err != nil {
+		c.errorf("recite say: %v", err)
+		return plan, seg, ExitInternal
+	}
+	return plan, seg, ExitOK
+}
+
+// textErrorCode is the exit code of a text-stage error: 2 for the user's input.
+func textErrorCode(err error) int {
+	var se *text.ScriptError
+	var ue *usageError
+	if errors.As(err, &se) || errors.As(err, &ue) || text.IsInputError(err) {
+		return ExitUsage
+	}
+	return ExitInternal
+}
+
 // guardText runs the text guard (TXT-09) before anything touches the network.
 // Findings go to stderr, one per line, unless -q; a guard failure (a fail
 // action, strict with warn-level findings, nothing speakable) is exit 2 and
@@ -461,9 +493,11 @@ func (c *CLI) guardText(req SayRequest, input string) (guard.Result, int) {
 // language. N-AMBIGUOUS findings print like guard findings; under --guard
 // strict they stop the run (exit 2), as design §7.7 says. Each rewrite is
 // logged at debug level with the rule that made it.
-func (c *CLI) spokenForm(req SayRequest, display string) (spoken.Result, int) {
+func (c *CLI) spokenForm(req SayRequest, g guard.Result) (spoken.Result, int) {
+	display := g.Text
 	lang := text.Resolve(display, text.ResolveOptions{})
-	res, err := spoken.Normalize(display, lang.Code, req.Spoken)
+	so := markOptions(g, req.Spoken, markReader(lang.Code, req.Spoken.DateStyle))
+	res, err := spoken.Normalize(display, lang.Code, so)
 	if err != nil {
 		c.errorf("recite say: %v", err)
 		return res, ExitInternal

@@ -176,7 +176,11 @@ func inputOf(req SayRequest, input string) manifest.Input {
 	default:
 		src = "-"
 	}
-	return manifest.Input{Source: src, Format: "text", SHA256: manifest.SHA256(input), Chars: utf8.RuneCountInString(input)}
+	format := req.InputFormat
+	if format == "" {
+		format = formatText
+	}
+	return manifest.Input{Source: src, Format: format, SHA256: manifest.SHA256(input), Chars: utf8.RuneCountInString(input)}
 }
 
 // settingsOf records the render and verification settings.

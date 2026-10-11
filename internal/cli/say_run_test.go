@@ -42,6 +42,7 @@ type sayEnv struct {
 	said     *lastSaid                                             // what the echo wrapper last rendered
 	env      map[string]string                                     // the environment Getenv sees; nil is empty
 	tr       stt.Transcriber                                       // nil = echoTranscriber
+	newTr    func(*auth.Credentials) stt.Transcriber               // when set, builds the transcriber
 }
 
 func newSayEnv(t *testing.T, opts ...rtfake.Option) *sayEnv {
@@ -94,7 +95,10 @@ func (e *sayEnv) run(args ...string) result {
 		}
 		return echoSynth{s, e.said}, nil
 	}
-	c.NewTranscriber = func(*auth.Credentials) (stt.Transcriber, func() error, error) {
+	c.NewTranscriber = func(creds *auth.Credentials) (stt.Transcriber, func() error, error) {
+		if e.newTr != nil {
+			return e.newTr(creds), func() error { return nil }, nil
+		}
 		if e.tr != nil {
 			return e.tr, func() error { return nil }, nil
 		}

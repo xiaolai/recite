@@ -30,6 +30,7 @@ type detector struct {
 // path and long-token rules, which would otherwise claim their text; emoji
 // run before symbols so a kept emoji is not removed as a symbol.
 var detectors = []detector{
+	{Mark, findMark},
 	{Control, findControl},
 	{Markup, findMarkup},
 	{URL, findURL},

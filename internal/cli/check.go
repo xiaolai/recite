@@ -108,18 +108,24 @@ func setupCheck(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite check: %v", err)
 			return ExitUsage
 		}
+		format, marks, err := tf.inputMode()
+		if err != nil {
+			c.errorf("recite check: %v", err)
+			return ExitUsage
+		}
+		g.Marks = marks
 		if len(args) != 1 {
 			c.errorf("recite check: takes exactly one FILE (- for stdin)")
 			return ExitUsage
 		}
-		return c.runCheck(args[0], tf, g, so, sp)
+		return c.runCheck(args[0], tf, format, g, so, sp)
 	}
 }
 
 // runCheck is `check` (CLI-14): parse, guard, spoken form and segmentation, with no network
 // and no credentials. The report goes to stdout; the exit code says whether `say` with the
 // same flags would stop at the text stage (2) or go on (0).
-func (c *CLI) runCheck(file string, tf textFlags, g guard.Options, so spoken.Options, speed float64) int {
+func (c *CLI) runCheck(file string, tf textFlags, format string, g guard.Options, so spoken.Options, speed float64) int {
 	input, err := text.Read(text.Source{File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, tf.maxInput)
 	if err != nil {
 		c.errorf("recite check: %v", err)
@@ -128,10 +134,15 @@ func (c *CLI) runCheck(file string, tf textFlags, g guard.Options, so spoken.Opt
 		}
 		return ExitInternal
 	}
-	rep, err := buildCheckReport(input, g, so, tf.chunkSeconds, speed)
+	var rep CheckReport
+	if format == formatSpoken {
+		rep, err = buildSpokenCheckReport(input, g, so, speed)
+	} else {
+		rep, err = buildCheckReport(input, g, so, tf.chunkSeconds, speed)
+	}
 	if err != nil {
 		c.errorf("recite check: %v", err)
-		return ExitInternal
+		return textErrorCode(err)
 	}
 	rep.Input = file
 	if c.globals.JSON {
@@ -156,20 +167,65 @@ func writeLine(w io.Writer, b []byte) error {
 	return err
 }
 
+// textStages is the outcome of the text stages of `say` on plain text: the guard, the spoken
+// form and the plan. failed says `say` would stop at the text stage (exit 2); form and plan
+// are set only when there is something speakable to plan.
+type textStages struct {
+	guard   guard.Result
+	failed  bool
+	lang    string
+	form    spoken.Result
+	planned bool
+	plan    pipeline.Plan
+	seg     text.Segmentation
+}
+
+// runTextStages runs guard → spoken form → segmentation with no network, as `say` would.
+func runTextStages(input string, g guard.Options, so spoken.Options, budget float64, settings realtime.Settings) (textStages, error) {
+	var st textStages
+	gr, gerr := guard.Run(input, g)
+	var ge *guard.Error
+	if gerr != nil && !errors.As(gerr, &ge) {
+		return st, gerr
+	}
+	st.guard, st.failed = gr, ge != nil
+	if !guard.Speakable(gr.Text) {
+		return st, nil
+	}
+	if err := checkPauses(gr); err != nil {
+		return st, err
+	}
+	lang := text.Resolve(gr.Text, text.ResolveOptions{})
+	st.lang = lang.Code
+	form, err := spoken.Normalize(gr.Text, lang.Code, markOptions(gr, so, markReader(lang.Code, so.DateStyle)))
+	if err != nil {
+		return st, err
+	}
+	st.form = form
+	if len(form.Findings) > 0 && g.Policy == guard.PolicyStrict {
+		st.failed = true
+	}
+	st.plan, st.seg, err = planChunks(input, gr, form, budget, settings)
+	if err != nil {
+		return st, err
+	}
+	st.planned = true
+	return st, nil
+}
+
 // buildCheckReport runs the text stages of `say` and reports on them.
 func buildCheckReport(input string, g guard.Options, so spoken.Options, budget, speed float64) (CheckReport, error) {
 	if g.Policy == "" {
 		g.Policy = guard.PolicyFix
 	}
-	rep := CheckReport{Schema: FindingsSchema, Policy: string(g.Policy), Findings: []CheckFinding{}, Ambiguous: []CheckAmbiguous{},
-		RequestLike: []string{}, Plan: CheckPlan{Items: []CheckChunk{}, Warnings: []CheckSegWarn{}}}
-	gr, gerr := guard.Run(input, g)
-	var ge *guard.Error
-	if gerr != nil && !errors.As(gerr, &ge) {
-		return rep, gerr
+	rep := newCheckReport(g.Policy)
+	settings := realtime.DefaultSettings()
+	settings.Speed = speed
+	st, err := runTextStages(input, g, so, budget, settings)
+	if err != nil {
+		return rep, err
 	}
-	failed := ge != nil
-	for _, f := range gr.Findings {
+	for _, f := range st.guard.Findings {
 		rep.Findings = append(rep.Findings, CheckFinding{Code: string(f.Code), Line: f.Line, Col: f.Col,
 			Severity: f.Severity.String(), Action: string(f.Action), Before: f.Before, After: f.After})
 		switch f.Severity {
@@ -185,35 +241,44 @@ func buildCheckReport(input string, g guard.Options, so spoken.Options, budget, 
 	strict.Policy = guard.PolicyStrict
 	_, serr := guard.Run(input, strict)
 	rep.Risk.StrictWouldFail = serr != nil
-
-	if guard.Speakable(gr.Text) {
-		lang := text.Resolve(gr.Text, text.ResolveOptions{})
-		rep.Language = lang.Code
-		form, err := spoken.Normalize(gr.Text, lang.Code, so)
-		if err != nil {
-			return rep, err
-		}
-		for _, f := range form.Findings {
+	failed := st.failed
+	if st.planned {
+		rep.Language = st.lang
+		for _, f := range st.form.Findings {
 			rep.Ambiguous = append(rep.Ambiguous, CheckAmbiguous{Code: f.Code, Rule: string(f.Rule), Line: f.Line, Col: f.Col, Text: f.Text, Reason: f.Reason})
 		}
-		rep.Risk.Ambiguous = len(form.Findings)
-		if len(form.Findings) > 0 {
+		rep.Risk.Ambiguous = len(st.form.Findings)
+		if len(st.form.Findings) > 0 {
 			rep.Risk.StrictWouldFail = true
-			if g.Policy == guard.PolicyStrict {
-				failed = true
-			}
 		}
-		settings := realtime.DefaultSettings()
-		settings.Speed = speed
-		plan, seg, err := planChunks(input, gr, form, budget, settings)
-		if err != nil {
-			return rep, err
-		}
-		fillPlan(&rep, plan, seg)
+		fillPlan(&rep, st.plan, st.seg)
 	}
 	if failed {
 		rep.Exit = ExitUsage
 	}
+	return rep, nil
+}
+
+func newCheckReport(p guard.Policy) CheckReport {
+	return CheckReport{Schema: FindingsSchema, Policy: string(p), Findings: []CheckFinding{}, Ambiguous: []CheckAmbiguous{},
+		RequestLike: []string{}, Plan: CheckPlan{Items: []CheckChunk{}, Warnings: []CheckSegWarn{}}}
+}
+
+// buildSpokenCheckReport reports on a spoken script (TXT-15): there is no guard and no
+// spoken-form stage, so the report is its plan.
+func buildSpokenCheckReport(input string, g guard.Options, so spoken.Options, speed float64) (CheckReport, error) {
+	if g.Policy == "" {
+		g.Policy = guard.PolicyFix
+	}
+	rep := newCheckReport(g.Policy)
+	settings := realtime.DefaultSettings()
+	settings.Speed = speed
+	plan, doc, err := spokenScriptPlan(input, g.Marks, so, planSettings(settings), speed)
+	if err != nil {
+		return rep, err
+	}
+	rep.Language = text.Resolve(scriptText(input), text.ResolveOptions{}).Code
+	fillPlan(&rep, plan, doc.Seg)
 	return rep, nil
 }
 

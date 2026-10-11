@@ -1,6 +1,10 @@
 package verify
 
-import "github.com/xiaolai/recite/internal/spoken"
+import (
+	"strings"
+
+	"github.com/xiaolai/recite/internal/spoken"
+)
 
 // form is a text taken through the spoken-form rules, with the span map back to the text.
 // STT writes numbers, dates, times and symbols in written form ("3:15 p.m.", "1990s") while
@@ -20,6 +24,47 @@ func toForm(s, lang string) form {
 		return form{text: s}
 	}
 	return form{text: r.Spoken, segs: r.Segments}
+}
+
+// toFormSpans is toForm with each {{lang}} span taken through its own language's rules and
+// the rest through lang's. The transcript has no spans to follow, so only the reference is
+// read this way; it falls back to toForm on spans that do not fit s.
+func toFormSpans(s, lang string, spans []LangSpan) form {
+	if len(spans) == 0 {
+		return toForm(s, lang)
+	}
+	var out form
+	var b strings.Builder
+	pos := 0
+	add := func(end int, l string) {
+		if end <= pos {
+			return
+		}
+		f := toForm(s[pos:end], l)
+		segs := f.segs
+		if len(segs) == 0 {
+			segs = []spoken.Segment{{Display: spoken.Range{End: end - pos}, Spoken: spoken.Range{End: len(f.text)}}}
+		}
+		for _, sg := range segs {
+			sg.Display.Start += pos
+			sg.Display.End += pos
+			sg.Spoken.Start += b.Len()
+			sg.Spoken.End += b.Len()
+			out.segs = append(out.segs, sg)
+		}
+		b.WriteString(f.text)
+		pos = end
+	}
+	for _, sp := range spans {
+		if sp.Spoken.Start < pos || sp.Spoken.End > len(s) || sp.Spoken.End < sp.Spoken.Start {
+			return toForm(s, lang)
+		}
+		add(sp.Spoken.Start, lang)
+		add(sp.Spoken.End, sp.Lang)
+	}
+	add(len(s), lang)
+	out.text = b.String()
+	return out
 }
 
 // back maps the range [start, end) of the form to the range of the original it came from. A

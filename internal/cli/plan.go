@@ -18,26 +18,39 @@ import (
 // the guard ran on, g its result, and form the spoken form of g.Text. Findings are passed to
 // the planner at byte offsets of the display text (form.Display).
 func planChunks(input string, g guard.Result, form spoken.Result, budget float64, s realtime.Settings) (pipeline.Plan, text.Segmentation, error) {
-	seg, err := text.Segment(form, text.SegmentOptions{Budget: budget, Speed: s.Speed, Breaks: text.ParagraphBreaks(form.Display)})
+	breaks := text.ParagraphBreaks(form.Display)
+	pauses := pausesOf(g)
+	for _, p := range pauses {
+		breaks = append(breaks, text.Break{Display: p.at, Kind: text.BoundaryPause})
+	}
+	seg, err := text.Segment(form, text.SegmentOptions{Budget: budget, Speed: s.Speed, Breaks: breaks})
 	if err != nil {
 		return pipeline.Plan{}, text.Segmentation{}, fmt.Errorf("segment: %w", err)
+	}
+	// A {{pause}} mark is an exact silence and a chunk boundary (TXT-13).
+	durations, err := pauseDurations(seg, pauses)
+	if err != nil {
+		return pipeline.Plan{}, seg, err
 	}
 	in := pipeline.Input{
 		Display:  form.Display,
 		Seg:      seg,
 		Findings: planFindings(input, g, form),
-		// Pause boundaries come only from {{pause}} marks, which the plain-text input of M2
-		// cannot carry: only paragraph breaks are passed to Segment, so there is no pause to
-		// time. Build fails loudly if one ever appears without a duration.
-		Pauses: nil,
+		Pauses:   durations,
+		Marks:    markSpans(spokenMarks(g, form)),
 	}
-	p, err := pipeline.Build(in, pipeline.Settings{
-		Model: s.Model, Voice: s.Voice, Speed: s.Speed, Effort: string(s.Effort), InstructionsVersion: s.InstructionsVersion,
-	})
+	p, err := pipeline.Build(in, planSettings(s))
 	if err != nil {
 		return pipeline.Plan{}, seg, err
 	}
 	return p, seg, nil
+}
+
+// planSettings are the render settings that shape the plan and its cache keys.
+func planSettings(s realtime.Settings) pipeline.Settings {
+	return pipeline.Settings{
+		Model: s.Model, Voice: s.Voice, Speed: s.Speed, Effort: string(s.Effort), InstructionsVersion: s.InstructionsVersion,
+	}
 }
 
 // planFindings converts the guard findings (line:col of input) and the spoken-form findings
@@ -106,10 +119,23 @@ func tasksFor(p pipeline.Plan, spec realtime.SessionSpec) []pipeline.Task {
 				Language:    text.Resolve(c.Spoken, text.ResolveOptions{}),
 				Estimate:    time.Duration(max(c.EstMillis, 1)) * time.Millisecond,
 				RequestLike: requestLike,
+				Protected:   c.Protected,
+				LangSpans:   langSpans(c.LangSpans),
 			},
-			Spec:     spec,
+			Spec: spec,
+			// Speech-mark instructions ride after the rules (realtime.ResponseInstructions).
+			Style:    strings.Join(c.Instructions, "\n"),
 			CacheKey: c.CacheKey,
 		}
 	}
 	return tasks
+}
+
+// langSpans converts the plan's {{lang}} spans for verification.
+func langSpans(ls []pipeline.LangSpan) []verify.LangSpan {
+	var out []verify.LangSpan
+	for _, l := range ls {
+		out = append(out, verify.LangSpan{Spoken: l.Spoken, Lang: l.Lang})
+	}
+	return out
 }

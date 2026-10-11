@@ -44,7 +44,7 @@ func (c *CLI) commands() []command {
 		{"say", "[TEXT...]", "Text to verified audio file (default command)", setupSay},
 		{"render", "PROJECT.toml", "Render a batch or project into many outputs", stub("render")},
 		{"check", "FILE", "Text guard, spoken form and chunk plan, no network", setupCheck},
-		{"prepare", "FILE", "Write the editable spoken-form script", stub("prepare")},
+		{"prepare", "FILE", "Write the editable spoken-form script", setupPrepare},
 		{"voices", "", "List voices", stub("voices")},
 		{"doctor", "", "Check the environment and the route", stub("doctor")},
 		{"auth", "status|login", "Login state, or sign in through codex", setupAuth},
@@ -89,6 +89,9 @@ type SayRequest struct {
 	Settings   realtime.Settings
 	Guard      guard.Options
 	Spoken     spoken.Options
+
+	InputFormat string // --input-format: text or spoken (TXT-15)
+	Marks       bool   // speech marks are read (TXT-13)
 
 	ChunkSeconds  float64 // segmentation budget (TXT-03)
 	Gaps          audio.Gaps
@@ -157,6 +160,9 @@ type textFlags struct {
 	dateStyle    string
 	disableSpecs []string
 	chunkSeconds float64
+	inputFormat  string
+	marks        bool
+	noMarks      bool
 }
 
 func (f *textFlags) register(fs *flag.FlagSet) {
@@ -170,6 +176,10 @@ func (f *textFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.dateStyle, "date-style", f.dateStyle, "spoken date `STYLE`: us, uk or iso")
 	f.chunkSeconds = text.DefaultChunkSeconds
 	fs.Float64Var(&f.chunkSeconds, "chunk-seconds", f.chunkSeconds, "segmentation budget in `SECONDS` per chunk")
+	f.inputFormat = formatText
+	fs.StringVar(&f.inputFormat, "input-format", f.inputFormat, "input `FORMAT`: text, or spoken (a prepare script: no guard, no spoken-form rules)")
+	fs.BoolVar(&f.marks, "marks", false, "read inline speech marks such as {{spell|API}} (default on for spoken input)")
+	fs.BoolVar(&f.noMarks, "no-marks", false, "read {{…}} as plain text")
 }
 
 // resolve validates the text flags; actions are the per-code guard actions of [guard].
@@ -327,8 +337,14 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
+		inFormat, marks, err := tf.inputMode()
+		if err != nil {
+			c.errorf("recite say: %v", err)
+			return ExitUsage
+		}
+		g.Marks = marks
 		req := SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: tf.maxInput,
-			Settings: settings, Guard: g, Spoken: so, ChunkSeconds: tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
+			Settings: settings, Guard: g, Spoken: so, InputFormat: inFormat, Marks: marks, ChunkSeconds: tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
 		if err := rf.apply(&req); err != nil {
 			c.errorf("recite say: %v", err)
 			return ExitUsage

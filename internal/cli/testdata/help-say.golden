@@ -31,12 +31,16 @@ Flags:
     	gap after a sentence, DUR or MIN..MAX (default "200ms..350ms")
   -guard POLICY
     	text guard POLICY: fix, strict, warn or off (default "fix")
+  -input-format FORMAT
+    	input FORMAT: text, or spoken (a prepare script: no guard, no spoken-form rules) (default "text")
   -jobs N
     	render N chunks at once, 1 to 6 (default 3)
   -keep-rejected DIR
     	save every rejected take and its report in DIR
   -manifest PATH
     	write the manifest to PATH (default <output>.json)
+  -marks
+    	read inline speech marks such as {{spell|API}} (default on for spoken input)
   -max-attempts N
     	renders per chunk, N (default 3)
   -max-input BYTES
@@ -49,6 +53,8 @@ Flags:
     	neither read nor write the take cache
   -no-manifest
     	write no manifest
+  -no-marks
+    	read {{…}} as plain text
   -no-trim
     	keep the leading and trailing silence of each take
   -normalize MODE

@@ -117,7 +117,7 @@ type judgement struct {
 // edge-insertion guards, and collects the content-word mismatches (design §8.4).
 func judge(c Chunk, t stt.Transcript) judgement {
 	metric := ScriptMetric(c.Spoken)
-	ref, hyp := toForm(c.Spoken, c.Language.Code), toForm(t.Text, c.Language.Code)
+	ref, hyp := toFormSpans(c.Spoken, c.Language.Code, c.LangSpans), toForm(t.Text, c.Language.Code)
 	res, al := score(ref.text, hyp.text, metric)
 	// Report edits against the reference and transcript as they are, for the protected ranges
 	// and the logprobs.

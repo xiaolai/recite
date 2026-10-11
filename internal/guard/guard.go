@@ -25,6 +25,9 @@ type Options struct {
 	// Markdown says the input is Markdown, so ** ## ` are syntax, not residue.
 	Markdown bool
 	Typo     TypoChecker
+	// Marks parses speech marks (§7.8) before the guard: each becomes its
+	// display text, which no detector touches, and a malformed one is G-MARK.
+	Marks bool
 }
 
 func (o *Options) action(c Code) Action {
@@ -40,6 +43,17 @@ type Result struct {
 	Text     string
 	Findings []Finding
 	Edits    []Edit
+	// Marks are the speech marks in text order and Placed their ranges in Text,
+	// one per mark (Options.Marks).
+	Marks  []text.Mark
+	Placed []PlacedMark
+}
+
+// PlacedMark is where mark Marks[Index] ended up: the byte range [Start, End)
+// of Result.Text holding its display text (empty for a pause).
+type PlacedMark struct {
+	Index      int
+	Start, End int
 }
 
 // maxPasses bounds the fixpoint loop. Each pass only shrinks or rewrites to
@@ -62,6 +76,11 @@ func Run(s string, o Options) (Result, error) {
 		o.Policy = PolicyFix
 	}
 	d := newSpanDoc(s)
+	var marks []text.Mark
+	if o.Marks {
+		marks, _ = parseMarks(s)
+		d = newMarkedDoc(s, marks)
+	}
 	fs := newFindingSet(d)
 	switch o.Policy {
 	case PolicyFix, PolicyStrict:
@@ -95,7 +114,7 @@ func Run(s string, o Options) (Result, error) {
 			fs.extra = append(fs.extra, o.Typo.Check(out)...)
 		}
 	}
-	res := Result{Text: out, Findings: fs.list(), Edits: d.edits()}
+	res := Result{Text: out, Findings: fs.list(), Edits: d.edits(), Marks: marks, Placed: d.marks()}
 	if !Speakable(out) {
 		res.Findings = append(res.Findings, Finding{Code: Empty, Line: 1, Col: 1, Severity: Fatal, Action: ActFail, Before: s, After: out})
 		return res, &Error{Reason: "nothing speakable is left after the guard (G-EMPTY)", Findings: res.Findings}
@@ -127,6 +146,9 @@ func runDetector(d *spanDoc, fs *findingSet, det detector, o *Options, apply boo
 	for _, m := range ms {
 		if m.edit && cur[m.start:m.end] == m.repl {
 			continue // a no-op rewrite is not a finding
+		}
+		if d.touchesMark(m) {
+			continue // a speech mark's text is the user's explicit choice
 		}
 		fs.add(m, cur)
 		if m.edit && apply {
@@ -253,4 +275,35 @@ func EncodingFinding(raw []byte, err error) (Finding, bool) {
 	end := off + 1
 	before := string(raw[off:end])
 	return Finding{Code: Encoding, Line: line, Col: col, Severity: Fatal, Action: ActFail, Before: before, After: ""}, true
+}
+
+// parseMarks parses the speech marks of s. A mark holding a control character
+// or a <<< >>> marker is malformed: its text would reach the model unguarded.
+func parseMarks(s string) ([]text.Mark, []text.BadMark) {
+	marks, bad := text.ParseMarks(s)
+	ok := marks[:0:0]
+	for _, m := range marks {
+		raw := s[m.Start:m.End]
+		if strings.ContainsFunc(raw, isControl) || reMarker.MatchString(raw) {
+			bad = append(bad, text.BadMark{Start: m.Start, End: m.End, Reason: "contains a control character or a <<< >>> marker", Plain: m.Text})
+			continue
+		}
+		ok = append(ok, m)
+	}
+	return ok, bad
+}
+
+// findMark reports each malformed speech mark (G-MARK) of the current text and
+// strips its syntax, so no brace reaches the model.
+func findMark(s string, act Action, o *Options) []match {
+	if !o.Marks {
+		return nil
+	}
+	_, bad := parseMarks(s)
+	ms := make([]match, 0, len(bad))
+	for _, b := range bad {
+		ms = append(ms, mk(Mark, act, b.Start, b.End, b.Plain, rules[Mark].sev))
+	}
+	sortMatches(ms)
+	return ms
 }

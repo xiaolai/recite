@@ -1,0 +1,27 @@
+#| recite: spoken script; edit the text, then render it with: recite say -f FILE --input-format spoken
+
+#| display: "Paid $3.5M on 2026-10-11."
+#| join: sentence
+#| finding: 1:25 G-WHITESPACE collapse
+#| finding: 1:25 G-EMOJI remove
+Paid three point five million dollars on October eleventh, twenty twenty-six.
+
+#| display: "Read API as SQL, code 42."
+Read {{say:A P I|API}} as {{say:sequel|SQL}}, code {{say:four two|42}}.{{pause:600ms}}
+
+#| display: "Then stop and say bonjour to Okafor."
+Then {{emph|stop}} and say {{lang:fr|bonjour}} to {{hint:oh-KAH-for|Okafor}}.
+
+#| display: "Take 1/2 of the cake and R2-D2."
+#| join: sentence
+Take one half of the cake and R2-D2.
+
+#| display: "This sentence is long enough that a small budget cuts the paragraph here."
+#| join: sentence
+This sentence is long enough that a small budget cuts the paragraph here.
+
+#| display: "Another sentence follows it, and then the paragraph ends."
+Another sentence follows it, and then the paragraph ends.
+
+#| display: "The third paragraph is short."
+The third paragraph is short.
