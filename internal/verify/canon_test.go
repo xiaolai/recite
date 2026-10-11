@@ -34,6 +34,10 @@ func TestEquivalencePairs(t *testing.T) {
 		{"account DE89", "account D E eighty-nine"},
 		{"ticket JIRA-10442", "ticket J I R A 10442"},
 		{"use the A P I", "use the API"},
+		// Zero is read "oh" in digit readings, and STT writes it "O", "oh" or "0".
+		{"three seven oh four, oh oh four four", "three seven O four, O O four four"},
+		{"DE eighty-nine three seven oh four", "D E eighty nine three seven O four"},
+		{"version 4.0", "version four point oh"},
 	}
 	for _, p := range pairs {
 		if !Equivalent(p[0], p[1]) {
@@ -42,7 +46,9 @@ func TestEquivalencePairs(t *testing.T) {
 	}
 	for _, p := range [][2]string{{"42", "forty-three"}, {"1999", "nineteen ninety-eight"}, {"3.5", "35"}, {"四十二", "24"},
 		// Joining spelled letters removes spacing only: different or extra letters still differ.
-		{"part X J", "part X K"}, {"plan A", "plan A B"}, {"XJ", "JX"}} {
+		{"part X J", "part X K"}, {"plan A", "plan A B"}, {"XJ", "JX"},
+		// "oh" is zero only beside a number word.
+		{"oh no", "zero no"}, {"the letter O", "the letter zero"}} {
 		if Equivalent(p[0], p[1]) {
 			t.Errorf("Equivalent(%q, %q) = true", p[0], p[1])
 		}
@@ -65,6 +71,7 @@ func TestCanonForms(t *testing.T) {
 		"Hello—world":      "hello world",
 		"msð":              "msð", // "ms" is not a whole word here, though regexp's \b says so
 		"X J 4471":         "xj four thousand four hundred seventy one",
+		"Oh no, O O seven": "oh no zero zero seven",
 	}
 	for in, want := range cases {
 		if got := strings.Join(Canon(in), " "); got != want {

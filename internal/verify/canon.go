@@ -2,6 +2,7 @@ package verify
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -13,7 +14,7 @@ import (
 
 // CanonVersion identifies the canonicaliser's behaviour. Bump it on any change
 // to Canon's output: cache keys and verification provenance record it.
-const CanonVersion = 6
+const CanonVersion = 7
 
 // Canon canonicalises s into comparison tokens (design §8.3): NFKC and width
 // folding, abbreviation expansion, lower case, numbers to English words (one
@@ -78,7 +79,33 @@ func canon(s string, joinHyphens bool) []string {
 	// joined ("M s" -> "ms" -> "miz").
 	// Dropping an apostrophe can bring a letter and a combining mark together ("A'̆"), which a
 	// second pass would compose; compose them now.
-	return expandTokens(joinLetters(dropNumberAnd(strings.Fields(norm.NFKC.String(b.String())))))
+	return expandTokens(joinLetters(spokenZeros(dropNumberAnd(strings.Fields(norm.NFKC.String(b.String()))))))
+}
+
+// spokenZeros reads "oh" and "o" as zero inside a reading of digits: the spoken form says
+// "three seven oh four" for 3704 and "four point oh" for 4.0, and STT writes "O" or "oh". A
+// run of them counts when a number word stands right before or after it, or "point" right
+// before it, so "oh no" and the letter O stay. It runs before joinLetters, which would join "O O" into "oo".
+func spokenZeros(toks []string) []string {
+	zero := func(t string) bool { return t == "oh" || t == "o" }
+	out := slices.Clone(toks)
+	for i := 0; i < len(out); {
+		if !zero(out[i]) {
+			i++
+			continue
+		}
+		j := i
+		for j < len(out) && zero(out[j]) {
+			j++
+		}
+		if i > 0 && (isNumberWord(out[i-1]) || out[i-1] == "point") || j < len(out) && isNumberWord(out[j]) {
+			for k := i; k < j; k++ {
+				out[k] = "zero"
+			}
+		}
+		i = j
+	}
+	return out
 }
 
 // joinLetters joins each run of two or more single-letter Latin tokens into one token. A code
@@ -372,7 +399,7 @@ func yearPairAt(toks []string, i int) (v, n int) {
 	switch {
 	case toks[j] == "hundred":
 		return hi * 100, 2
-	case toks[j] == "oh" && j+1 < len(toks):
+	case toks[j] == "zero" && j+1 < len(toks): // "oh" is zero by now (spokenZeros)
 		if lo, ok := smallValue(toks[j+1]); ok && lo >= 1 && lo <= 9 {
 			return hi*100 + lo, 3
 		}
