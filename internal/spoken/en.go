@@ -3,6 +3,8 @@ package spoken
 import (
 	"regexp"
 	"strings"
+
+	"github.com/xiaolai/recite/internal/numwords"
 )
 
 // English is the English column of design §7.7. Order matters where two
@@ -18,6 +20,7 @@ var English = Table{
 	{"en.time", enTime},
 	{"en.currency.scale", enCurrencyScale},
 	{"en.currency", enCurrency},
+	{"en.ipv4", enIPv4},
 	{"en.version", enVersion},
 	{"en.year", enYear},
 	{"en.range", enRange},
@@ -199,6 +202,37 @@ func enCurrency(s string, i int, _ *Options) (Match, bool) {
 		return Match{}, false
 	}
 	return Match{End: mo.end, Spoken: mo.words()}, true
+}
+
+// --- IPv4 addresses ---
+
+// enIPv4 reads a dotted quad digit by digit ("one nine two dot zero dot two dot
+// one"), the way addresses are said aloud. Anything that is not exactly four
+// groups of 0-255 without leading zeros is left to the version rule.
+func enIPv4(s string, i int, _ *Options) (Match, bool) {
+	if !wordStart(s, i) {
+		return Match{}, false
+	}
+	var groups []string
+	j := i
+	for {
+		e := digits(s, j)
+		n, ok := atoi(s[j:e])
+		if !ok || n > 255 || e-j > 1 && s[j] == '0' {
+			return Match{}, false
+		}
+		groups = append(groups, strings.Join(numwords.Digits(s[j:e]), " "))
+		j = e
+		if j+1 < len(s) && s[j] == '.' && isDigit(s[j+1]) {
+			j++
+			continue
+		}
+		break
+	}
+	if len(groups) != 4 || !wordEnd(s, j) {
+		return Match{}, false
+	}
+	return Match{End: j, Spoken: strings.Join(groups, " dot ")}, true
 }
 
 // --- versions ---
