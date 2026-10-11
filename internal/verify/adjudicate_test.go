@@ -561,3 +561,59 @@ func TestTranscriberGetsTheUnpaddedTake(t *testing.T) {
 		t.Fatalf("transcriber got %d bytes, want the %d-byte trimmed take", calls[0].Bytes, len(r.PCM))
 	}
 }
+
+// spokenChunk is the chunk recite renders for display text s: its spoken form.
+func spokenChunk(t *testing.T, s string) verify.Chunk {
+	t.Helper()
+	r, err := spoken.Normalize(s, "en", spoken.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return chunk(r.Spoken)
+}
+
+// STT writes numbers, dates and symbols as digits; the reference is the spoken form. The
+// transcript goes through the same rules, so a correct take scores as one (the live corpus
+// of TXT-11#3 failed half its chunks on this) and a wrong number is still caught.
+func TestTranscriptInWrittenFormMatchesSpokenReference(t *testing.T) {
+	for _, tc := range []struct{ display, heard string }{
+		{"In 2026 the fee rose from ¥3,000 to ¥3,500.", "In 2026, the fee rose from 3,000 yen to 3,500 yen."},
+		{"Meet me on October 11, 2026 at 3:15pm in Room 204.", "Meet me on October 11, 2026 at 3:15 p.m. in room 204."},
+		{"Volume III arrives on 2026-12-01 for $29.99.", "Volume III arrives on December 1, 2026, for $29.99."},
+		{"The team scored 3–5 points per game in the 1990s.", "The team scored three to five points per game in the 1990s."},
+	} {
+		c := spokenChunk(t, tc.display)
+		r := run(t, c, verify.DefaultOptions(), synthWith(c), sttWith(sttfake.Text(tc.heard)))
+		if r.State != verify.StateVerified || r.Score < 0.95 {
+			t.Errorf("%q heard as %q: %s, score %.3f %v", c.Spoken, tc.heard, r.State, r.Score, reasons(r))
+		}
+	}
+}
+
+func TestWrongNumberInWrittenFormIsStillRejected(t *testing.T) {
+	c := spokenChunk(t, "In 2026 the fee rose from ¥3,000 to ¥3,500.")
+	heard := "In 2025, the fee rose from 3,000 yen to 3,500 yen."
+	o := verify.DefaultOptions()
+	o.MaxAttempts = 1
+	r := run(t, c, o, synthWith(c), sttWith(sttfake.Text(heard)))
+	wantResult(t, r, verify.StateUnverified, 1, 1, verify.ReasonProtected)
+	// Edits point into the transcript as STT wrote it, so logprobs can be matched to them.
+	for _, e := range r.Attempts[0].Transcriptions[0].Result.Edits {
+		if e.HeardEnd > len(heard) || e.HeardStart > e.HeardEnd || heard[e.HeardStart:e.HeardEnd] != e.Heard {
+			t.Fatalf("edit %+v does not point into the transcript %q", e, heard)
+		}
+		if e.RefEnd > len(c.Spoken) || c.Spoken[e.RefStart:e.RefEnd] != e.Expected {
+			t.Fatalf("edit %+v does not point into the reference %q", e, c.Spoken)
+		}
+	}
+}
+
+// With the spoken form off, the reference keeps its digits and a transcript in words still
+// matches it.
+func TestDigitReferenceMatchesWordTranscript(t *testing.T) {
+	c := chunk("In 2026 the fee rose to 3,500 yen.")
+	r := run(t, c, verify.DefaultOptions(), synthWith(c), sttWith(sttfake.Text("In twenty twenty-six the fee rose to three thousand five hundred yen.")))
+	if r.State != verify.StateVerified {
+		t.Fatalf("%s, score %.3f %v", r.State, r.Score, reasons(r))
+	}
+}
