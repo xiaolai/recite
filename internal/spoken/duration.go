@@ -171,8 +171,36 @@ func scanDigitGroups(s string, i int, start func(string, int) bool) ([]string, i
 		}
 		break
 	}
-	if len(groups) < 3 || isWordRune(nextRune(s, j)) || byteAt(s, j) == '-' && isDigit(byteAt(s, j+1)) ||
+	// Two groups only as a long serial and its check digit ("482917-3", ISO 6346).
+	checkDigit := len(groups) == 2 && len(groups[0]) >= 6 && len(groups[1]) == 1
+	if len(groups) < 3 && !checkDigit || isWordRune(nextRune(s, j)) || byteAt(s, j) == '-' && isDigit(byteAt(s, j+1)) ||
 		byteAt(s, j) == '.' && isDigit(byteAt(s, j+1)) {
+		return nil, 0, false
+	}
+	return groups, j, true
+}
+
+// scanSpacedGroups reads four or more digit groups of four separated by single spaces, the
+// last of one to four digits: an account or card number ("DE89 3704 0044 0532 0130 00",
+// "4111 1111 1111 1111"). Like a hyphenated run it is not a quantity.
+func scanSpacedGroups(s string, i int, start func(string, int) bool) ([]string, int, bool) {
+	if !isDigit(s[i]) || !start(s, i) {
+		return nil, 0, false
+	}
+	var groups []string
+	j := i
+	for {
+		e := digits(s, j)
+		groups = append(groups, s[j:e])
+		j = e
+		if len(s[j-len(groups[len(groups)-1]):j]) != 4 || byteAt(s, j) != ' ' || !isDigit(byteAt(s, j+1)) {
+			break
+		}
+		j++
+	}
+	last := len(groups[len(groups)-1])
+	if len(groups) < 4 || last > 4 || isWordRune(nextRune(s, j)) ||
+		(byteAt(s, j) == '.' || byteAt(s, j) == ',' || byteAt(s, j) == '-') && isDigit(byteAt(s, j+1)) {
 		return nil, 0, false
 	}
 	return groups, j, true
@@ -236,7 +264,9 @@ func enElapsed(s string, i int, _ *Options) (Match, bool) {
 func enDigitGroups(s string, i int, _ *Options) (Match, bool) {
 	groups, end, ok := scanDigitGroups(s, i, wordStart)
 	if !ok {
-		return Match{}, false
+		if groups, end, ok = scanSpacedGroups(s, i, wordStart); !ok {
+			return Match{}, false
+		}
 	}
 	if singleDigits(groups) {
 		return Match{End: end, Ambiguous: "a code or a list"}, true
@@ -292,6 +322,9 @@ func zhElapsed(s string, i int, _ *Options) (Match, bool) {
 
 func zhDigitGroups(s string, i int, _ *Options) (Match, bool) {
 	groups, end, ok := scanDigitGroups(s, i, zhStart)
+	if !ok {
+		groups, end, ok = scanSpacedGroups(s, i, zhStart)
+	}
 	if !ok || singleDigits(groups) {
 		return Match{}, false // "3-5-7" is left to zh.range, which reports it
 	}
