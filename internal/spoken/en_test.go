@@ -109,6 +109,10 @@ func TestAmbiguityIsReportedNotGuessed(t *testing.T) {
 		{"Model 4-5-6 rule.", "4-5-6", "en.digitgroups", 1, 7}, // a code, a list or a score
 		{"Grade XII", "", "", 0, 0},                            // a numbering context decides it
 		{"Due 10/11/2026.", "", "", 0, 0},
+		{"Due 2026-02-29.", "2026-02-29", "en.date.iso", 1, 5}, // 2026 is not a leap year
+		{"Due February 29, 2026.", "February 29, 2026", "en.date.text", 1, 5},
+		{"Due 29 February 2026.", "29 February 2026", "en.date.text", 1, 5},
+		{"Due 2028-02-29.", "", "", 0, 0},
 	}
 	for _, c := range cases {
 		r, err := spoken.Normalize(c.in, "en", spoken.Options{})

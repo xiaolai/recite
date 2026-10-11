@@ -14,6 +14,12 @@ var monthDays = []int{31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
 
 func validDate(m, d int) bool { return m >= 1 && m <= 12 && d >= 1 && d <= monthDays[m-1] }
 
+// validYearDate is validDate for a known year: February 29 exists only in a leap year.
+func validYearDate(y, m, d int) bool {
+	leap := y%4 == 0 && (y%100 != 0 || y%400 == 0)
+	return validDate(m, d) && (m != 2 || d != 29 || leap)
+}
+
 // sayDate reads a date in the requested style; year 0 means no year.
 func sayDate(m, d, y int, style DateStyle) string {
 	day := ordinalWords(uint64(d))
@@ -75,7 +81,7 @@ func enDateISO(s string, i int, o *Options) (Match, bool) {
 	if !wordEnd(s, j) || nextRune(s, j) == '-' {
 		return Match{}, false
 	}
-	if !validDate(m, d) {
+	if !validYearDate(y, m, d) {
 		return Match{End: j, Ambiguous: "date-shaped but not a calendar date"}, true
 	}
 	return Match{End: j, Spoken: sayDate(m, d, y, o.DateStyle)}, true
@@ -102,7 +108,7 @@ func enDateNumeric(s string, i int, o *Options) (Match, bool) {
 	a, _ := atoi(s[i:e1])
 	b, _ := atoi(s[e1+1 : e2])
 	y, _ := atoi(s[e2+1 : e3])
-	md, dm := validDate(a, b), validDate(b, a)
+	md, dm := validYearDate(y, a, b), validYearDate(y, b, a)
 	switch {
 	case !md && !dm:
 		return Match{}, false
@@ -176,6 +182,9 @@ func enDateText(s string, i int, o *Options) (Match, bool) {
 			return Match{}, false
 		}
 		y, e3 := yearAfter(s, e2, true)
+		if y != 0 && !validYearDate(y, m, d) {
+			return Match{End: e3, Ambiguous: "not a calendar date"}, true
+		}
 		if style == DateUK {
 			style = DateUS // keep the order as written
 		}
@@ -191,6 +200,9 @@ func enDateText(s string, i int, o *Options) (Match, bool) {
 			return Match{}, false
 		}
 		y, e3 := yearAfter(s, e2, false)
+		if y != 0 && !validYearDate(y, m, d) {
+			return Match{End: e3, Ambiguous: "not a calendar date"}, true
+		}
 		return Match{End: e3, Spoken: sayDate(m, d, y, DateUK)}, true
 	}
 	return Match{}, false

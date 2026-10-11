@@ -433,9 +433,10 @@ func zhDateISO(s string, i int, _ *Options) (Match, bool) {
 	if !numberEnd(s, j) || strings.ContainsAny(string(byteAt(s, j)), "-/.") && isDigit(byteAt(s, j+1)) {
 		return Match{}, false
 	}
+	y, _ := atoi(m[1])
 	mo, _ := atoi(m[3])
 	d, _ := atoi(m[5])
-	if !validDate(mo, d) {
+	if !validYearDate(y, mo, d) {
 		return Match{End: j, Ambiguous: "not a valid date"}, true
 	}
 	return Match{End: j, Spoken: zhDigits(m[1], "〇") + "年" + zhInt(itoa(mo)) + "月" + zhInt(itoa(d)) + "日"}, true

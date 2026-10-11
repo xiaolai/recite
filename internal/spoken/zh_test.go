@@ -132,6 +132,7 @@ func TestChineseAmbiguityIsReported(t *testing.T) {
 		{"编号3-5-7", "3-5", "zh.range"},
 		{"2026-10", "2026-10", "zh.range"},
 		{"2026-02-30", "2026-02-30", "zh.date.iso"},
+		{"2026-02-29", "2026-02-29", "zh.date.iso"}, // 2026 is not a leap year
 		{"1/0", "1/0", "zh.fraction"},
 	}
 	for _, c := range cases {
