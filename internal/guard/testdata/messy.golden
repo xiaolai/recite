@@ -40,9 +40,7 @@ in:  "Dr. Smith lives on St. James St., No. 5."
 out: "Dr. Smith lives on St. James St., No. 5."
 == symbols
 in:  "A → B, x ≥ 3, & 2 × 4 = 8."
-out: "A B, x ≥ 3, & 2 × 4 = 8."
-  1:2 G-WHITESPACE collapse: " → " → " " [info]
-  1:3 G-SYMBOL remove: "→" → "" [warn]
+out: "A → B, x ≥ 3, & 2 × 4 = 8."
 == roman
 in:  "Henry VIII ruled in the 16th century; see Chapter IV."
 out: "Henry VIII ruled in the 16th century; see Chapter IV."

@@ -11,6 +11,7 @@ import (
 
 	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/realtime"
+	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/text"
 )
 
@@ -117,6 +118,7 @@ func TestDefaultCommandResolution(t *testing.T) {
 			tc.want.Settings = realtime.DefaultSettings()
 			tc.want.MaxInput = text.DefaultMaxInput
 			tc.want.Guard = guard.Options{Policy: guard.PolicyFix}
+			tc.want.Spoken = spoken.Options{Mode: spoken.ModeAuto, DateStyle: spoken.DateUS}
 			if got := r.says[0]; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %+v, want %+v", got, tc.want)
 			}
@@ -165,6 +167,7 @@ func TestInterspersedFlags(t *testing.T) {
 	want.Settings = realtime.DefaultSettings()
 	want.MaxInput = text.DefaultMaxInput
 	want.Guard = guard.Options{Policy: guard.PolicyFix}
+	want.Spoken = spoken.Options{Mode: spoken.ModeAuto, DateStyle: spoken.DateUS}
 	want.Globals.JSON, want.Globals.Verbose, want.Globals.AuthSource = true, 2, "codex"
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)

@@ -7,6 +7,7 @@ import (
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/realtime"
+	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/text"
 )
 
@@ -75,6 +76,7 @@ type SayRequest struct {
 	MaxInput int64
 	Settings realtime.Settings
 	Guard    guard.Options
+	Spoken   spoken.Options
 }
 
 // hiddenFlags are registered but left out of help (design §12.2).
@@ -139,6 +141,14 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 		actionSpecs = append(actionSpecs, s)
 		return nil
 	})
+	normalize, dateStyle := string(spoken.ModeAuto), string(spoken.DateUS)
+	var disableSpecs []string
+	fs.StringVar(&normalize, "normalize", normalize, "spoken-form `MODE`: auto or off")
+	fs.Func("normalize-disable", "turn off spoken-form rules, `RULE,…` (repeatable)", func(s string) error {
+		disableSpecs = append(disableSpecs, s)
+		return nil
+	})
+	fs.StringVar(&dateStyle, "date-style", dateStyle, "spoken date `STYLE`: us, uk or iso")
 	return func(args []string) int {
 		if maxInput <= 0 {
 			c.errorf("recite say: --max-input must be a positive number of bytes")
@@ -154,7 +164,12 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
-		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: maxInput, Settings: settings, Guard: g})
+		so, err := spokenOptions(normalize, dateStyle, disableSpecs)
+		if err != nil {
+			c.errorf("recite say: %v", err)
+			return ExitUsage
+		}
+		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: maxInput, Settings: settings, Guard: g, Spoken: so})
 	}
 }
 
@@ -174,6 +189,26 @@ func guardOptions(policy string, specs []string) (guard.Options, error) {
 			o.Actions = map[guard.Code]guard.Action{}
 		}
 		o.Actions[code] = act
+	}
+	return o, nil
+}
+
+// spokenOptions resolves --normalize, --date-style and --normalize-disable (TXT-10).
+func spokenOptions(mode, dateStyle string, disable []string) (spoken.Options, error) {
+	var o spoken.Options
+	var err error
+	if o.Mode, err = spoken.ParseMode(mode); err != nil {
+		return o, err
+	}
+	if o.DateStyle, err = spoken.ParseDateStyle(dateStyle); err != nil {
+		return o, err
+	}
+	for _, spec := range disable {
+		ids, err := spoken.ParseDisabled(spec)
+		if err != nil {
+			return o, err
+		}
+		o.Disabled = append(o.Disabled, ids...)
 	}
 	return o, nil
 }

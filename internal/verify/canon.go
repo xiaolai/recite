@@ -6,6 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/xiaolai/recite/internal/numwords"
 	"golang.org/x/text/unicode/norm"
 	"golang.org/x/text/width"
 )
@@ -139,91 +140,16 @@ func expandAbbreviations(s string) string {
 
 // --- English numbers ---
 
+// The number words live in internal/numwords, shared with the spoken form.
 var (
-	ones = []string{"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
-		"ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
-		"eighteen", "nineteen"}
-	tens   = []string{"", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"}
-	scales = []struct {
-		v    uint64
-		name string
-	}{{1e12, "trillion"}, {1e9, "billion"}, {1e6, "million"}, {1e3, "thousand"}}
+	cardinal     = numwords.Cardinal
+	digitWords   = numwords.Digits
+	integerWords = numwords.Integer
+	ordinal      = numwords.Ordinal
+	smallValue   = numwords.SmallValue
 )
 
-// maxCardinal bounds numbers read as cardinals; longer digit strings are read
-// digit by digit, as are strings with a leading zero ("007").
-const maxCardinal = 999_999_999_999_999
-
-func cardinal(n uint64) []string {
-	if n < 20 {
-		return []string{ones[n]}
-	}
-	if n < 100 {
-		w := []string{tens[n/10]}
-		if n%10 != 0 {
-			w = append(w, ones[n%10])
-		}
-		return w
-	}
-	if n < 1000 {
-		w := []string{ones[n/100], "hundred"}
-		if n%100 != 0 {
-			w = append(w, cardinal(n%100)...)
-		}
-		return w
-	}
-	for _, sc := range scales {
-		if n >= sc.v {
-			w := append(cardinal(n/sc.v), sc.name)
-			if n%sc.v != 0 {
-				w = append(w, cardinal(n%sc.v)...)
-			}
-			return w
-		}
-	}
-	panic("unreachable")
-}
-
-func digitWords(ds string) []string {
-	w := make([]string, 0, len(ds))
-	for _, d := range ds {
-		w = append(w, ones[d-'0'])
-	}
-	return w
-}
-
-func integerWords(ds string) []string {
-	if len(ds) > 1 && ds[0] == '0' || len(ds) > 15 {
-		return digitWords(ds)
-	}
-	var n uint64
-	for _, d := range ds {
-		n = n*10 + uint64(d-'0')
-	}
-	if n > maxCardinal {
-		return digitWords(ds)
-	}
-	return cardinal(n)
-}
-
-var ordinalIrregular = map[string]string{
-	"one": "first", "two": "second", "three": "third", "five": "fifth", "eight": "eighth",
-	"nine": "ninth", "twelve": "twelfth",
-}
-
-func ordinal(words []string) []string {
-	last := words[len(words)-1]
-	switch {
-	case ordinalIrregular[last] != "":
-		last = ordinalIrregular[last]
-	case strings.HasSuffix(last, "y"):
-		last = last[:len(last)-1] + "ieth"
-	default:
-		last += "th"
-	}
-	out := append([]string(nil), words[:len(words)-1]...)
-	return append(out, last)
-}
+const maxCardinal = numwords.MaxCardinal
 
 func isASCIIDigit(b byte) bool { return b >= '0' && b <= '9' }
 
@@ -327,20 +253,6 @@ func isScale(w string) bool {
 }
 
 func isNumberWord(w string) bool { _, ok := smallValue(w); return ok }
-
-func smallValue(w string) (int, bool) {
-	for i, o := range ones {
-		if o == w {
-			return i, true
-		}
-	}
-	for i, t := range tens {
-		if t != "" && t == w {
-			return i * 10, true
-		}
-	}
-	return 0, false
-}
 
 // twoDigit parses a number word reading of 0..99 at toks[i:], returning the
 // value and the tokens consumed (0 when none).
@@ -478,7 +390,7 @@ func digitWordsHan(run []rune) []string {
 	var w []string
 	for _, r := range run {
 		if d, ok := hanDigits[r]; ok {
-			w = append(w, ones[d])
+			w = append(w, cardinal(d)...)
 		} else {
 			w = append(w, cardinal(hanUnits[r])...)
 		}

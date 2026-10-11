@@ -357,9 +357,10 @@ func findRuns(s string, in func(rune) bool, code Code, act Action, repl string) 
 // --- G-SYMBOL ---
 
 // spokenSymbols are the symbols the spoken-form stage (§7.7) is expected to
-// read: currency, arithmetic, comparison, degrees, and the ASCII symbols.
+// read: currency, arithmetic, comparison, arrows, degrees, and the ASCII
+// symbols.
 // Every other symbol has no spoken rule yet and is removed with a warning.
-const spokenSymbols = "+-×÷=≠<>≤≥±≈~^°℃℉%‰&#@*|$€£¥¢₩₹₽"
+const spokenSymbols = "+-×÷=≠<>≤≥±≈~^°℃℉%‰&#@*|$€£¥¢₩₹₽→"
 
 func isUnspokenSymbol(r rune) bool {
 	if !unicode.IsSymbol(r) || isEmoji(r) {

@@ -13,6 +13,7 @@ import (
 	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
+	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/text"
 )
 
@@ -73,6 +74,13 @@ func (c *CLI) runSay(req SayRequest) int {
 	if code != ExitOK {
 		return code
 	}
+	// The spoken form is what the model is asked to say; form.Display keeps
+	// the cleaned text for the manifest and subtitles.
+	form, code := c.spokenForm(req, input)
+	if code != ExitOK {
+		return code
+	}
+	input = form.Spoken
 	if est := realtime.EstimateDuration(input, req.Settings.Speed); est > m1ChunkBudget {
 		c.errorf("recite say: the text is about %.0f s of speech, over one %v chunk; multi-chunk input arrives in M2", est.Seconds(), m1ChunkBudget)
 		return ExitUsage
@@ -149,4 +157,31 @@ func (c *CLI) guardText(req SayRequest, input string) (string, int) {
 		return "", ExitUsage
 	}
 	return res.Text, ExitOK
+}
+
+// spokenForm applies the spoken-form rules (TXT-10, TXT-11) for the text's
+// language. N-AMBIGUOUS findings print like guard findings; under --guard
+// strict they stop the run (exit 2), as design §7.7 says. Each rewrite is
+// logged at debug level with the rule that made it.
+func (c *CLI) spokenForm(req SayRequest, display string) (spoken.Result, int) {
+	lang := text.Resolve(display, text.ResolveOptions{})
+	res, err := spoken.Normalize(display, lang.Code, req.Spoken)
+	if err != nil {
+		c.errorf("recite say: %v", err)
+		return res, ExitInternal
+	}
+	for _, rw := range res.Rewrites() {
+		c.Logger.Debug("spoken form", "rewrite", rw.String())
+	}
+	strict := req.Guard.Policy == guard.PolicyStrict && len(res.Findings) > 0
+	if strict || !c.globals.Quiet {
+		for _, f := range res.Findings {
+			c.errorf("%s", f)
+		}
+	}
+	if strict {
+		c.errorf("recite say: --guard strict: %d ambiguous span(s) (%s); resolve them or use --guard fix", len(res.Findings), spoken.AmbiguousCode)
+		return res, ExitUsage
+	}
+	return res, ExitOK
 }

@@ -185,7 +185,7 @@ func TestActions(t *testing.T) {
 		{"Run foo_bar() now.", CodeToken, ActFail, "", true},
 		{"Proven [1] twice.", Footnote, ActKeep, "Proven [1] twice.", false},
 		{"Great 🎉 job.", Emoji, ActKeep, "Great 🎉 job.", false},
-		{"A → B.", Symbol, ActKeep, "A → B.", false},
+		{"A ⊕ B.", Symbol, ActKeep, "A ⊕ B.", false},
 		{"pаypal ok.", Homoglyph, ActFail, "", true},
 		{"a  b,, c", Whitespace, ActKeep, "a  b, c", false},
 		{"a b,, c", RepeatPunct, ActKeep, "a b,, c", false},
