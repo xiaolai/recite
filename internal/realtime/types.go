@@ -30,9 +30,15 @@ type Effort string
 
 // RenderRequest asks for one chunk. Effort is the effective effort; it is sent as an override
 // only when it differs from the session's.
+//
+// Attempt is the 1-based attempt number sent as metadata.attempt; 0 means 1. Estimate is the
+// chunk's estimated speech duration, which sets the hard cap (3 × Estimate + 30 s, design §5.2);
+// 0 means it is derived from Text and the session speed (EstimateDuration).
 type RenderRequest struct {
 	ChunkID, Text, Style string
 	Effort               Effort
+	Attempt              int
+	Estimate             time.Duration
 }
 
 // Take is one rendered response.
