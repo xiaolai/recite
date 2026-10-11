@@ -76,6 +76,12 @@ func (e *sayEnv) fakeSynth(creds *auth.Credentials) (realtime.Synthesizer, error
 
 func (e *sayEnv) run(args ...string) result {
 	e.t.Helper()
+	return e.command("say", args...)
+}
+
+// command runs the recite command cmd against the fakes.
+func (e *sayEnv) command(cmd string, args ...string) result {
+	e.t.Helper()
 	e.t.Setenv("FAKECODEX_MODE", e.mode)
 	e.t.Setenv("FAKECODEX_TOKEN_EXP", fmt.Sprint(cliNow.Add(time.Hour).Unix()))
 	var out, errb bytes.Buffer
@@ -104,7 +110,7 @@ func (e *sayEnv) run(args ...string) result {
 		}
 		return echoTranscriber{e.said}, func() error { return nil }, nil
 	}
-	full := append([]string{"--codex-bin", fakeCodex, "--codex-home", e.t.TempDir(), "--auth-source", "codex", "say"}, args...)
+	full := append([]string{"--codex-bin", fakeCodex, "--codex-home", e.t.TempDir(), "--auth-source", "codex", cmd}, args...)
 	code := c.Run(full)
 	return result{code: code, stdout: out.String(), stderr: errb.String()}
 }

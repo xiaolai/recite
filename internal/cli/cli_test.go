@@ -201,19 +201,6 @@ func TestInterspersedFlags(t *testing.T) {
 	}
 }
 
-func TestStubs(t *testing.T) {
-	for _, cmd := range New(nil, nil).commands() {
-		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" || cmd.name == "check" || cmd.name == "config" || cmd.name == "prepare" ||
-			cmd.name == "doctor" || cmd.name == "voices" || cmd.name == "usage" || cmd.name == "cache" {
-			continue
-		}
-		r := run(cmd.name)
-		if r.code != ExitUsage || r.stderr != "recite "+cmd.name+": not implemented yet\n" {
-			t.Errorf("%s: code %d, %q", cmd.name, r.code, r.stderr)
-		}
-	}
-}
-
 func TestDistance(t *testing.T) {
 	for _, tc := range []struct {
 		a, b string

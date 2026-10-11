@@ -65,6 +65,22 @@ func ParseFrontMatter(s *Schema, path, data string, firstLine int) (Values, erro
 	return f.Top, nil
 }
 
+// ParseTable validates t, the settings table at docPrefix of the file at path whose text is
+// data (RUN-07: a project's [defaults] and each [[output]]). Keys follow the rules of a
+// settings file of layer; detail qualifies every value's source. Lines are reported where the
+// decoder can locate the key, which excludes tables inside an array of tables.
+func ParseTable(s *Schema, path string, data []byte, docPrefix []string, t map[string]any, layer Layer, detail string) (Values, error) {
+	p := &fileParser{s: s, path: path, data: data}
+	out := Values{}
+	for _, name := range sortedKeys(t) {
+		p.walk(out, docPrefix, nil, name, t[name], layer, detail)
+	}
+	if err := p.err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func parse(s *Schema, path string, data []byte, layer Layer, profiles bool, lineOffset int) (*File, error) {
 	var root map[string]any
 	if _, err := toml.Decode(string(data), &root); err != nil {
@@ -84,15 +100,23 @@ func parse(s *Schema, path string, data []byte, layer Layer, profiles bool, line
 		}
 		p.walk(f.Top, nil, nil, name, v, layer, "")
 	}
-	if len(p.errs) > 0 {
-		sort.SliceStable(p.errs, func(i, j int) bool { return p.errs[i].Line < p.errs[j].Line })
-		errs := make([]error, len(p.errs))
-		for i, e := range p.errs {
-			errs[i] = e
-		}
-		return nil, errors.Join(errs...)
+	if err := p.err(); err != nil {
+		return nil, err
 	}
 	return f, nil
+}
+
+// err joins every problem found, in line order; nil when there is none.
+func (p *fileParser) err() error {
+	if len(p.errs) == 0 {
+		return nil
+	}
+	sort.SliceStable(p.errs, func(i, j int) bool { return p.errs[i].Line < p.errs[j].Line })
+	errs := make([]error, len(p.errs))
+	for i, e := range p.errs {
+		errs[i] = e
+	}
+	return errors.Join(errs...)
 }
 
 type fileParser struct {
@@ -159,7 +183,11 @@ func (p *fileParser) walk(dst map[string]Value, docPrefix, keyPath []string, nam
 			p.fail(doc, "%s: %v", full, err)
 			return
 		}
-		dst[full] = Value{Raw: raw, Layer: layer, Origin: fmt.Sprintf("%s:%d", p.path, p.line(doc)), Detail: detail}
+		origin := p.path
+		if n := p.line(doc); n > 0 {
+			origin = fmt.Sprintf("%s:%d", p.path, n)
+		}
+		dst[full] = Value{Raw: raw, Layer: layer, Origin: origin, Detail: detail}
 		return
 	}
 	if t, ok := v.(map[string]any); ok && layer != LayerFrontMatter && p.s.isSection(full) {

@@ -187,7 +187,7 @@ func (c *CLI) resolveSettings(fs *flag.FlagSet, fm *frontMatterSource) (config.S
 	if err != nil {
 		return config.Settings{}, err
 	}
-	st, err := config.Resolve(config.Input{Schema: schema, User: user, FrontMatter: fmValues, Getenv: c.Getenv, Flags: flags})
+	st, err := config.Resolve(config.Input{Schema: schema, User: user, Project: c.project, FrontMatter: fmValues, Getenv: c.Getenv, Flags: flags})
 	if err != nil {
 		return config.Settings{}, err
 	}

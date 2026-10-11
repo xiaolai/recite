@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
+	"github.com/xiaolai/recite/internal/config"
 	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/manifest"
 	"github.com/xiaolai/recite/internal/pipeline"
@@ -54,6 +55,7 @@ type CLI struct {
 	globals Globals
 	intr    *pipeline.Interrupt // set while a command with credentials runs
 	written *manifest.Output    // the output `say` published, for the done event
+	project *config.File        // the project layer of the output `render` is running (RUN-07)
 }
 
 // New returns a CLI writing to stdout and stderr.
@@ -172,14 +174,17 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-// commandDone ends a `say` that failed before it ran with the done event under --json
+// commandDone ends a `say` or `render` that failed before it ran with its last event under --json
 // (CLI-06): its stdout is an event stream whatever happens.
 func (c *CLI) commandDone(cmd command, code int) int {
-	if cmd.name != "say" {
+	if cmd.name != "say" && cmd.name != "render" {
 		return code
 	}
 	if c.Logger == nil {
 		c.Logger = logx.New(io.Discard, logx.Level(true, 0), false) // event logs need a logger
+	}
+	if cmd.name == "render" {
+		return c.renderDone(renderEvent{Exit: code})
 	}
 	return c.sayDone(code)
 }

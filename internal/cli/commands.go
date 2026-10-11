@@ -43,7 +43,7 @@ type command struct {
 func (c *CLI) commands() []command {
 	return []command{
 		{"say", "[TEXT...]", "Text to verified audio file (default command)", setupSay},
-		{"render", "PROJECT.toml", "Render a batch or project into many outputs", stub("render")},
+		{"render", "PROJECT.toml", "Render a batch or project into many outputs", setupRender},
 		{"check", "FILE", "Text guard, spoken form and chunk plan, no network", setupCheck},
 		{"prepare", "FILE", "Write the editable spoken-form script", setupPrepare},
 		{"voices", "", "List voices; --preview DIR renders a sample of each", setupVoices},
@@ -64,17 +64,6 @@ func (c *CLI) lookup(name string) (command, bool) {
 		}
 	}
 	return command{}, false
-}
-
-func stub(name string) func(*flag.FlagSet, *CLI) func([]string) int {
-	return func(_ *flag.FlagSet, c *CLI) func([]string) int {
-		return func([]string) int { return c.notImplemented(name) }
-	}
-}
-
-func (c *CLI) notImplemented(name string) int {
-	c.errorf("recite %s: not implemented yet", name)
-	return ExitUsage
 }
 
 // SayRequest is what the router resolved for `say`.

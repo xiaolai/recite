@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/xiaolai/recite/docs/schema/events.schema.json",
   "title": "recite --json events",
-  "description": "One NDJSON line on stdout per event (design §12.5). The version is raised whenever an event is added or a field changes. Version 1 (M1): auth_error, auth_status, doctor_check, voice. Version 2 (WP-3.8): plan, chunk and done of `say --json`; done is always the last line of `say`. Version 3 (WP-4.6): usage, cache and cache_removed.",
-  "version": 3,
+  "description": "One NDJSON line on stdout per event (design §12.5). The version is raised whenever an event is added or a field changes. Version 1 (M1): auth_error, auth_status, doctor_check, voice. Version 2 (WP-3.8): plan, chunk and done of `say --json`; done is always the last line of `say`. Version 3 (WP-4.6): usage, cache and cache_removed. Version 4 (WP-5.3): render, the last line of `render --json`; each output before it is a `say` stream (plan, chunk, done).",
+  "version": 4,
   "oneOf": [
     {
       "$ref": "#/$defs/auth_error"
@@ -34,6 +34,9 @@
     },
     {
       "$ref": "#/$defs/cache_removed"
+    },
+    {
+      "$ref": "#/$defs/render"
     }
   ],
   "$defs": {
@@ -581,6 +584,109 @@
         "left": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "render": {
+      "description": "The last line of `render --json` (RUN-07, CLI-13): the project's exit code, the most severe across outputs, and one row per output in project order. exit is null for an output --fail-fast skipped. plan is the dry-run estimate summed over the outputs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "dry_run",
+        "exit",
+        "outputs"
+      ],
+      "properties": {
+        "event": {
+          "const": "render"
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "exit": {
+          "$ref": "#/$defs/exit"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "input",
+              "output",
+              "exit",
+              "skipped"
+            ],
+            "properties": {
+              "input": {
+                "type": "string",
+                "minLength": 1
+              },
+              "output": {
+                "type": "string",
+                "minLength": 1
+              },
+              "exit": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/exit"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "skipped": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "plan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "chunks",
+            "cached",
+            "est_seconds",
+            "est_wall_seconds",
+            "estimate_usd",
+            "price_note"
+          ],
+          "properties": {
+            "chunks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cached": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "est_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "est_wall_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "estimate_usd": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "price_note": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     }
