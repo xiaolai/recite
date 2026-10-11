@@ -512,6 +512,37 @@ func TestOutcomeTable(t *testing.T) {
 	}
 }
 
+// The off-mode table (design D18, VER-09): verification was not asked for, so a run whose
+// every chunk has an eligible take succeeds; --strict-output still refuses to write, and a
+// chunk with no eligible take still fails. Normal and strict mode keep the table above.
+// accept: VER-09#1
+func TestOutcomeTableVerifyOff(t *testing.T) {
+	unverified := verify.ChunkResult{State: verify.StateUnverified}
+	none := verify.ChunkResult{State: verify.StateNoEligible}
+	type cell struct {
+		code  int
+		write bool
+	}
+	for _, c := range []struct {
+		name    string
+		results []verify.ChunkResult
+		policy  verify.OutputPolicy
+		want    cell
+	}{
+		{"every chunk eligible", []verify.ChunkResult{unverified, unverified}, verify.OutputPolicy{VerifyOff: true}, cell{0, true}},
+		{"with --allow-unverified", []verify.ChunkResult{unverified}, verify.OutputPolicy{VerifyOff: true, AllowUnverified: true}, cell{0, true}},
+		{"with --strict-output", []verify.ChunkResult{unverified}, verify.OutputPolicy{VerifyOff: true, StrictOutput: true}, cell{5, false}},
+		{"with both flags", []verify.ChunkResult{unverified}, verify.OutputPolicy{VerifyOff: true, AllowUnverified: true, StrictOutput: true}, cell{5, false}},
+		{"some no eligible take", []verify.ChunkResult{unverified, none}, verify.OutputPolicy{VerifyOff: true}, cell{5, false}},
+		{"no eligible take, --allow-unverified", []verify.ChunkResult{none}, verify.OutputPolicy{VerifyOff: true, AllowUnverified: true}, cell{5, false}},
+		{"normal mode is unchanged", []verify.ChunkResult{unverified}, verify.OutputPolicy{}, cell{5, true}},
+	} {
+		if code, write := verify.Outcome(c.results, c.policy); (cell{code, write}) != c.want {
+			t.Errorf("%s: %d, %v; want %+v", c.name, code, write, c.want)
+		}
+	}
+}
+
 func TestLowConfidenceSpans(t *testing.T) {
 	c := chunk(pathRef)
 	o := verify.DefaultOptions()

@@ -549,3 +549,29 @@ func TestCacheUnverifiedTakeReattemptedUnlessAllowed(t *testing.T) {
 		t.Fatal("the unverified take was not re-attempted")
 	}
 }
+
+// A take kept under --verify off was never transcribed, so a later normal or strict run must
+// verify it before calling it verified (design D18); it reuses the audio and renders nothing.
+func TestCacheVerifyOffTakesAreReverifiedLater(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ts := keyed(tasks(4), baseSettings)
+	off := func(c *pipeline.Config) { c.Verify.Mode = verify.ModeOff; c.Transcriber = nil }
+	for _, mode := range []verify.Mode{verify.ModeNormal, verify.ModeStrict} {
+		// Each mode starts from a cache that holds only the off-mode takes.
+		st := newStore(t)
+		synth, h := rtfake.NewScriptedSynthesizer(), newHearing(ts)
+		first := runCache(t, ts, synth, h, &pipeline.TakeCache{Store: st}, off)
+		if first.err != nil || first.renders != 4 || first.stt != 0 {
+			t.Fatalf("off run: %v, %d renders, %d transcriptions", first.err, first.renders, first.stt)
+		}
+		r := runCache(t, ts, synth, h, &pipeline.TakeCache{Store: st}, func(c *pipeline.Config) { c.Verify.Mode = mode })
+		if r.code != 0 || r.renders != 0 || r.stt != 4 {
+			t.Fatalf("%s after off: exit %d, %d renders, %d transcriptions; want 0, 0 and 4", mode, r.code, r.renders, r.stt)
+		}
+		for _, c := range r.res.Chunks {
+			if c.State != verify.StateVerified || c.Cached {
+				t.Fatalf("%s after off: %s is %s, cached %v; want verified by this run", mode, c.ChunkID, c.State, c.Cached)
+			}
+		}
+	}
+}

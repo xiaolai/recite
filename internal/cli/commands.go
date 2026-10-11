@@ -258,7 +258,7 @@ func (f *runFlags) apply(req *SayRequest) error {
 	}
 	req.Jobs, req.VerifyJobs, req.SessionChunks = f.jobs, f.verifyJobs, f.sessionChunks
 	req.Verify = verify.Options{Mode: mode, MaxAttempts: f.maxAttempts, RequestExtraAttempts: f.requestExtraAttempts, NoTrim: f.noTrim}
-	req.Policy = verify.OutputPolicy{AllowUnverified: f.allowUnverified, StrictOutput: f.strictOutput}
+	req.Policy = verify.OutputPolicy{AllowUnverified: f.allowUnverified, StrictOutput: f.strictOutput, VerifyOff: mode == verify.ModeOff}
 	req.Gaps = g
 	req.NoCache, req.Refresh = f.noCache, f.refresh
 	return nil

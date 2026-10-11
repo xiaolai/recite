@@ -225,7 +225,11 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		Jobs: req.Jobs, VerifyJobs: req.VerifyJobs, SessionChunks: req.SessionChunks,
 		Verify: req.Verify, Synth: synth, Transcriber: tr, Cache: job.cache,
 		Deliver: func(i int, r verify.ChunkResult) error {
-			c.reportChunk(r)
+			// Under --verify off every chunk is unverified by request: one summary line, not
+			// a report per chunk.
+			if req.Verify.Mode != verify.ModeOff || r.State != verify.StateUnverified {
+				c.reportChunk(r)
+			}
 			return asm.Add(i, r.PCM)
 		},
 		DrainTimeout: c.DrainTimeout,
@@ -276,6 +280,9 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 	}
 	if code != ExitOK {
 		return verdictError(res, code, write)
+	}
+	if req.Verify.Mode == verify.ModeOff {
+		c.errorf("recite: verification is off (--verify off): %d chunk(s) written unverified", len(res.Chunks))
 	}
 	return nil
 }

@@ -272,16 +272,20 @@ func verifyTake(ctx context.Context, c Chunk, th Thresholds, hint stt.Hint, tr s
 	return nil
 }
 
-// OutputPolicy is --allow-unverified and --strict-output (VER-09).
+// OutputPolicy is --allow-unverified and --strict-output (VER-09), and whether verification
+// was turned off (--verify off), which changes the table (design D18).
 type OutputPolicy struct {
 	AllowUnverified bool
 	StrictOutput    bool
+	VerifyOff       bool
 }
 
 // Outcome decides the exit code and whether the output file is written (design §8.5):
 // a chunk with no eligible take means no file and exit 5 whatever the flags; an unverified
 // chunk means exit 5 and a file, unless --allow-unverified (exit 0) or --strict-output (no
 // file). With both flags, --strict-output wins: no file is written, so the run cannot succeed.
+// Under --verify off every chunk is unverified by request, so that alone is not a failure: the
+// run exits 0 unless --strict-output refuses to write.
 func Outcome(results []ChunkResult, p OutputPolicy) (code int, write bool) {
 	unverified := false
 	for _, r := range results {
@@ -297,7 +301,7 @@ func Outcome(results []ChunkResult, p OutputPolicy) (code int, write bool) {
 		return exitcode.OK, true
 	case p.StrictOutput:
 		return exitcode.VerifyFailed, false
-	case p.AllowUnverified:
+	case p.AllowUnverified, p.VerifyOff:
 		return exitcode.OK, true
 	}
 	return exitcode.VerifyFailed, true

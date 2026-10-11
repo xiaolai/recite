@@ -478,3 +478,36 @@ func mustRead(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+// --verify off without --allow-unverified (design D18): the run succeeds, says on stderr that
+// verification was off, and the manifest still marks every chunk unverified; --strict-output
+// still refuses to write.
+// accept: VER-09#1
+func TestSayVerifyOffExits0AndMarksUnverified(t *testing.T) {
+	sch := manifestSchema(t)
+	m := newMultiEnv(t)
+	r := m.run(threeParagraphs, "-o", "off.wav", "--verify", "off")
+	if r.code != exitcode.OK || m.tr.Calls() != 0 {
+		t.Fatalf("off: code %d, %d transcriptions, stderr %q", r.code, m.tr.Calls(), r.stderr)
+	}
+	if !strings.Contains(r.stderr, "verification is off") || strings.Contains(r.stderr, "allow-unverified") ||
+		strings.Contains(r.stderr, "chunk c0001 unverified") {
+		t.Fatalf("off stderr: %q", r.stderr)
+	}
+	readWAV(t, m.path("off.wav"))
+	got := validManifest(t, sch, m.path("off.wav.json"))
+	if got.Summary.Unverified != 3 || got.Summary.Verified != 0 {
+		t.Fatalf("off manifest summary: %+v", got.Summary)
+	}
+	for _, c := range got.Chunks {
+		if c.Verified || c.State != "unverified" {
+			t.Fatalf("off manifest chunk %+v", c)
+		}
+	}
+	if r := m.run(threeParagraphs, "-o", "offstrict.wav", "--verify", "off", "--strict-output"); r.code != exitcode.VerifyFailed {
+		t.Fatalf("off + --strict-output: code %d", r.code)
+	}
+	if _, err := os.Stat(m.path("offstrict.wav")); !os.IsNotExist(err) {
+		t.Fatalf("off + --strict-output wrote the output: %v", err)
+	}
+}
