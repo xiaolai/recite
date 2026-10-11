@@ -9,4 +9,4 @@ AUTH-05#1 WP-3.3 manifest, rejected-take and usage-ledger artifacts in the canar
 AUTH-05#2 WP-1.3 the fake codex child leaking the canary via stderr, RPC errors and malformed JSON needs the codexapp client (WP-1.3 lists it)
 SPK-10#3 WP-1.6 each effort level renders live; needs the render function of SPK-01
 SPK-05#3 WP-1.6 the 87-take INSTR v2 qualification renders live; needs the render function of SPK-01
-TXT-11#3 WP-3.5 the corpus has three Chinese probe items whose numbers need TXT-12 (2026-10-11 live run: 47/51, failures listed in the WP-2.9 status)
+TXT-11#3 WP-3.5 owner decision: after WP-3.5, 47/51 first attempt and 48/51 verified; c0003 and c0021 are N-AMBIGUOUS by design (TXT-11#2) and c0017 is deliberately misspelled

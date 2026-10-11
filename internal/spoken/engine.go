@@ -136,8 +136,11 @@ func Normalize(s, lang string, o Options) (Result, error) {
 // TableFor returns the rule table for a language code, or nil.
 func TableFor(lang string) Table {
 	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(lang)), "-")
-	if base == "en" {
+	switch base {
+	case "en":
 		return English
+	case "zh":
+		return Chinese
 	}
 	return nil
 }
@@ -145,7 +148,7 @@ func TableFor(lang string) Table {
 // KnownRules lists every built-in rule ID, sorted.
 func KnownRules() []RuleID {
 	var ids []RuleID
-	for _, r := range English {
+	for _, r := range slices.Concat(English, Chinese) {
 		if !slices.Contains(ids, r.ID) {
 			ids = append(ids, r.ID)
 		}
@@ -381,7 +384,8 @@ func (b *builder) tryRules(rules []Rule, o *Options, limit int) bool {
 
 // padded returns m.Spoken with a space added on any side where its words would
 // otherwise touch a letter or digit ("St.&St." must become "Street and St.", not
-// "Streetand St."). Without this, a rewrite can glue words into new tokens that the
+// "Streetand St."). Chinese is written without spaces, so a side that is 汉字 is
+// never padded ("价格是一千", not "价格是 一千"). Without this, a rewrite can glue words into new tokens that the
 // next pass reads differently, and normalisation stops being idempotent.
 func (b *builder) padded(m Match) string {
 	out := m.Spoken
@@ -390,12 +394,12 @@ func (b *builder) padded(m Match) string {
 	}
 	first, _ := utf8.DecodeRuneInString(out)
 	last, _ := utf8.DecodeLastRuneInString(out)
-	if isWordRune(first) && b.spoken.Len() > 0 {
+	if isWordRune(first) && !isHan(first) && b.spoken.Len() > 0 {
 		if prev, _ := utf8.DecodeLastRuneInString(b.spoken.String()); isWordRune(prev) {
 			out = " " + out
 		}
 	}
-	if isWordRune(last) && m.End < len(b.display) {
+	if isWordRune(last) && !isHan(last) && m.End < len(b.display) {
 		if next, _ := utf8.DecodeRuneInString(b.display[m.End:]); isWordRune(next) {
 			out += " "
 		}

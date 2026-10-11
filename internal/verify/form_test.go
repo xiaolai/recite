@@ -9,14 +9,18 @@ import (
 // always be sliced out of the reference or the transcript.
 func FuzzFormBack(f *testing.F) {
 	for _, s := range []string{"", "In 2026, the fee rose from 3,000 yen.", "Meet at 3:15 p.m. in room 204.",
-		"Henry VIII, 1990s, $29.99, v1.2.3", "第1/2季度", "St. A"} {
-		f.Add(s, uint16(0), uint16(7))
+		"Henry VIII, 1990s, $29.99, v1.2.3", "第1/2季度", "St. A", "价格是¥1,280.50，增长了12.5%。"} {
+		f.Add(s, uint16(0), uint16(7), false)
 	}
-	f.Fuzz(func(t *testing.T, s string, a, b uint16) {
+	f.Fuzz(func(t *testing.T, s string, a, b uint16, zh bool) {
 		if !utf8.ValidString(s) {
 			return
 		}
-		fm := toForm(s, "en")
+		lang := "en"
+		if zh {
+			lang = "zh"
+		}
+		fm := toForm(s, lang)
 		n := len(fm.text) + 1
 		lo, hi := int(a)%n, int(b)%n
 		if lo > hi {

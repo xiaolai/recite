@@ -67,6 +67,16 @@ func TestQualifyEnglishSpokenForm(t *testing.T) {
 	if len(corpus) != 51 {
 		t.Fatalf("corpus has %d chunks, want 51", len(corpus))
 	}
+	qualifyCorpus(t, "TXT-11#3", "txt11", corpus, raw, 49)
+}
+
+// qualifyCorpus renders and verifies corpus, one chunk per item and one take each, in
+// budgeted shards (RECITE_SHARD); once every shard has run it requires minFirst items
+// verified on the first attempt and all of them within the attempt limit. Shard results
+// and transcripts go to $TMPDIR/recite-live/<tag>-<hash of raw>/.
+func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, raw []byte, minFirst int) {
+	t.Helper()
+	total := len(corpus)
 	set := realtime.DefaultSettings()
 	spec, err := set.SessionSpec()
 	if err != nil {
@@ -97,11 +107,15 @@ func TestQualifyEnglishSpokenForm(t *testing.T) {
 	if os.Getenv("RECITE_LIVE") == "" {
 		t.Skip("set RECITE_LIVE=1 to render and verify the corpus against the real service")
 	}
-	// The worst case of all 51 chunks is over one invocation's budget (plan §1.4), so the gate
+	// The worst case of all the chunks is over one invocation's budget (plan §1.4), so the gate
 	// runs in shards, one per invocation, each resumable; the last shard aggregates.
 	attempts := opts.MaxAttempts + opts.RequestExtraAttempts
 	shards := shard(tasks, attempts, liveBudget)
-	k, err := strconv.Atoi(os.Getenv("RECITE_SHARD"))
+	shard := os.Getenv("RECITE_SHARD")
+	if shard == "" && len(shards) == 1 {
+		shard = "1"
+	}
+	k, err := strconv.Atoi(shard)
 	if err != nil || k < 1 || k > len(shards) {
 		t.Fatalf("run each of the %d shards in its own invocation: RECITE_SHARD=1..%d", len(shards), len(shards))
 	}
@@ -114,7 +128,7 @@ func TestQualifyEnglishSpokenForm(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
-	dir := filepath.Join(os.TempDir(), "recite-live", fmt.Sprintf("txt11-%x", sum[:6]))
+	dir := filepath.Join(os.TempDir(), "recite-live", fmt.Sprintf("%s-%x", tag, sum[:6]))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -199,9 +213,10 @@ func TestQualifyEnglishSpokenForm(t *testing.T) {
 			t.Logf("%s %s, kept attempt %d, score %.3f: %q", o.ID, o.State, o.Final, o.Score, corpus[i])
 		}
 	}
-	t.Logf("%d/51 verified on the first attempt, %d/51 within the limit", first, verified)
-	if first < 49 || verified != 51 {
-		t.Fatalf("TXT-11#3 fails: %d/51 first-attempt (want ≥ 49), %d/51 verified (want 51)", first, verified)
+	t.Logf("%d/%d verified on the first attempt, %d/%d within the limit", first, total, verified, total)
+	if first < minFirst || verified != total {
+		t.Fatalf("%s fails: %d/%d first-attempt (want ≥ %d), %d/%d verified (want %d)",
+			bullet, first, total, minFirst, verified, total, total)
 	}
 }
 

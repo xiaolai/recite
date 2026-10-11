@@ -12,6 +12,7 @@ import (
 func TestRuleRegexpsAreAnchored(t *testing.T) {
 	for name, re := range map[string]*regexp.Regexp{
 		"phoneRe": phoneRe, "scaleRe": scaleRe, "monthRe": monthRe, "ampmRe": ampmRe,
+		"zhDateRe": zhDateRe, "zhTimeRe": zhTimeRe, "zhRatioRe": zhRatioRe, "zhPhoneRe": zhPhoneRe,
 	} {
 		parsed, err := syntax.Parse(re.String(), syntax.Perl)
 		if err != nil {

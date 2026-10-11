@@ -115,6 +115,9 @@ func FuzzSpoken(f *testing.F) {
 		"Henry VIII ruled in the 16th century; see Chapter IV.", "Call +1 (415) 555-0134.",
 		"The meeting is on 2026-10-11 at 3:45pm.", "It weighs 5kg, runs at 120km/h, and costs 3¥.",
 		"in 1999 -5 1,280.50 v1.2.3 3–5 10-12 12.5% C++ C# .NET iOS e.g. IV 3/4 #1",
+		"2026年10月11日下午3点45分，价格是¥1,280.50，增长了12.5%。", "请在iPhone 17上打开App Store，下载版本v2.0。",
+		"第1/2季度，温度是-5℃到30℃。", "¥10-20 -5~30℃ 10-20% 2026-10 3-5-7 1/0 第IV章 2个 2年级 v10.0.1版本",
+		"+86 13800138000 尾号1234 12:00:05 比分3:1 1+1=2 x ≥ 3 COVID-19 120km/h 1400000000人",
 	} {
 		f.Add(s)
 	}
@@ -123,7 +126,7 @@ func FuzzSpoken(f *testing.F) {
 			return // the decoder (TXT-01) rejects invalid UTF-8 before this stage
 		}
 		run(t, s, spoken.Options{})
-		// Idempotence is a property of the English rules; the test mark rule
+		// Idempotence is a property of the English and Chinese rules; the test mark rule
 		// speaks arbitrary text by design (marks are protected later, §7.8).
 		r, err := spoken.Normalize(s, "en", spoken.Options{})
 		if err != nil {
@@ -136,6 +139,18 @@ func FuzzSpoken(f *testing.F) {
 		}
 		if again.Spoken != r.Spoken {
 			t.Fatalf("not idempotent:\n in  %q\n one %q\n two %q", s, r.Spoken, again.Spoken)
+		}
+		zh, err := spoken.Normalize(s, "zh", spoken.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkMap(t, zh)
+		zhAgain, err := spoken.Normalize(zh.Spoken, "zh", spoken.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if zhAgain.Spoken != zh.Spoken {
+			t.Fatalf("zh not idempotent:\n in  %q\n one %q\n two %q", s, zh.Spoken, zhAgain.Spoken)
 		}
 	})
 }
@@ -200,7 +215,7 @@ func TestModeOffAndOtherLanguages(t *testing.T) {
 	for _, c := range []struct {
 		lang string
 		o    spoken.Options
-	}{{"en", spoken.Options{Mode: spoken.ModeOff}}, {"fr", spoken.Options{}}, {"zh", spoken.Options{}}, {"", spoken.Options{}}} {
+	}{{"en", spoken.Options{Mode: spoken.ModeOff}}, {"fr", spoken.Options{}}, {"ja", spoken.Options{}}, {"", spoken.Options{}}} {
 		r, err := spoken.Normalize(in, c.lang, c.o)
 		if err != nil {
 			t.Fatal(err)
