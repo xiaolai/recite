@@ -25,7 +25,7 @@ func noTools(string) (string, error) { return "", exec.ErrNotFound }
 
 // fakeEncoder installs an ffmpeg that records its argument vector, one argument per line, and
 // copies stdin to its last argument (or stdout for pipe:1). A loudness analysis pass (output
-// format null) is logged to args.log.measure instead, and prints loudnorm's JSON with an
+// format null) is appended to args.log.measure instead, ending in a "--" line, and prints loudnorm's JSON with an
 // input of -22 LUFS. It lives in a directory whose name a shell would split and expand.
 func fakeEncoder(t *testing.T) (look func(string) (string, error), args func() []string) {
 	t.Helper()
@@ -35,7 +35,7 @@ func fakeEncoder(t *testing.T) (look func(string) (string, error), args func() [
 	}
 	log, bin := filepath.Join(dir, "args.log"), filepath.Join(dir, "ffmpeg")
 	script := "#!/bin/sh\nfor a in \"$@\"; do if [ \"$a\" = null ]; then\n" +
-		"for b in \"$@\"; do printf '%s\\n' \"$b\"; done > \"$FAKE_FFMPEG_LOG.measure\"\ncat > /dev/null\n" +
+		"for b in \"$@\"; do printf '%s\\n' \"$b\"; done >> \"$FAKE_FFMPEG_LOG.measure\"\necho -- >> \"$FAKE_FFMPEG_LOG.measure\"\ncat > /dev/null\n" +
 		"printf '[Parsed_loudnorm_0]\\n{\\n\"input_i\" : \"-22.00\",\\n\"input_tp\" : \"-6.50\",\\n\"input_lra\" : \"3.20\",\\n" +
 		"\"input_thresh\" : \"-32.10\",\\n\"target_offset\" : \"0.40\"\\n}\\n' >&2\nexit 0\nfi; done\n" +
 		"for a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$FAKE_FFMPEG_LOG\"\n" +

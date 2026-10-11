@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os/exec"
 	"strconv"
@@ -95,17 +96,25 @@ func (m Measurement) Silent() bool { return m.I < loudnormMinI }
 // MeasureArgs is the ffmpeg argument vector of the first pass: it reads internal PCM on stdin
 // and prints loudnorm's JSON analysis to stderr. The log level must be info for the JSON.
 func MeasureArgs(l Loudness) []string {
-	t, _ := l.Target()
-	return []string{"-hide_banner", "-loglevel", "info", "-nostdin",
-		"-f", "s16le", "-ar", strconv.Itoa(SampleRate), "-ac", strconv.Itoa(Channels), "-i", "pipe:0",
-		"-af", fmt.Sprintf("loudnorm=I=%s:TP=%s:LRA=%s:print_format=json", num(t.I), num(t.TP), num(loudnessRange)),
-		"-f", "null", "-"}
+	return measureArgs(l, "-f", "s16le", "-ar", strconv.Itoa(SampleRate), "-ac", strconv.Itoa(Channels), "-i", "pipe:0")
 }
 
-// normalizeFilter is the second-pass filter: the first pass's measurement lets loudnorm apply
-// one linear gain when the true-peak ceiling allows it.
-func normalizeFilter(l Loudness, m Measurement) string {
+// MeasureFileArgs is [MeasureArgs] for the encoded file at path: the check that the encoder
+// kept the true peak under the ceiling.
+func MeasureFileArgs(l Loudness, path string) []string {
+	return measureArgs(l, "-i", ffmpegPath(path))
+}
+
+func measureArgs(l Loudness, input ...string) []string {
 	t, _ := l.Target()
+	args := append([]string{"-hide_banner", "-loglevel", "info", "-nostdin"}, input...)
+	return append(args, "-af", fmt.Sprintf("loudnorm=I=%s:TP=%s:LRA=%s:print_format=json", num(t.I), num(t.TP), num(loudnessRange)),
+		"-f", "null", "-")
+}
+
+// normalizeFilter is the second-pass filter toward t: the first pass's measurement lets
+// loudnorm apply one linear gain when the true-peak ceiling allows it.
+func normalizeFilter(t LoudnessTarget, m Measurement) string {
 	return fmt.Sprintf("loudnorm=I=%s:TP=%s:LRA=%s:measured_I=%s:measured_TP=%s:measured_LRA=%s:measured_thresh=%s:offset=%s:linear=true:print_format=none",
 		num(t.I), num(t.TP), num(loudnessRange), num(m.I), num(m.TP), num(m.LRA), num(m.Thresh), num(m.Offset))
 }
@@ -162,9 +171,18 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 
 // measure runs the first pass over p.
 func measure(ctx context.Context, e Encoding, p PCM) (Measurement, error) {
+	return runMeasure(ctx, e.Bin, MeasureArgs(e.Loudness), bytes.NewReader(p))
+}
+
+// measureFile analyses the encoded file at path.
+func measureFile(ctx context.Context, e Encoding, path string) (Measurement, error) {
+	return runMeasure(ctx, e.Bin, MeasureFileArgs(e.Loudness, path), nil)
+}
+
+func runMeasure(ctx context.Context, bin string, args []string, stdin io.Reader) (Measurement, error) {
 	var stderr tailBuffer
-	cmd := exec.CommandContext(ctx, e.Bin, MeasureArgs(e.Loudness)...)
-	cmd.Stdin, cmd.Stderr = bytes.NewReader(p), &stderr
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin, cmd.Stderr = stdin, &stderr
 	if err := cmd.Run(); err != nil {
 		tail := stderr.b[max(0, len(stderr.b)-maxToolStderr):]
 		return Measurement{}, fmt.Errorf("audio: ffmpeg loudness analysis failed: %w: %s", err, strings.TrimSpace(string(tail)))

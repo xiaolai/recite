@@ -175,7 +175,8 @@ func FFmpegChapterArgs(e Encoding, meta, out string) []string { return ffmpegArg
 // NormalizeArgs is [FFmpegArgs] with the second loudness pass applied, from the first pass's
 // measurement m (AUD-06).
 func NormalizeArgs(e Encoding, out string, m Measurement) []string {
-	return ffmpegArgs(e, "", out, normalizeFilter(e.Loudness, m))
+	t, _ := e.Loudness.Target()
+	return ffmpegArgs(e, "", out, normalizeFilter(t, m))
 }
 
 // ffmpegArgs builds every encoding command: meta adds a chapter input, filter the loudness pass.
@@ -272,23 +273,18 @@ func EncodeFile(ctx context.Context, e Encoding, p PCM, path string) error {
 			return err
 		}
 		defer cleanup()
-		filter := ""
-		if _, ok := e.Loudness.Target(); ok {
-			m, err := measure(ctx, e, p)
-			if err != nil {
-				return err
-			}
-			if !m.Silent() {
-				filter = normalizeFilter(e.Loudness, m)
-			}
+		target, ok := e.Loudness.Target()
+		if !ok {
+			return encodeFFmpeg(ctx, e, p, meta, path, "")
 		}
-		var stderr boundedBuffer
-		cmd := exec.CommandContext(ctx, e.Bin, ffmpegArgs(e, meta, path, filter)...)
-		cmd.Stdin, cmd.Stderr = bytes.NewReader(p), &stderr
-		if err := cmd.Run(); err != nil {
-			return toolError(ToolFFmpeg, err, &stderr)
+		m, err := measure(ctx, e, p)
+		if err != nil {
+			return err
 		}
-		return nil
+		if m.Silent() {
+			return encodeFFmpeg(ctx, e, p, meta, path, "")
+		}
+		return encodeUnderCeiling(ctx, e, p, meta, path, target, m)
 	case ToolAfconvert:
 		if _, ok := e.Loudness.Target(); ok {
 			return errors.New("audio: afconvert cannot normalise loudness")
@@ -296,6 +292,48 @@ func EncodeFile(ctx context.Context, e Encoding, p PCM, path string) error {
 		return afconvert(ctx, e, p, path)
 	}
 	return fmt.Errorf("audio: unknown encoder %q", e.Tool)
+}
+
+func encodeFFmpeg(ctx context.Context, e Encoding, p PCM, meta, path, filter string) error {
+	var stderr boundedBuffer
+	cmd := exec.CommandContext(ctx, e.Bin, ffmpegArgs(e, meta, path, filter)...)
+	cmd.Stdin, cmd.Stderr = bytes.NewReader(p), &stderr
+	if err := cmd.Run(); err != nil {
+		return toolError(ToolFFmpeg, err, &stderr)
+	}
+	return nil
+}
+
+// maxPeakPasses bounds the normalised encodes; peakStep is the margin added to each overshoot.
+const (
+	maxPeakPasses = 3
+	peakStep      = 0.1
+)
+
+// encodeUnderCeiling normalises p toward target and checks the encoded file: a lossy codec
+// (AAC, MP3, Opus) and resampling can lift the true peak above the ceiling loudnorm met on
+// the PCM. Each pass that overshoots lowers loudnorm's ceiling by the measured overshoot plus
+// peakStep and encodes again, so the file gives up only the headroom its codec needed. A file
+// still over the ceiling after maxPeakPasses is an error, never published.
+func encodeUnderCeiling(ctx context.Context, e Encoding, p PCM, meta, path string, target LoudnessTarget, m Measurement) error {
+	aim := target
+	for pass := 1; ; pass++ {
+		if err := encodeFFmpeg(ctx, e, p, meta, path, normalizeFilter(aim, m)); err != nil {
+			return err
+		}
+		got, err := measureFile(ctx, e, path)
+		if err != nil {
+			return err
+		}
+		if got.TP <= target.TP {
+			return nil
+		}
+		if pass == maxPeakPasses {
+			return fmt.Errorf("audio: the %s true peak is %.2f dBTP after %d passes, above the %s ceiling of %.1f dBTP",
+				e.Format, got.TP, pass, e.Loudness, target.TP)
+		}
+		aim.TP -= got.TP - target.TP + peakStep
+	}
 }
 
 // chapterFile writes ffmetadata text to a private temp directory: its path, or "" for no

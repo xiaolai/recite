@@ -31,7 +31,8 @@ func manifestLoudness(t *testing.T, path string) string {
 }
 
 // An encoded format defaults to podcast: ffmpeg first measures the assembly, then encodes it
-// with loudnorm fed the measurement, both as argument vectors. The manifest records the preset.
+// with loudnorm fed the measurement, then measures the encoded file to check its true peak,
+// all as argument vectors. The manifest records the preset.
 func TestSayLoudnessTwoPasses(t *testing.T) {
 	m := newMultiEnv(t)
 	look, args := fakeEncoder(t)
@@ -41,6 +42,9 @@ func TestSayLoudnessTwoPasses(t *testing.T) {
 		want  audio.Loudness
 	}{{nil, audio.LoudnessPodcast}, {[]string{"--loudness", "audiobook"}, audio.LoudnessAudiobook}} {
 		name := string(tc.want) + ".mp3"
+		if err := os.RemoveAll(os.Getenv("FAKE_FFMPEG_LOG") + ".measure"); err != nil {
+			t.Fatal(err)
+		}
 		r := m.run(append([]string{threeParagraphs, "-o", name, "--gap-paragraph", "300ms"}, tc.extra...)...)
 		if r.code != exitcode.OK {
 			t.Fatalf("%s: %+v", tc.want, r)
@@ -52,12 +56,19 @@ func TestSayLoudnessTwoPasses(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: no analysis pass: %v", tc.want, err)
 		}
-		if got := strings.Split(strings.TrimSuffix(string(measure), "\n"), "\n"); !slices.Equal(got, audio.MeasureArgs(tc.want)) {
-			t.Fatalf("%s: analysis args %q", tc.want, got)
-		}
 		got := args()
+		tmp := strings.TrimPrefix(got[len(got)-1], "file:")
+		passes := strings.Split(strings.TrimSuffix(string(measure), "--\n"), "--\n")
+		if len(passes) != 2 {
+			t.Fatalf("%s: %d analysis passes, want the assembly and the encoded file:\n%s", tc.want, len(passes), measure)
+		}
+		for i, want := range [][]string{audio.MeasureArgs(tc.want), audio.MeasureFileArgs(tc.want, tmp)} {
+			if got := strings.Split(strings.TrimSuffix(passes[i], "\n"), "\n"); !slices.Equal(got, want) {
+				t.Fatalf("%s: analysis pass %d args %q", tc.want, i+1, got)
+			}
+		}
 		e := audio.Encoding{Format: audio.FormatMP3, Rate: audio.SampleRate, Tool: audio.ToolFFmpeg, Loudness: tc.want}
-		want := audio.NormalizeArgs(e, strings.TrimPrefix(got[len(got)-1], "file:"), audio.Measurement{I: -22, TP: -6.5, LRA: 3.2, Thresh: -32.1, Offset: 0.4})
+		want := audio.NormalizeArgs(e, tmp, audio.Measurement{I: -22, TP: -6.5, LRA: 3.2, Thresh: -32.1, Offset: 0.4})
 		if !slices.Equal(got, want) {
 			t.Fatalf("%s: encode args\n got %q\nwant %q", tc.want, got, want)
 		}
