@@ -13,7 +13,7 @@ import (
 
 // CanonVersion identifies the canonicaliser's behaviour. Bump it on any change
 // to Canon's output: cache keys and verification provenance record it.
-const CanonVersion = 3
+const CanonVersion = 4
 
 // Canon canonicalises s into comparison tokens (design §8.3): NFKC and width
 // folding, abbreviation expansion, lower case, numbers to English words (one
@@ -49,6 +49,9 @@ func equalTokens(a, b []string) bool {
 }
 
 func canon(s string, joinHyphens bool) []string {
+	// An invalid byte ends up a separator anyway; making it one first keeps the number pass
+	// from stalling on it ("\xf7¾" would keep "3 4" as digits, and a second pass read them).
+	s = strings.ToValidUTF8(s, " ")
 	s = width.Fold.String(norm.NFKC.String(s))
 	// Numbers first: digits glued to letters ("Mr00") must not hide a word
 	// boundary from the abbreviation pass, or a second pass would differ.
