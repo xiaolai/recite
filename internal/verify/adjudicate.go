@@ -51,9 +51,6 @@ const (
 	DefaultRequestExtraAttempts = 1
 )
 
-// STTPadding is the silence added on each side of a take before transcription (design §8.2).
-const STTPadding = 300 * time.Millisecond
-
 // Chunk is what adjudication needs to know about one chunk.
 type Chunk struct {
 	ID          string
@@ -227,10 +224,9 @@ func (r ChunkResult) keep(s State, n int) ChunkResult {
 // content-word mismatch; the higher score counts, and a content-word mismatch heard twice at
 // the same position rejects. Every guard applies to every transcription.
 func verifyTake(ctx context.Context, c Chunk, th Thresholds, hint stt.Hint, tr stt.Transcriber, a *Attempt, calls *int) error {
-	padded := append(append(audio.Silence(STTPadding), a.PCM...), audio.Silence(STTPadding)...)
 	var first []mismatch
 	for pass := 1; pass <= 2; pass++ {
-		t, err := tr.Transcribe(ctx, padded, hint)
+		t, err := tr.Transcribe(ctx, a.PCM, hint) // the STT client adds the silence padding (design §8.2)
 		*calls++
 		if err != nil {
 			return fmt.Errorf("transcribe: %w", err)

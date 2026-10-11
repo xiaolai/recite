@@ -546,3 +546,18 @@ func TestAdjudicateRejectsBadOptions(t *testing.T) {
 		t.Error("chunk without an estimate accepted")
 	}
 }
+
+// The STT clients pad each take with silence themselves (design §8.2), so adjudication must
+// hand them the trimmed take as is; padding here too doubled the silence.
+func TestTranscriberGetsTheUnpaddedTake(t *testing.T) {
+	c := chunk(sixty("approved"))
+	tr := sttWith(sttfake.Text(c.Spoken))
+	r := run(t, c, verify.DefaultOptions(), synthWith(c), tr)
+	calls := tr.Calls()
+	if r.State != verify.StateVerified || len(calls) != 1 {
+		t.Fatalf("state %s with %d STT calls", r.State, len(calls))
+	}
+	if calls[0].Bytes != len(r.PCM) {
+		t.Fatalf("transcriber got %d bytes, want the %d-byte trimmed take", calls[0].Bytes, len(r.PCM))
+	}
+}
