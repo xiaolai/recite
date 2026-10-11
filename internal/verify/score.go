@@ -43,6 +43,17 @@ type Result struct {
 // MetricCER. score = 1 − errors / reference length, clamped to [0, 1]; an empty reference
 // scores 1 against an empty transcript and 0 against anything else.
 func Score(reference, hypothesis string, metric text.Metric) Result {
+	res, _ := score(reference, hypothesis, metric)
+	return res
+}
+
+// alignment is a scored alignment with its canonical units, for the guards.
+type alignment struct {
+	ref, hyp []unit
+	steps    []step
+}
+
+func score(reference, hypothesis string, metric text.Metric) (Result, alignment) {
 	ref, hyp := units(reference, metric), units(hypothesis, metric)
 	steps := align(texts(ref), texts(hyp))
 	res := Result{Metric: metric, RefLen: len(ref)}
@@ -60,7 +71,7 @@ func Score(reference, hypothesis string, metric text.Metric) Result {
 		res.Score = max(0, min(1, 1-float64(res.Errors)/float64(res.RefLen)))
 	}
 	res.Edits = edits(steps, ref, hyp, reference, hypothesis)
-	return res
+	return res, alignment{ref: ref, hyp: hyp, steps: steps}
 }
 
 // ScriptMetric chooses the metric for a chunk from its dominant script.

@@ -84,8 +84,9 @@ func Keywords(chunk string, lexicon []string) []string {
 }
 
 type keywordToken struct {
-	text    string
-	initial bool // first word of the chunk or of a sentence
+	text       string
+	initial    bool // first word of the chunk or of a sentence
+	start, end int  // byte offsets in the source
 }
 
 // keywordTokens splits s into words: runs of letters, digits and marks, with '.', '-' and
@@ -97,7 +98,7 @@ func keywordTokens(s string) []keywordToken {
 	start := -1
 	emit := func(end int) {
 		if start >= 0 {
-			out = append(out, keywordToken{text: s[start:end], initial: initial})
+			out = append(out, keywordToken{text: s[start:end], initial: initial, start: start, end: end})
 			initial = false
 			start = -1
 		}
@@ -107,7 +108,7 @@ func keywordTokens(s string) []keywordToken {
 		switch {
 		case isSyllabicLetter(r):
 			emit(i)
-			out = append(out, keywordToken{text: s[i : i+size], initial: initial})
+			out = append(out, keywordToken{text: s[i : i+size], initial: initial, start: i, end: i + size})
 			initial = false
 		case isWordChar(r):
 			if start < 0 {

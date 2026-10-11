@@ -197,7 +197,8 @@ func (ss *scriptedSession) Close() error {
 var tagMagic = []byte("FAKEPCM:")
 
 // TaggedPCM returns d of PCM whose leading bytes identify chunkID and attempt, so a scripted
-// transcriber can tell takes apart. The tag is not silence; it is a fake, not audio.
+// transcriber can tell takes apart. The rest is a ±4096 square wave (−18 dBFS), so silence
+// trimming keeps the whole take as it would keep speech.
 func TaggedPCM(chunkID string, attempt int, d time.Duration) []byte {
 	n := int(d.Seconds()*BytesPerSecond) &^ 1
 	tag := fmt.Appendf(append([]byte(nil), tagMagic...), "%s#%d;", chunkID, attempt)
@@ -208,6 +209,12 @@ func TaggedPCM(chunkID string, attempt int, d time.Duration) []byte {
 		n = len(tag)
 	}
 	pcm := make([]byte, n)
+	for i := 0; i+1 < n; i += 2 {
+		pcm[i+1] = 0x10 // +4096 little-endian
+		if (i/2)%2 == 1 {
+			pcm[i+1] = 0xF0 // −4096
+		}
+	}
 	copy(pcm, tag)
 	return pcm
 }
