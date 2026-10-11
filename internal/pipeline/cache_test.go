@@ -551,7 +551,7 @@ func TestCacheUnverifiedTakeReattemptedUnlessAllowed(t *testing.T) {
 }
 
 // A take kept under --verify off was never transcribed, so a later normal or strict run must
-// verify it before calling it verified (design D18); it reuses the audio and renders nothing.
+// verify it before calling it verified (design D19); it reuses the audio and renders nothing.
 func TestCacheVerifyOffTakesAreReverifiedLater(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ts := keyed(tasks(4), baseSettings)

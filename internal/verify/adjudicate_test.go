@@ -512,7 +512,7 @@ func TestOutcomeTable(t *testing.T) {
 	}
 }
 
-// The off-mode table (design D18, VER-09): verification was not asked for, so a run whose
+// The off-mode table (design D19, VER-09): verification was not asked for, so a run whose
 // every chunk has an eligible take succeeds; --strict-output still refuses to write, and a
 // chunk with no eligible take still fails. Normal and strict mode keep the table above.
 // accept: VER-09#1

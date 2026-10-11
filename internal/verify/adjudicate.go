@@ -273,7 +273,7 @@ func verifyTake(ctx context.Context, c Chunk, th Thresholds, hint stt.Hint, tr s
 }
 
 // OutputPolicy is --allow-unverified and --strict-output (VER-09), and whether verification
-// was turned off (--verify off), which changes the table (design D18).
+// was turned off (--verify off), which changes the table (design D19).
 type OutputPolicy struct {
 	AllowUnverified bool
 	StrictOutput    bool

@@ -479,7 +479,7 @@ func mustRead(t *testing.T, p string) string {
 	return string(b)
 }
 
-// --verify off without --allow-unverified (design D18): the run succeeds, says on stderr that
+// --verify off without --allow-unverified (design D19): the run succeeds, says on stderr that
 // verification was off, and the manifest still marks every chunk unverified; --strict-output
 // still refuses to write.
 // accept: VER-09#1
