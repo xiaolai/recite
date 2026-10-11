@@ -306,6 +306,11 @@ func decodeDone(typ string, r *wireResponse) (Event, error) {
 	if r.ID == nil {
 		return nil, missing(typ, "response.id")
 	}
+	switch st := ResponseStatus(*r.Status); st {
+	case StatusCompleted, StatusFailed, StatusIncomplete, StatusCancelled:
+	default:
+		return nil, protocolError(typ, fmt.Sprintf("unknown response.status %q", st))
+	}
 	ev := ResponseDone{ResponseID: *r.ID, Status: ResponseStatus(*r.Status), Metadata: r.Metadata}
 	if r.StatusDetails != nil {
 		ev.StatusReason = r.StatusDetails.Reason

@@ -93,6 +93,25 @@ func TestResponseDoneWithoutStatusIsProtocol(t *testing.T) {
 	}
 }
 
+// A status outside the four documented values is as unusable as a missing one: the take
+// cannot be judged, so it must fail loud (retried on a fresh session, with an event dump)
+// instead of reaching the status guard as a silent reject.
+func TestResponseDoneWithUnknownStatusIsProtocol(t *testing.T) {
+	for _, status := range []string{``, `in_progress`, `Completed`} {
+		_, err := realtime.DecodeEvent([]byte(`{"type":"response.done","response":{"id":"resp_1","status":"` + status + `"}}`))
+		wantClass(t, err, openai.ClassProtocol)
+		if got := err.Error(); !strings.Contains(got, "response.status") {
+			t.Fatalf("status %q: error does not name the field: %v", status, err)
+		}
+	}
+	for _, status := range []string{"completed", "failed", "incomplete", "cancelled"} {
+		ev, err := realtime.DecodeEvent([]byte(`{"type":"response.done","response":{"id":"resp_1","status":"` + status + `"}}`))
+		if err != nil || ev.(realtime.ResponseDone).Status != realtime.ResponseStatus(status) {
+			t.Fatalf("status %q: %v, %v", status, ev, err)
+		}
+	}
+}
+
 func TestMissingRequiredFieldsAreProtocol(t *testing.T) {
 	for _, raw := range []string{
 		`not json`,
