@@ -72,7 +72,9 @@ type q10Summary struct {
 //	RECITE_LIVE=1 RECITE_SHARD=k go test -tags qualify -run TestQ10EffortExperiment -count=1 -v ./internal/spoken
 //
 // Results go to $TMPDIR/recite-live/q10-<evidence ID>/: shard-k-of-n.json per shard, then
-// records.json, summary.json and summary.md once every shard has run.
+// records.json, summary.json and summary.md once every shard has run. The committed report
+// built from them is dev-docs/spikes/q10-effort.md.
+// accept: SPK-11#6
 func TestQ10EffortExperiment(t *testing.T) {
 	raw, err := os.ReadFile("testdata/q10-hard.txt")
 	if err != nil {
