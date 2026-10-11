@@ -1,0 +1,11 @@
+# Bullets completed after their feature's WP (implementation plan §1.7).
+# Format: <BULLET-ID> <WP-id> <reason>. A deferral is exempt only while its WP is not DONE.
+# Where a §1.7 row covers part of a bullet, the bullet is listed against the later WP.
+NET-05#1 WP-1.4 WebSocket close-code and error-event rows need NET-03/NET-04
+CLI-03#1 WP-2.8 codes 5 (WP-2.6), 6 and 130 (WP-2.8) need verification, retries, cancellation
+RUN-03#1 WP-3.2 verified takes present in the cache need RUN-04
+TXT-02#3 WP-2.2 G-CONTROL findings need TXT-09
+TXT-14#2 WP-2.6 extra attempt only on flagged chunks needs VER-08
+TXT-11#3 WP-2.9 live verification of the normalised corpus needs assembly and verification
+VER-02#2 WP-3.3 fallback recorded in the manifest needs OUT-02
+AUTH-05#1 WP-3.3 manifest, rejected-take and usage-ledger artifacts in the canary search need OUT-02, OUT-06, OBS-03

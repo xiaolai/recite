@@ -1,4 +1,9 @@
-.PHONY: build test
+# Tool versions are pinned here and run with `go run`, so nothing is installed globally.
+GOLANGCI_LINT := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+GOVULNCHECK   := golang.org/x/vuln/cmd/govulncheck@v1.9.0
+FUZZTIME      := 60s
+
+.PHONY: build test check fuzz bench live qualify calibrate
 
 build:
 	go build -o bin/recite ./cmd/recite
@@ -6,4 +11,28 @@ build:
 test:
 	go test -race ./...
 
-# WP-0.2 adds: check, fuzz, bench, live, qualify, calibrate.
+# The merge gate (FND-03). Each recipe line fails the target on a non-zero exit.
+check:
+	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt -l: unformatted files:"; echo "$$out"; exit 1; fi
+	go vet ./...
+	go run $(GOLANGCI_LINT) run ./...
+	go test -race ./...
+	go run $(GOVULNCHECK) ./...
+	go run ./tools/acceptcheck
+
+# Extended fuzzing: FUZZTIME per Fuzz* target, one target at a time.
+fuzz:
+	@set -e; for pkg in $$(go list ./...); do \
+		list="$$(go test -list '^Fuzz' $$pkg)"; \
+		for f in $$(printf '%s\n' "$$list" | grep '^Fuzz' || true); do \
+			echo "fuzz $$pkg $$f"; \
+			go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) $$pkg; \
+		done; \
+	done
+
+bench:
+	go test -run '^$$' -bench . -benchmem ./...
+
+# Suites against the real service; never part of check.
+live qualify calibrate:
+	RECITE_LIVE=1 go test -tags $@ -run . -count=1 ./...
