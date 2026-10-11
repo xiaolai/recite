@@ -113,16 +113,31 @@ func enAbbrev(s string, i int, _ *Options) (Match, bool) {
 		return Match{End: j, Spoken: w}
 	}
 	switch {
-	case strings.HasPrefix(rest, "St."):
+	case strings.HasPrefix(rest, "St.") && tokenEnd(s, i+3):
+		// Design §7.7: Saint before a name, Street after one. A name on both sides
+		// ("Main St. The…") is ambiguous; a capitalised sentence-initial word is no name.
 		j := i + 3
-		if capitalised(nextWord(s, j)) && j < len(s) && s[j] == ' ' {
-			return Match{End: j, Spoken: "Saint"}, true
+		nameAfter := capitalised(nextWord(s, j)) && j < len(s) && s[j] == ' '
+		p := prevWord(s, i)
+		// "0A.and" or "A.andand.": only the last dot-separated piece is the word before.
+		p = strings.TrimRight(p, ".")
+		if k := strings.LastIndexByte(p, '.'); k >= 0 {
+			p = p[k+1:]
 		}
-		if p := prevWord(s, i); p != "" && (capitalised(p) || isDigit(p[0])) {
+		// A capitalised word that does not start the sentence is a name; a digit or a
+		// sentence-initial word only supports Street when no name follows.
+		nameBefore := p != "" && capitalised(p) && !sentenceInitial(s, i)
+		streetBefore := p != "" && (capitalised(p) || isDigit(p[0]))
+		switch {
+		case nameAfter && nameBefore:
+			return Match{End: j, Ambiguous: "Saint or Street: a name on both sides"}, true
+		case nameAfter:
+			return Match{End: j, Spoken: "Saint"}, true
+		case streetBefore:
 			return keepStop(j, "Street"), true
 		}
 		return Match{End: j, Ambiguous: "Saint or Street, with no name next to it"}, true
-	case strings.HasPrefix(rest, "Dr."):
+	case strings.HasPrefix(rest, "Dr.") && tokenEnd(s, i+3):
 		j := i + 3
 		if j < len(s) && s[j] == ' ' && capitalised(nextWord(s, j)) {
 			return Match{End: j, Spoken: "Doctor"}, true

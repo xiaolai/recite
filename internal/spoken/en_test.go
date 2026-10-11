@@ -167,3 +167,24 @@ func TestDateStyles(t *testing.T) {
 		}
 	}
 }
+
+// accept: TXT-11#2
+func TestSaintStreetBothSidesIsAmbiguous(t *testing.T) {
+	cases := []struct {
+		in, want  string
+		ambiguous int
+	}{
+		{"He lives on Main St. The shop is closed.", "He lives on Main St. The shop is closed.", 1},
+		{"Visit St. Paul today.", "Visit Saint Paul today.", 0},
+		{"She lives on Elm St. near the park.", "She lives on Elm Street near the park.", 0},
+	}
+	for _, c := range cases {
+		r, err := spoken.Normalize(c.in, "en", spoken.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Spoken != c.want || len(r.Findings) != c.ambiguous {
+			t.Errorf("%q → %q (%d ambiguous); want %q (%d)", c.in, r.Spoken, len(r.Findings), c.want, c.ambiguous)
+		}
+	}
+}

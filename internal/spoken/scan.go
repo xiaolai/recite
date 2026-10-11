@@ -214,3 +214,55 @@ func pad(s string, i, j int, words string) string {
 	}
 	return words
 }
+
+// sentenceInitial reports whether the word before position i starts a sentence: only
+// spaces, or a sentence-ending punctuation mark, precede it.
+func sentenceInitial(s string, i int) bool {
+	j := i
+	for j > 0 && s[j-1] == ' ' {
+		j--
+	}
+	k := j
+	for k > 0 {
+		r, n := utf8.DecodeLastRuneInString(s[:k])
+		if !isWordRune(r) && r != '.' {
+			break
+		}
+		k -= n
+	}
+	for k > 0 && (s[k-1] == ' ' || s[k-1] == '\n') {
+		k--
+	}
+	if k == 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(s[:k])
+	if r == '.' && abbreviationBefore(s, k-1) {
+		return false // "St. James": the period ends an abbreviation, not a sentence
+	}
+	return strings.ContainsRune(".!?。！？", r)
+}
+
+// abbreviationBefore reports whether the period at s[dot] ends a title or street
+// abbreviation such as St., Dr., Mr., Mrs., Ms. or No.
+func abbreviationBefore(s string, dot int) bool {
+	k := dot
+	for k > 0 && isWordRune(rune(s[k-1])) && s[k-1] < utf8.RuneSelf {
+		k--
+	}
+	switch s[k:dot] {
+	case "St", "Dr", "Mr", "Mrs", "Ms", "No", "Mt", "Ft", "Jr", "Sr":
+		return true
+	}
+	return false
+}
+
+// tokenEnd reports whether position j ends a standalone token: the end of the text, or a
+// rune that is neither a letter nor a digit. "St." in "St.a" or "St.0" is not a token.
+func tokenEnd(s string, j int) bool {
+	if j >= len(s) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(s[j:])
+	return !isWordRune(r)
+}

@@ -85,6 +85,7 @@ type Finding struct {
 	Col    int
 	Text   string
 	Reason string
+	off    int // byte offset in the display text (the spoken-form pass input while running)
 }
 
 // String is the one-line report form, matching the guard's.
@@ -160,10 +161,36 @@ func Run(s string, t Table, o Options) (Result, error) {
 	if err := o.validate(len(s), s); err != nil {
 		return Result{}, err
 	}
+	// Rules read their neighbours in the input while other rules rewrite those
+	// neighbours, so one pass is not idempotent ("A St. No. 0": the next word becomes
+	// "number" and the St. decision changes). Run passes until the output is stable and
+	// compose the span maps, so the result is a fixed point by construction.
+	res := runOnce(s, t, o)
+	for pass := 1; pass < maxPasses; pass++ {
+		next := runOnce(res.Spoken, t, Options{Mode: o.Mode, Disabled: o.Disabled, DateStyle: o.DateStyle,
+			Protected: mapProtected(o.Protected, res.Segments)})
+		if next.Spoken == res.Spoken {
+			res.Findings = mapFindings(next.Findings, res)
+			return res, nil
+		}
+		res = Result{Display: s, Spoken: next.Spoken, Segments: compose(res.Segments, next.Segments)}
+	}
+	// No fixed point within maxPasses: report the last pass's ambiguities and stop.
+	last := runOnce(res.Spoken, t, Options{Mode: o.Mode, Disabled: o.Disabled, DateStyle: o.DateStyle,
+		Protected: mapProtected(o.Protected, res.Segments)})
+	res.Findings = mapFindings(last.Findings, res)
+	return res, nil
+}
+
+// maxPasses bounds the fixed-point loop; real text settles in two or three.
+const maxPasses = 8
+
+// runOnce is one left-to-right pass of the rules over s.
+func runOnce(s string, t Table, o Options) Result {
 	b := builder{display: s}
 	if o.Mode == ModeOff || len(t) == 0 {
 		b.copy(len(s))
-		return b.result(), nil
+		return b.result()
 	}
 	rules := make([]Rule, 0, len(t))
 	for _, r := range t {
@@ -188,7 +215,105 @@ func Run(s string, t Table, o Options) (Result, error) {
 			b.copy(b.pos + n)
 		}
 	}
-	return b.result(), nil
+	return b.result()
+}
+
+// compose maps display→s2 from l1 (display→s1) and l2 (s1→s2). Segments of both lists
+// are grouped until their s1 boundaries coincide; each group becomes one segment.
+func compose(l1, l2 []Segment) []Segment {
+	var out []Segment
+	i, j := 0, 0
+	dispEnd, spokEnd := 0, 0
+	for i < len(l1) || j < len(l2) {
+		gi, gj := i, j
+		end := -1
+		if i < len(l1) {
+			end = l1[i].Spoken.End
+			i++
+		}
+		if j < len(l2) {
+			end = max(end, l2[j].Display.End)
+			j++
+		}
+		for grown := true; grown; {
+			grown = false
+			for i < len(l1) && (l1[i].Spoken.Start < end || l1[i].Spoken.End <= end && l1[i].Spoken.Start == end && l1[i].Spoken.Start == l1[i].Spoken.End) {
+				end = max(end, l1[i].Spoken.End)
+				i++
+				grown = true
+			}
+			for j < len(l2) && (l2[j].Display.Start < end || l2[j].Display.End <= end && l2[j].Display.Start == end && l2[j].Display.Start == l2[j].Display.End) {
+				end = max(end, l2[j].Display.End)
+				j++
+				grown = true
+			}
+		}
+		seg := Segment{Display: Range{dispEnd, dispEnd}, Spoken: Range{spokEnd, spokEnd}}
+		if gi < i {
+			seg.Display = Range{l1[gi].Display.Start, l1[i-1].Display.End}
+		}
+		if gj < j {
+			seg.Spoken = Range{l2[gj].Spoken.Start, l2[j-1].Spoken.End}
+		}
+		var rules []string
+		for _, g := range append(append([]Segment{}, l1[gi:i]...), l2[gj:j]...) {
+			if g.Rule != "" && !slices.Contains(rules, string(g.Rule)) {
+				rules = append(rules, string(g.Rule))
+			}
+		}
+		seg.Rule = RuleID(strings.Join(rules, "+"))
+		dispEnd, spokEnd = seg.Display.End, seg.Spoken.End
+		out = append(out, seg)
+	}
+	return out
+}
+
+// mapProtected carries protected display ranges into the coordinates of a spoken form.
+// Protected spans are copied verbatim, so they sit inside verbatim segments.
+func mapProtected(prot []Range, segs []Segment) []Range {
+	var out []Range
+	for _, p := range prot {
+		out = append(out, Range{toSpoken(p.Start, segs), toSpoken(p.End, segs)})
+	}
+	return out
+}
+
+func toSpoken(off int, segs []Segment) int {
+	for _, sg := range segs {
+		if off >= sg.Display.Start && off <= sg.Display.End && sg.Rule == "" {
+			return sg.Spoken.Start + off - sg.Display.Start
+		}
+	}
+	for _, sg := range segs {
+		if off <= sg.Display.Start {
+			return sg.Spoken.Start
+		}
+	}
+	if n := len(segs); n > 0 {
+		return segs[n-1].Spoken.End
+	}
+	return 0
+}
+
+// mapFindings moves findings from spoken-form coordinates back to the display text.
+func mapFindings(fs []Finding, r Result) []Finding {
+	out := make([]Finding, 0, len(fs))
+	for _, f := range fs {
+		d := 0
+		for _, sg := range r.Segments {
+			if f.off >= sg.Spoken.Start && f.off < max(sg.Spoken.End, sg.Spoken.Start+1) {
+				d = sg.Display.Start
+				if sg.Rule == "" {
+					d += f.off - sg.Spoken.Start
+				}
+				break
+			}
+		}
+		f.Line, f.Col = position(r.Display, d)
+		f.off = d
+		out = append(out, f)
+	}
+	return out
 }
 
 func (o *Options) validate(n int, s string) error {
@@ -241,17 +366,41 @@ func (b *builder) tryRules(rules []Rule, o *Options, limit int) bool {
 		if m.Ambiguous != "" {
 			line, col := position(b.display, b.pos)
 			b.findings = append(b.findings, Finding{Code: AmbiguousCode, Rule: r.ID, Line: line, Col: col,
-				Text: b.display[b.pos:m.End], Reason: m.Ambiguous})
+				Text: b.display[b.pos:m.End], Reason: m.Ambiguous, off: b.pos})
 			b.copy(m.End)
 			return true
 		}
 		start := b.spoken.Len()
-		b.spoken.WriteString(m.Spoken)
+		b.spoken.WriteString(b.padded(m))
 		b.segs = append(b.segs, Segment{Display: Range{b.pos, m.End}, Spoken: Range{start, b.spoken.Len()}, Rule: r.ID})
 		b.pos = m.End
 		return true
 	}
 	return false
+}
+
+// padded returns m.Spoken with a space added on any side where its words would
+// otherwise touch a letter or digit ("St.&St." must become "Street and St.", not
+// "Streetand St."). Without this, a rewrite can glue words into new tokens that the
+// next pass reads differently, and normalisation stops being idempotent.
+func (b *builder) padded(m Match) string {
+	out := m.Spoken
+	if out == "" {
+		return out
+	}
+	first, _ := utf8.DecodeRuneInString(out)
+	last, _ := utf8.DecodeLastRuneInString(out)
+	if isWordRune(first) && b.spoken.Len() > 0 {
+		if prev, _ := utf8.DecodeLastRuneInString(b.spoken.String()); isWordRune(prev) {
+			out = " " + out
+		}
+	}
+	if isWordRune(last) && m.End < len(b.display) {
+		if next, _ := utf8.DecodeRuneInString(b.display[m.End:]); isWordRune(next) {
+			out += " "
+		}
+	}
+	return out
 }
 
 // copy copies the display text up to end as written, extending the previous
