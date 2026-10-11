@@ -26,6 +26,7 @@ var reservedKeys = map[string]string{
 	"emotion":    "delivery presets, SPK-07, M4",
 	"style":      "delivery style, SPK-07, M4",
 	"loudness":   "loudness normalisation, AUD-06",
+	"voices":     "dialogue speaker map, TXT-06, M5",
 }
 
 // guardKey is the [guard] key of a code's per-code action: the code without "G-", in lower
@@ -52,11 +53,13 @@ func settingSchema(getenv func(string) string, modelUnchecked bool) *config.Sche
 	gaps := audio.DefaultGaps()
 	keys := []config.Key{
 		{Name: config.ProfileKey, Flag: "profile", Env: "RECITE_PROFILE", NoFile: true},
-		{Name: "voice", Default: realtime.DefaultVoice, Flag: "voice", Env: "RECITE_VOICE", Check: check(realtime.ParseVoice)},
+		{Name: titleKey, NoFile: true, FrontMatter: true},
+		{Name: "voice", Default: realtime.DefaultVoice, Flag: "voice", Env: "RECITE_VOICE", FrontMatter: true, Check: check(realtime.ParseVoice)},
 		{Name: "model", Default: realtime.DefaultModel, Flag: "model", Env: "RECITE_MODEL",
 			Check: func(s string) error { _, err := realtime.ParseModel(s, modelUnchecked); return err }},
-		{Name: "effort", Default: string(realtime.DefaultEffort), Flag: "effort", Env: "RECITE_EFFORT", Check: check(realtime.ParseEffort)},
-		{Name: "speed", Default: "1.0", Flag: "speed", Env: "RECITE_SPEED", Check: check(realtime.ParseSpeed)},
+		{Name: "effort", Default: string(realtime.DefaultEffort), Flag: "effort", Env: "RECITE_EFFORT", FrontMatter: true, Check: check(realtime.ParseEffort)},
+		{Name: "speed", Default: "1.0", Flag: "speed", Env: "RECITE_SPEED", FrontMatter: true, Check: check(realtime.ParseSpeed)},
+		{Name: langKey, NoFile: true, FrontMatter: true, Check: checkLang},
 		{Name: "jobs", Default: strconv.Itoa(pipeline.DefaultJobs), Flag: "jobs", Env: "RECITE_JOBS", Check: intIn(1, pipeline.MaxJobs)},
 		{Name: "verify.mode", Default: string(verify.ModeNormal), Flag: "verify", Check: check(verify.ParseMode)},
 		{Name: "verify.max_attempts", Default: strconv.Itoa(verify.DefaultMaxAttempts), Flag: "max-attempts", Check: intIn(1, 1<<20)},
@@ -137,7 +140,7 @@ func (c *CLI) configPath() (path string, required bool) {
 // writes each value that did not come from a flag or a default into its flag, so the
 // command's existing flag parsing is the single place a value is interpreted. Every error is
 // a usage error.
-func (c *CLI) resolveSettings(fs *flag.FlagSet) (config.Settings, error) {
+func (c *CLI) resolveSettings(fs *flag.FlagSet, fm *frontMatterSource) (config.Settings, error) {
 	unchecked := false
 	if f := fs.Lookup("model-unchecked"); f != nil {
 		unchecked = f.Value.String() == "true"
@@ -167,7 +170,11 @@ func (c *CLI) resolveSettings(fs *flag.FlagSet) (config.Settings, error) {
 	if err != nil {
 		return config.Settings{}, err
 	}
-	st, err := config.Resolve(config.Input{Schema: schema, User: user, Getenv: c.Getenv, Flags: flags})
+	fmValues, err := fm.values(schema)
+	if err != nil {
+		return config.Settings{}, err
+	}
+	st, err := config.Resolve(config.Input{Schema: schema, User: user, FrontMatter: fmValues, Getenv: c.Getenv, Flags: flags})
 	if err != nil {
 		return config.Settings{}, err
 	}

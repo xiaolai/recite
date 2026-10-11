@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/xiaolai/recite/internal/config"
+	"github.com/xiaolai/recite/internal/text"
 )
 
 // setupConfig is `config show|path` (CLI-10). It takes every setting flag of `say`, so
@@ -16,6 +17,8 @@ import (
 func setupConfig(fs *flag.FlagSet, c *CLI) func([]string) int {
 	var all settingFlags
 	all.register(fs)
+	var input string
+	fs.StringVar(&input, "input", "", "show the settings for the input `FILE`, with its Markdown front matter")
 	return func(args []string) int {
 		if len(args) != 1 {
 			c.errorf("recite config: takes one subcommand: show or path")
@@ -23,7 +26,7 @@ func setupConfig(fs *flag.FlagSet, c *CLI) func([]string) int {
 		}
 		switch args[0] {
 		case "show":
-			return c.configShow(fs)
+			return c.configShow(fs, &all.tf, input)
 		case "path":
 			return c.configPathCmd()
 		}
@@ -40,8 +43,20 @@ type settingRow struct {
 	Origin string `json:"origin,omitempty"`
 }
 
-func (c *CLI) configShow(fs *flag.FlagSet) int {
-	st, err := c.resolveSettings(fs)
+func (c *CLI) configShow(fs *flag.FlagSet, tf *textFlags, input string) int {
+	var fm *frontMatterSource
+	if input != "" {
+		pre, code := c.prereadMarkdown("recite config show", tf, text.Source{File: input, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, input)
+		if code != ExitOK {
+			return code
+		}
+		if pre == nil {
+			c.errorf("recite config show: --input %s is not Markdown, so it has no front matter (use --input-format markdown)", input)
+			return ExitUsage
+		}
+		fm = pre.frontMatter()
+	}
+	st, err := c.resolveSettings(fs, fm)
 	if err != nil {
 		c.errorf("recite config show: %v", err)
 		return ExitUsage

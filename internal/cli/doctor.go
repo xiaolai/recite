@@ -259,7 +259,7 @@ func (c *CLI) encoderChecks() []doctorCheck {
 // dirChecks is check 7: the cache and state directories are writable.
 func (c *CLI) dirChecks() []doctorCheck {
 	cacheDir := ""
-	if st, err := c.resolveSettings(newFlagSet("doctor-settings")); err == nil {
+	if st, err := c.resolveSettings(newFlagSet("doctor-settings"), nil); err == nil {
 		cacheDir = st.Get("cache_dir").Raw
 	} else {
 		return []doctorCheck{failCheck("cache", "config: "+err.Error(), "fix the config file (recite config path)", exitcode.Usage)}

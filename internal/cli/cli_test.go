@@ -115,8 +115,8 @@ func TestDefaultCommandResolution(t *testing.T) {
 	}{
 		{[]string{"Hello"}, SayRequest{Text: []string{"Hello"}}},
 		{[]string{"say", "Hello"}, SayRequest{Text: []string{"Hello"}}},
-		{[]string{"-f", "x.md"}, SayRequest{File: "x.md"}},
-		{[]string{"say", "-f", "x.md"}, SayRequest{File: "x.md"}},
+		{[]string{"-f", "x.txt"}, SayRequest{File: "x.txt"}},
+		{[]string{"say", "-f", "x.txt"}, SayRequest{File: "x.txt"}},
 		{[]string{"say", "check"}, SayRequest{Text: []string{"check"}}},
 		{[]string{"--", "check"}, SayRequest{Text: []string{"check"}}},
 		{[]string{"say", "--", "-f"}, SayRequest{Text: []string{"-f"}}},
@@ -172,12 +172,12 @@ func TestUnknownCommandSuggestion(t *testing.T) {
 
 // accept: CLI-01#1
 func TestInterspersedFlags(t *testing.T) {
-	r := run("say", "Hello", "-f", "x.md", "world", "--json", "-v", "-v", "--auth-source", "codex")
+	r := run("say", "Hello", "-f", "x.txt", "world", "--json", "-v", "-v", "--auth-source", "codex")
 	if r.code != ExitOK || len(r.says) != 1 {
 		t.Fatalf("code %d, stderr %q", r.code, r.stderr)
 	}
 	got := r.says[0]
-	want := SayRequest{File: "x.md", Text: []string{"Hello", "world"}}
+	want := SayRequest{File: "x.txt", Text: []string{"Hello", "world"}}
 	want.Globals = defaultGlobals()
 	want.Settings = realtime.DefaultSettings()
 	want.MaxInput = text.DefaultMaxInput

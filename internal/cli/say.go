@@ -121,13 +121,10 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 		return sayJob{}, code
 	}
 	stream := target == stdoutTarget
-	input, err := text.Read(text.Source{Args: req.Text, File: req.File, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, req.MaxInput)
-	if err != nil {
-		c.errorf("%s: %v", req.prefix(), err)
-		if text.IsInputError(err) {
-			return sayJob{}, ExitUsage
-		}
-		return sayJob{}, ExitInternal
+	input, code := c.readInput(req.prefix(), textInput{preread: req.preread},
+		text.Source{Args: req.Text, File: req.File, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, req.MaxInput)
+	if code != ExitOK {
+		return sayJob{}, code
 	}
 	plan, seg, code := c.planText(req, input)
 	if code != ExitOK {
@@ -480,7 +477,13 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 		}
 		return plan, doc.Seg, ExitOK
 	}
-	g, code := c.guardText(req, input)
+	doc, err := speechDoc(input, textInput{format: req.InputFormat, markdown: req.Markdown, lang: req.Lang})
+	c.skippedWarning(req.prefix(), doc.skipped)
+	if err != nil {
+		c.errorf("%s: %v", req.prefix(), err)
+		return pipeline.Plan{}, text.Segmentation{}, textErrorCode(err)
+	}
+	g, code := c.guardText(req, doc.text)
 	if code != ExitOK {
 		return pipeline.Plan{}, text.Segmentation{}, code
 	}
@@ -494,7 +497,7 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 	if code != ExitOK {
 		return pipeline.Plan{}, text.Segmentation{}, code
 	}
-	plan, seg, err := planChunks(input, g, form, req.ChunkSeconds, req.Settings)
+	plan, seg, err := planDoc(doc, g, form, req.ChunkSeconds, req.Settings)
 	if err != nil {
 		c.errorf("%s: %v", req.prefix(), err)
 		return plan, seg, ExitInternal
@@ -542,7 +545,7 @@ func (c *CLI) guardText(req SayRequest, input string) (guard.Result, int) {
 // logged at debug level with the rule that made it.
 func (c *CLI) spokenForm(req SayRequest, g guard.Result) (spoken.Result, int) {
 	display := g.Text
-	lang := text.Resolve(display, text.ResolveOptions{})
+	lang := text.Resolve(display, text.ResolveOptions{FrontMatter: req.Lang})
 	so := markOptions(g, req.Spoken, markReader(lang.Code, req.Spoken.DateStyle))
 	res, err := spoken.Normalize(display, lang.Code, so)
 	if err != nil {

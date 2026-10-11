@@ -98,7 +98,15 @@ func setupCheck(fs *flag.FlagSet, c *CLI) func([]string) int {
 	tf.register(fs)
 	speed := fs.String("speed", "1.0", "`SPEED` the estimates assume, 0.25 to 1.5")
 	return func(args []string) int {
-		g, so, _, err := c.textSettings(fs, &tf)
+		if len(args) != 1 {
+			c.errorf("recite check: takes exactly one FILE (- for stdin)")
+			return ExitUsage
+		}
+		pre, code := c.prereadMarkdown("recite check", &tf, text.Source{File: args[0], Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, args[0])
+		if code != ExitOK {
+			return code
+		}
+		g, so, st, err := c.textSettings(fs, &tf, pre.frontMatter())
 		if err != nil {
 			c.errorf("recite check: %v", err)
 			return ExitUsage
@@ -108,37 +116,42 @@ func setupCheck(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite check: %v", err)
 			return ExitUsage
 		}
-		format, marks, err := tf.inputMode()
+		format, marks, err := tf.inputMode(args[0])
 		if err != nil {
 			c.errorf("recite check: %v", err)
 			return ExitUsage
 		}
 		g.Marks = marks
-		if len(args) != 1 {
-			c.errorf("recite check: takes exactly one FILE (- for stdin)")
+		g.Markdown = format == formatMarkdown
+		md, err := tf.markdownOptions()
+		if err != nil {
+			c.errorf("recite check: %v", err)
 			return ExitUsage
 		}
-		return c.runCheck(args[0], tf, format, g, so, sp)
+		in := textInput{format: format, markdown: md, lang: st.Get(langKey).Raw, preread: pre}
+		return c.runCheck(args[0], tf, in, g, so, sp)
 	}
 }
 
 // runCheck is `check` (CLI-14): parse, guard, spoken form and segmentation, with no network
 // and no credentials. The report goes to stdout; the exit code says whether `say` with the
 // same flags would stop at the text stage (2) or go on (0).
-func (c *CLI) runCheck(file string, tf textFlags, format string, g guard.Options, so spoken.Options, speed float64) int {
-	input, err := text.Read(text.Source{File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, tf.maxInput)
-	if err != nil {
-		c.errorf("recite check: %v", err)
-		if text.IsInputError(err) {
-			return ExitUsage
-		}
-		return ExitInternal
+func (c *CLI) runCheck(file string, tf textFlags, in textInput, g guard.Options, so spoken.Options, speed float64) int {
+	input, code := c.readInput("recite check", in, text.Source{File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, tf.maxInput)
+	if code != ExitOK {
+		return code
 	}
 	var rep CheckReport
-	if format == formatSpoken {
+	var err error
+	if in.format == formatSpoken {
 		rep, err = buildSpokenCheckReport(input, g, so, speed)
 	} else {
-		rep, err = buildCheckReport(input, g, so, tf.chunkSeconds, speed)
+		var doc textDoc
+		doc, err = speechDoc(input, in)
+		c.skippedWarning("recite check", doc.skipped)
+		if err == nil {
+			rep, err = buildCheckReport(doc, g, so, tf.chunkSeconds, speed)
+		}
 	}
 	if err != nil {
 		c.errorf("recite check: %v", err)
@@ -182,8 +195,13 @@ type textStages struct {
 
 // runTextStages runs guard → spoken form → segmentation with no network, as `say` would.
 func runTextStages(input string, g guard.Options, so spoken.Options, budget float64, settings realtime.Settings) (textStages, error) {
+	return runDocStages(plainDoc(input), g, so, budget, settings)
+}
+
+// runDocStages is runTextStages for a text document (plain text or Markdown speech text).
+func runDocStages(doc textDoc, g guard.Options, so spoken.Options, budget float64, settings realtime.Settings) (textStages, error) {
 	var st textStages
-	gr, gerr := guard.Run(input, g)
+	gr, gerr := guard.Run(doc.text, g)
 	var ge *guard.Error
 	if gerr != nil && !errors.As(gerr, &ge) {
 		return st, gerr
@@ -195,7 +213,7 @@ func runTextStages(input string, g guard.Options, so spoken.Options, budget floa
 	if err := checkPauses(gr); err != nil {
 		return st, err
 	}
-	lang := text.Resolve(gr.Text, text.ResolveOptions{})
+	lang := text.Resolve(gr.Text, text.ResolveOptions{FrontMatter: doc.lang})
 	st.lang = lang.Code
 	form, err := spoken.Normalize(gr.Text, lang.Code, markOptions(gr, so, markReader(lang.Code, so.DateStyle)))
 	if err != nil {
@@ -205,7 +223,7 @@ func runTextStages(input string, g guard.Options, so spoken.Options, budget floa
 	if len(form.Findings) > 0 && g.Policy == guard.PolicyStrict {
 		st.failed = true
 	}
-	st.plan, st.seg, err = planChunks(input, gr, form, budget, settings)
+	st.plan, st.seg, err = planDoc(doc, gr, form, budget, settings)
 	if err != nil {
 		return st, err
 	}
@@ -213,15 +231,15 @@ func runTextStages(input string, g guard.Options, so spoken.Options, budget floa
 	return st, nil
 }
 
-// buildCheckReport runs the text stages of `say` and reports on them.
-func buildCheckReport(input string, g guard.Options, so spoken.Options, budget, speed float64) (CheckReport, error) {
+// buildCheckReport runs the text stages of `say` on doc and reports on them.
+func buildCheckReport(doc textDoc, g guard.Options, so spoken.Options, budget, speed float64) (CheckReport, error) {
 	if g.Policy == "" {
 		g.Policy = guard.PolicyFix
 	}
 	rep := newCheckReport(g.Policy)
 	settings := realtime.DefaultSettings()
 	settings.Speed = speed
-	st, err := runTextStages(input, g, so, budget, settings)
+	st, err := runDocStages(doc, g, so, budget, settings)
 	if err != nil {
 		return rep, err
 	}
@@ -239,7 +257,7 @@ func buildCheckReport(input string, g guard.Options, so spoken.Options, budget, 
 	}
 	strict := g
 	strict.Policy = guard.PolicyStrict
-	_, serr := guard.Run(input, strict)
+	_, serr := guard.Run(doc.text, strict)
 	rep.Risk.StrictWouldFail = serr != nil
 	failed := st.failed
 	if st.planned {

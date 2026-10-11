@@ -59,8 +59,10 @@ type Key struct {
 	Default string
 	Flag    string // flag name without dashes; "" when no flag sets it
 	Env     string // environment variable; "" when none
-	NoFile  bool   // set only by the environment or a flag, never by a file
-	List    bool   // a TOML array of strings, carried comma-joined
+	NoFile  bool   // set only by the environment or a flag, never by a settings file
+	// FrontMatter allows the key in an input's front matter (TXT-08), whatever NoFile says.
+	FrontMatter bool
+	List        bool // a TOML array of strings, carried comma-joined
 	// Check validates a value; nil accepts any value.
 	Check func(string) error
 }
@@ -108,6 +110,17 @@ func (s *Schema) isSection(name string) bool {
 		}
 	}
 	return false
+}
+
+// frontMatterKeys names the keys front matter may set, in display order.
+func (s *Schema) frontMatterKeys() []string {
+	var out []string
+	for _, k := range s.keys {
+		if k.FrontMatter {
+			out = append(out, k.Name)
+		}
+	}
+	return out
 }
 
 // Value is one setting's effective text and where it came from.

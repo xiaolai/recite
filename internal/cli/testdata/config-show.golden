@@ -1,9 +1,11 @@
 KEY                   VALUE              SOURCE
 profile               narrator           env (RECITE_PROFILE)
+title                 ""                 default
 voice                 marin              profile narrator ($DIR/recite/config.toml:8)
 model                 gpt-realtime-2.1   default
 effort                low                env (RECITE_EFFORT)
 speed                 0.9                profile narrator ($DIR/recite/config.toml:9)
+lang                  ""                 default
 jobs                  2                  user ($DIR/recite/config.toml:2)
 verify.mode           normal             default
 verify.max_attempts   3                  default

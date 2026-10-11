@@ -27,12 +27,20 @@ func setupPrepare(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.BoolVar(&force, "force", false, "overwrite the output")
 	fs.BoolVar(&withFindings, "with-findings", false, "add a comment per finding next to its chunk")
 	return func(args []string) int {
-		g, so, _, err := c.textSettings(fs, &tf)
+		if len(args) != 1 {
+			c.errorf("recite prepare: takes exactly one FILE (- for stdin)")
+			return ExitUsage
+		}
+		pre, code := c.prereadMarkdown("recite prepare", &tf, text.Source{File: args[0], Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, args[0])
+		if code != ExitOK {
+			return code
+		}
+		g, so, st, err := c.textSettings(fs, &tf, pre.frontMatter())
 		if err != nil {
 			c.errorf("recite prepare: %v", err)
 			return ExitUsage
 		}
-		format, marks, err := tf.inputMode()
+		format, marks, err := tf.inputMode(args[0])
 		if err != nil {
 			c.errorf("recite prepare: %v", err)
 			return ExitUsage
@@ -42,27 +50,35 @@ func setupPrepare(fs *flag.FlagSet, c *CLI) func([]string) int {
 			return ExitUsage
 		}
 		g.Marks = marks
-		if len(args) != 1 {
-			c.errorf("recite prepare: takes exactly one FILE (- for stdin)")
+		g.Markdown = format == formatMarkdown
+		md, err := tf.markdownOptions()
+		if err != nil {
+			c.errorf("recite prepare: %v", err)
 			return ExitUsage
 		}
 		if output == "" {
 			c.errorf("recite prepare: -o PATH is required (- writes to stdout)")
 			return ExitUsage
 		}
-		return c.runPrepare(args[0], output, force, withFindings, tf, g, so)
+		in := textInput{format: format, markdown: md, lang: st.Get(langKey).Raw, preread: pre}
+		return c.runPrepare(args[0], output, force, withFindings, tf, in, g, so)
 	}
 }
 
 // runPrepare is `prepare` (CLI-15, design §7.10): the text stages of `say`, written as an
 // editable spoken script that `say --input-format spoken` renders to the same plan.
-func (c *CLI) runPrepare(file, output string, force, withFindings bool, tf textFlags, g guard.Options, so spoken.Options) int {
-	input, err := text.Read(text.Source{File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, tf.maxInput)
+func (c *CLI) runPrepare(file, output string, force, withFindings bool, tf textFlags, in textInput, g guard.Options, so spoken.Options) int {
+	input, code := c.readInput("recite prepare", in, text.Source{File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, tf.maxInput)
+	if code != ExitOK {
+		return code
+	}
+	doc, err := speechDoc(input, in)
+	c.skippedWarning("recite prepare", doc.skipped)
 	if err != nil {
 		c.errorf("recite prepare: %v", err)
 		return textErrorCode(err)
 	}
-	st, err := runTextStages(input, g, so, tf.chunkSeconds, realtime.DefaultSettings())
+	st, err := runDocStages(doc, g, so, tf.chunkSeconds, realtime.DefaultSettings())
 	if err != nil {
 		c.errorf("recite prepare: %v", err)
 		return textErrorCode(err)

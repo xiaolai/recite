@@ -15,33 +15,35 @@ import (
 	"github.com/xiaolai/recite/internal/text"
 )
 
-// Input formats of --input-format (design §12.2). markdown and script are later work.
+// Input formats of --input-format (design §12.2). script is later work.
 const (
-	formatText   = "text"
-	formatSpoken = "spoken"
+	formatText     = "text"
+	formatMarkdown = "markdown"
+	formatSpoken   = "spoken"
 )
 
-// inputMode resolves --input-format, --marks and --no-marks: marks are on by default for
-// spoken input and off otherwise (design §7.8).
-func (f *textFlags) inputMode() (format string, marks bool, err error) {
-	switch f.inputFormat {
-	case formatText, formatSpoken:
-	case "markdown", "script":
-		return "", false, fmt.Errorf("--input-format %s is not available yet (valid: %s, %s)", f.inputFormat, formatText, formatSpoken)
+// inputMode resolves --input-format (by default from file's extension), --marks and
+// --no-marks: marks are on by default for spoken input and off otherwise (design §7.8).
+func (f *textFlags) inputMode(file string) (format string, marks bool, err error) {
+	format = f.format(file)
+	switch format {
+	case formatText, formatMarkdown, formatSpoken:
+	case "script":
+		return "", false, fmt.Errorf("--input-format %s is not available yet (valid: %s, %s, %s)", format, formatText, formatMarkdown, formatSpoken)
 	default:
-		return "", false, fmt.Errorf("--input-format must be %s or %s, not %q", formatText, formatSpoken, f.inputFormat)
+		return "", false, fmt.Errorf("--input-format must be %s, %s or %s, not %q", formatText, formatMarkdown, formatSpoken, format)
 	}
 	if f.marks && f.noMarks {
 		return "", false, fmt.Errorf("--marks and --no-marks exclude each other")
 	}
-	marks = f.inputFormat == formatSpoken
+	marks = format == formatSpoken
 	if f.marks {
 		marks = true
 	}
 	if f.noMarks {
 		marks = false
 	}
-	return f.inputFormat, marks, nil
+	return format, marks, nil
 }
 
 // markReader reads text-bearing marks in the language lang (spoken.MarkSpoken).

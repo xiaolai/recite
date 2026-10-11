@@ -7,3 +7,4 @@ AUTH-05#2 WP-1.3 the fake codex child leaking the canary via stderr, RPC errors 
 SPK-10#3 WP-1.6 each effort level renders live; needs the render function of SPK-01
 SPK-05#3 WP-1.6 the 87-take INSTR v2 qualification renders live; needs the render function of SPK-01
 AUD-07#2 WP-4.5 the --loudness half needs AUD-06 (--loudness does not exist before WP-4.5); the --strict-output half is tested
+TXT-08#1 WP-5.1 the voices, style and lexicon keys need TXT-06 (WP-5.1), SPK-07 (WP-4.2) and SPK-08 (WP-4.3); title, voice, speed, effort and lang are reported now

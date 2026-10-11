@@ -92,8 +92,11 @@ type SayRequest struct {
 	Guard       guard.Options
 	Spoken      spoken.Options
 
-	InputFormat string // --input-format: text or spoken (TXT-15)
-	Marks       bool   // speech marks are read (TXT-13)
+	InputFormat string               // --input-format: text, markdown (TXT-05) or spoken (TXT-15)
+	Marks       bool                 // speech marks are read (TXT-13)
+	Markdown    text.MarkdownOptions // --read-alt and --code (TXT-05)
+	Lang        string               // the front-matter language (TXT-08); "" means detect
+	preread     *prereadInput        // the input, when it was read before the settings; nil means read it
 
 	ChunkSeconds  float64 // segmentation budget (TXT-03)
 	Gaps          audio.Gaps
@@ -179,6 +182,8 @@ type textFlags struct {
 	inputFormat  string
 	marks        bool
 	noMarks      bool
+	readAlt      bool
+	code         string
 }
 
 func (f *textFlags) register(fs *flag.FlagSet) {
@@ -192,8 +197,10 @@ func (f *textFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.dateStyle, "date-style", f.dateStyle, "spoken date `STYLE`: us, uk or iso")
 	f.chunkSeconds = text.DefaultChunkSeconds
 	fs.Float64Var(&f.chunkSeconds, "chunk-seconds", f.chunkSeconds, "segmentation budget in `SECONDS` per chunk")
-	f.inputFormat = formatText
-	fs.StringVar(&f.inputFormat, "input-format", f.inputFormat, "input `FORMAT`: text, or spoken (a prepare script: no guard, no spoken-form rules)")
+	fs.StringVar(&f.inputFormat, "input-format", "", "input `FORMAT`: text, markdown, or spoken (a prepare script: no guard, no spoken-form rules); default markdown for .md and .markdown files, else text")
+	fs.BoolVar(&f.readAlt, "read-alt", false, "read the alt text of Markdown images")
+	f.code = codeSkip
+	fs.StringVar(&f.code, "code", f.code, "Markdown code blocks: `MODE` skip, or announce (say \"Code block omitted.\")")
 	fs.BoolVar(&f.marks, "marks", false, "read inline speech marks such as {{spell|API}} (default on for spoken input)")
 	fs.BoolVar(&f.noMarks, "no-marks", false, "read {{…}} as plain text")
 }
@@ -308,8 +315,8 @@ func (s *settingFlags) register(fs *flag.FlagSet) {
 }
 
 // textSettings resolves every layer into fs (CFG-04) and validates the text-stage settings.
-func (c *CLI) textSettings(fs *flag.FlagSet, tf *textFlags) (guard.Options, spoken.Options, config.Settings, error) {
-	st, err := c.resolveSettings(fs)
+func (c *CLI) textSettings(fs *flag.FlagSet, tf *textFlags, fm *frontMatterSource) (guard.Options, spoken.Options, config.Settings, error) {
+	st, err := c.resolveSettings(fs, fm)
 	if err != nil {
 		return guard.Options{}, spoken.Options{}, st, err
 	}
@@ -344,12 +351,17 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.BoolVar(&dryRun, "dry-run", false, "print the chunk plan and estimates (cache hits, audio, wall time, list price); no network, no login")
 	all.register(fs)
 	run := func(args []string) int {
-		req, err := c.sayRequest(fs, &all)
+		pre, code := c.prereadMarkdown("recite say", &all.tf, text.Source{Args: args, File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, file)
+		if code != ExitOK {
+			return code
+		}
+		req, err := c.sayRequest(fs, &all, pre.frontMatter(), file)
 		if err != nil {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
 		req.File, req.Text, req.Output, req.Force = file, args, output, force
+		req.preread = pre
 		if noManifest && manifestPath != "" {
 			c.errorf("recite say: --manifest and --no-manifest exclude each other")
 			return ExitUsage
@@ -374,8 +386,8 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 
 // sayRequest resolves every setting of fs (flags, environment, config) into a request with no
 // source or output; every error is a usage error. `say` and `voices --preview` share it.
-func (c *CLI) sayRequest(fs *flag.FlagSet, all *settingFlags) (SayRequest, error) {
-	g, so, st, err := c.textSettings(fs, &all.tf)
+func (c *CLI) sayRequest(fs *flag.FlagSet, all *settingFlags, fm *frontMatterSource, file string) (SayRequest, error) {
+	g, so, st, err := c.textSettings(fs, &all.tf, fm)
 	if err != nil {
 		return SayRequest{}, err
 	}
@@ -387,13 +399,19 @@ func (c *CLI) sayRequest(fs *flag.FlagSet, all *settingFlags) (SayRequest, error
 	if err != nil {
 		return SayRequest{}, err
 	}
-	inFormat, marks, err := all.tf.inputMode()
+	inFormat, marks, err := all.tf.inputMode(file)
+	if err != nil {
+		return SayRequest{}, err
+	}
+	mdOpts, err := all.tf.markdownOptions()
 	if err != nil {
 		return SayRequest{}, err
 	}
 	g.Marks = marks
+	g.Markdown = inFormat == formatMarkdown
 	req := SayRequest{Globals: c.globals, MaxInput: all.tf.maxInput, Settings: settings, RetryEffort: ladder, Guard: g, Spoken: so,
-		InputFormat: inFormat, Marks: marks, ChunkSeconds: all.tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
+		InputFormat: inFormat, Marks: marks, Markdown: mdOpts, Lang: st.Get(langKey).Raw,
+		ChunkSeconds: all.tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
 	if err := all.rf.apply(&req); err != nil {
 		return SayRequest{}, err
 	}

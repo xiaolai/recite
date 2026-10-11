@@ -171,8 +171,8 @@ func TestInputModeFlags(t *testing.T) {
 		want string
 	}{
 		{[]string{"--marks", "--no-marks"}, "exclude each other"},
-		{[]string{"--input-format", "markdown"}, "not available yet"},
-		{[]string{"--input-format", "rtf"}, "must be text or spoken"},
+		{[]string{"--input-format", "script"}, "not available yet"},
+		{[]string{"--input-format", "rtf"}, "must be text, markdown or spoken"},
 	} {
 		m := newMultiEnv(t)
 		r := m.run(append([]string{"Hello.", "-o", "a.wav"}, tc.args...)...)

@@ -18,7 +18,13 @@ import (
 // the guard ran on, g its result, and form the spoken form of g.Text. Findings are passed to
 // the planner at byte offsets of the display text (form.Display).
 func planChunks(input string, g guard.Result, form spoken.Result, budget float64, s realtime.Settings) (pipeline.Plan, text.Segmentation, error) {
-	breaks := text.ParagraphBreaks(form.Display)
+	return planDoc(plainDoc(input), g, form, budget, s)
+}
+
+// planDoc is planChunks for a text document: a Markdown document brings its own block breaks.
+func planDoc(doc textDoc, g guard.Result, form spoken.Result, budget float64, s realtime.Settings) (pipeline.Plan, text.Segmentation, error) {
+	input := doc.text
+	breaks := docBreaks(doc, form.Display, func(off int) int { return displayOffset(g.Edits, off) })
 	pauses := pausesOf(g)
 	for _, p := range pauses {
 		breaks = append(breaks, text.Break{Display: p.at, Kind: text.BoundaryPause})

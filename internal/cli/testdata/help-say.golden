@@ -7,6 +7,8 @@ Flags:
     	exit 0 when a chunk stays unverified
   -chunk-seconds SECONDS
     	segmentation budget in SECONDS per chunk (default 25)
+  -code MODE
+    	Markdown code blocks: MODE skip, or announce (say "Code block omitted.") (default "skip")
   -date-style STYLE
     	spoken date STYLE: us, uk or iso (default "us")
   -dry-run
@@ -34,7 +36,7 @@ Flags:
   -guard POLICY
     	text guard POLICY: fix, strict, warn or off (default "fix")
   -input-format FORMAT
-    	input FORMAT: text, or spoken (a prepare script: no guard, no spoken-form rules) (default "text")
+    	input FORMAT: text, markdown, or spoken (a prepare script: no guard, no spoken-form rules); default markdown for .md and .markdown files, else text
   -jobs N
     	render N chunks at once, 1 to 6 (default 3)
   -keep-rejected DIR
@@ -67,6 +69,8 @@ Flags:
     	write audio to PATH, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)
   -output PATH
     	write audio to PATH, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)
+  -read-alt
+    	read the alt text of Markdown images
   -refresh
     	render every chunk anew; the takes still go to the cache
   -request-extra-attempts N

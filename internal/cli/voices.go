@@ -97,7 +97,7 @@ func (c *CLI) previewVoices(dir, sample, effort string) int {
 			return ExitUsage
 		}
 	}
-	base, err := c.sayRequest(settings, &all)
+	base, err := c.sayRequest(settings, &all, nil, "")
 	if err != nil {
 		c.errorf("recite voices: %v", err)
 		return ExitUsage

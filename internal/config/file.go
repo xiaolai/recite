@@ -51,15 +51,30 @@ func (e *FileError) Error() string {
 // LayerProfile. Every problem is a *FileError naming the line; when there are several, they
 // are joined in line order.
 func ParseFile(s *Schema, path string, data []byte, layer Layer, profiles bool) (*File, error) {
+	return parse(s, path, data, layer, profiles, 0)
+}
+
+// ParseFrontMatter parses the TOML of an input's front matter (TXT-08), whose first line is
+// line firstLine of the input at path. Only keys marked FrontMatter are accepted; errors and
+// origins carry input line numbers.
+func ParseFrontMatter(s *Schema, path, data string, firstLine int) (Values, error) {
+	f, err := parse(s, path, []byte(data), LayerFrontMatter, false, firstLine-1)
+	if err != nil {
+		return nil, err
+	}
+	return f.Top, nil
+}
+
+func parse(s *Schema, path string, data []byte, layer Layer, profiles bool, lineOffset int) (*File, error) {
 	var root map[string]any
 	if _, err := toml.Decode(string(data), &root); err != nil {
 		var pe toml.ParseError
 		if errors.As(err, &pe) {
-			return nil, &FileError{Path: path, Line: pe.Position.Line, Msg: pe.Message}
+			return nil, &FileError{Path: path, Line: pe.Position.Line + lineOffset, Msg: pe.Message}
 		}
 		return nil, &FileError{Path: path, Msg: err.Error()}
 	}
-	p := &fileParser{s: s, path: path, data: data}
+	p := &fileParser{s: s, path: path, data: data, lineOffset: lineOffset}
 	f := &File{Path: path, Top: map[string]Value{}, Profiles: map[string]map[string]Value{}}
 	for _, name := range sortedKeys(root) {
 		v := root[name]
@@ -85,10 +100,19 @@ type fileParser struct {
 	path string
 	data []byte
 	errs []*FileError
+	// lineOffset is added to every line of data: the front matter's place in its input.
+	lineOffset int
+}
+
+func (p *fileParser) line(path []string) int {
+	if n := keyLine(p.data, path); n > 0 {
+		return n + p.lineOffset
+	}
+	return 0
 }
 
 func (p *fileParser) fail(path []string, format string, a ...any) {
-	p.errs = append(p.errs, &FileError{Path: p.path, Line: keyLine(p.data, path), Msg: fmt.Sprintf(format, a...)})
+	p.errs = append(p.errs, &FileError{Path: p.path, Line: p.line(path), Msg: fmt.Sprintf(format, a...)})
 }
 
 func (p *fileParser) profiles(f *File, v any) {
@@ -121,7 +145,12 @@ func (p *fileParser) walk(dst map[string]Value, docPrefix, keyPath []string, nam
 		p.fail(doc, "key %q is not supported by this version (%s)", full, why)
 		return
 	}
-	if k, ok := p.s.Lookup(full); ok && !k.NoFile {
+	k, known := p.s.Lookup(full)
+	if known && layer == LayerFrontMatter && !k.FrontMatter {
+		p.fail(doc, "key %q cannot be set in front matter (allowed: %s)", full, strings.Join(p.s.frontMatterKeys(), ", "))
+		return
+	}
+	if known && (!k.NoFile || layer == LayerFrontMatter) {
 		raw, err := toText(v, k.List)
 		if err == nil && k.Check != nil {
 			err = k.Check(raw)
@@ -130,10 +159,10 @@ func (p *fileParser) walk(dst map[string]Value, docPrefix, keyPath []string, nam
 			p.fail(doc, "%s: %v", full, err)
 			return
 		}
-		dst[full] = Value{Raw: raw, Layer: layer, Origin: fmt.Sprintf("%s:%d", p.path, keyLine(p.data, doc)), Detail: detail}
+		dst[full] = Value{Raw: raw, Layer: layer, Origin: fmt.Sprintf("%s:%d", p.path, p.line(doc)), Detail: detail}
 		return
 	}
-	if t, ok := v.(map[string]any); ok && p.s.isSection(full) {
+	if t, ok := v.(map[string]any); ok && layer != LayerFrontMatter && p.s.isSection(full) {
 		for _, sub := range sortedKeys(t) {
 			p.walk(dst, docPrefix, kp, sub, t[sub], layer, detail)
 		}
