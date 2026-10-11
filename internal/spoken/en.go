@@ -267,7 +267,7 @@ func enVersion(s string, i int, _ *Options) (Match, bool) {
 		}
 		break
 	}
-	if !wordEnd(s, j) || prefix == "" && len(parts) < 3 {
+	if prefix == "" && len(parts) < 3 {
 		return Match{}, false
 	}
 	ws := make([]string, len(parts))
@@ -278,8 +278,98 @@ func enVersion(s string, i int, _ *Options) (Match, bool) {
 			ws[k] = spellInt(p)
 		}
 	}
-	return Match{End: j, Spoken: prefix + strings.Join(ws, " point ")}, true
+	w := prefix + strings.Join(ws, " point ")
+	if end, suf, ok := versionSuffix(s, j); ok {
+		return Match{End: end, Spoken: w + suf}, true
+	}
+	if !wordEnd(s, j) {
+		return Match{}, false
+	}
+	return Match{End: j, Spoken: w}, true
 }
+
+// versionSuffix reads a semver pre-release or build suffix at j ("-rc.3", "+build.5"), and
+// the spoken "dash" a transcript writes for the hyphen ("4.12.0 dash RC.3"), so every
+// variant reads the same: "dash R C point three". The first identifier must start with a
+// letter, so "1.2.3-4" stays a hyphenated number.
+func versionSuffix(s string, j int) (int, string, bool) {
+	var w string
+	switch {
+	case strings.HasPrefix(s[j:], "-"):
+		w, j = " dash", j+1
+	case strings.HasPrefix(s[j:], "+"):
+		w, j = " plus", j+1
+	case strings.HasPrefix(s[j:], " dash "):
+		w, j = " dash", j+len(" dash ")
+	default:
+		return 0, "", false
+	}
+	if !isASCIILetter(byteAt(s, j)) {
+		return 0, "", false
+	}
+	for first := true; ; first = false {
+		e := j
+		for e < len(s) && (isASCIILetter(s[e]) || isDigit(s[e])) {
+			e++
+		}
+		if e == j {
+			return 0, "", false
+		}
+		if !first {
+			w += " point"
+		}
+		id, ok := versionIdent(s[j:e])
+		if !ok {
+			return 0, "", false
+		}
+		w += " " + id
+		j = e
+		if byteAt(s, j) == '.' && (isASCIILetter(byteAt(s, j+1)) || isDigit(byteAt(s, j+1))) {
+			j++
+			continue
+		}
+		break
+	}
+	if !wordEnd(s, j) || byteAt(s, j) == '-' || byteAt(s, j) == '+' {
+		return 0, "", false
+	}
+	return j, w, true
+}
+
+// releaseTags are pre-release words said as words; any other letter run of up to three
+// letters is spelled ("rc" is "R C"), and a longer unknown word rejects the suffix.
+var releaseTags = map[string]bool{"alpha": true, "beta": true, "build": true, "dev": true, "pre": true,
+	"preview": true, "nightly": true, "snapshot": true, "canary": true, "final": true, "stable": true}
+
+// versionIdent reads one dot-separated identifier: letter runs as tags or spelled
+// capitals, digit runs as cardinals ("rc2" is "R C two").
+func versionIdent(id string) (string, bool) {
+	var out []string
+	for k := 0; k < len(id); {
+		e := k
+		if isDigit(id[k]) {
+			e = digits(id, k)
+			out = append(out, spellInt(id[k:e]))
+		} else {
+			for e < len(id) && isASCIILetter(id[e]) {
+				e++
+			}
+			low := strings.ToLower(id[k:e])
+			switch {
+			case releaseTags[low]:
+				out = append(out, low)
+			case e-k <= 3:
+				out = append(out, strings.Join(strings.Split(strings.ToUpper(low), ""), " "))
+			default:
+				return "", false
+			}
+		}
+		k = e
+	}
+	return strings.Join(out, " "), true
+}
+
+func isASCIILetter(b byte) bool { return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' }
 
 // --- years ---
 
