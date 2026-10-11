@@ -24,6 +24,11 @@ const futureMode = "futureMode"
 
 func main() {
 	mode := os.Getenv("FAKECODEX_MODE")
+	if f := os.Getenv("FAKECODEX_STATE_FILE"); f != "" {
+		if b, err := os.ReadFile(f); err == nil { // absent until a login writes it
+			mode = strings.TrimSpace(string(b))
+		}
+	}
 	if mode == "" {
 		mode = "chatgpt"
 	}
@@ -46,6 +51,8 @@ func main() {
 	switch {
 	case len(args) >= 2 && args[0] == "login" && args[1] == "status":
 		os.Exit(loginStatus(mode))
+	case len(args) >= 1 && (args[0] == "login" || args[0] == "logout"):
+		os.Exit(login(args))
 	case len(args) >= 1 && args[0] == "app-server":
 		os.Exit(appServer(mode, os.Stdin, os.Stdout))
 	default:
@@ -323,4 +330,39 @@ func JWT(exp int64, refreshed bool) string {
 	h := b.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
 	p := b.EncodeToString(fmt.Appendf(nil, `{"exp":%d,"sub":"fake-subject","refreshed":%t}`, exp, refreshed))
 	return h + "." + p + "." + b.EncodeToString([]byte("fake-signature"))
+}
+
+// login imitates `codex login [--device-auth]` and `codex logout`: it appends its argv,
+// CODEX_HOME and one line read from stdin to $FAKECODEX_LOGIN_RECORD, answers on stdout and
+// stderr, and for login writes $FAKECODEX_LOGIN_SETS into $FAKECODEX_STATE_FILE, so the
+// sign-in a later app-server reports changes.
+func login(args []string) int {
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	line = strings.TrimSpace(line)
+	if path := os.Getenv("FAKECODEX_LOGIN_RECORD"); path != "" {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fakecodex: login record:", err)
+			return 70
+		}
+		_, werr := fmt.Fprintf(f, "argv0=%s\nargs=%s\nhome=%s\nstdin=%s\n", os.Args[0], strings.Join(args, " "), os.Getenv("CODEX_HOME"), line)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			fmt.Fprintln(os.Stderr, "fakecodex: login record:", werr)
+			return 70
+		}
+	}
+	fmt.Println("fakecodex " + args[0] + " stdout: " + line)
+	fmt.Fprintln(os.Stderr, "fakecodex "+args[0]+" stderr")
+	if args[0] == "login" {
+		if sets, path := os.Getenv("FAKECODEX_LOGIN_SETS"), os.Getenv("FAKECODEX_STATE_FILE"); sets != "" && path != "" {
+			if err := os.WriteFile(path, []byte(sets), 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, "fakecodex: state file:", err)
+				return 70
+			}
+		}
+	}
+	return 0
 }

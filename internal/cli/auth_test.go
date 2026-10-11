@@ -182,9 +182,6 @@ func TestAuthSubcommands(t *testing.T) {
 	if r.code != ExitOK || !strings.HasPrefix(r.stdout, "Usage: recite auth") {
 		t.Fatalf("auth: %+v", r)
 	}
-	if r := run("auth", "login"); r.code != ExitUsage || !strings.Contains(r.stderr, "not implemented") {
-		t.Fatalf("auth login: %+v", r)
-	}
 	if r := run("auth", "nope"); r.code != ExitUsage {
 		t.Fatalf("auth nope: %+v", r)
 	}

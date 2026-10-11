@@ -14,13 +14,16 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
+	"github.com/xiaolai/recite/internal/codexapp"
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/pipeline"
 )
 
-func setupAuth(_ *flag.FlagSet, c *CLI) func([]string) int {
+func setupAuth(fs *flag.FlagSet, c *CLI) func([]string) int {
+	var deviceAuth bool
+	fs.BoolVar(&deviceAuth, "device-auth", false, "auth login: sign in with a device code (no browser on this machine)")
 	return func(args []string) int {
 		if len(args) == 0 {
 			cmd, _ := c.lookup("auth")
@@ -33,9 +36,17 @@ func setupAuth(_ *flag.FlagSet, c *CLI) func([]string) int {
 				c.errorf("recite auth status: takes no arguments")
 				return ExitUsage
 			}
+			if deviceAuth {
+				c.errorf("recite auth status: --device-auth belongs to auth login")
+				return ExitUsage
+			}
 			return c.authStatus()
 		case "login":
-			return c.notImplemented("auth login")
+			if len(args) > 1 {
+				c.errorf("recite auth login: takes no arguments")
+				return ExitUsage
+			}
+			return c.authLogin(deviceAuth)
 		}
 		c.errorf("recite auth: unknown subcommand %q; use status or login", args[0])
 		return ExitUsage
@@ -87,6 +98,46 @@ func (c *CLI) authStatus() int {
 		_, _ = io.WriteString(c.Stderr, logx.Scrub(g.Text()))
 	}
 	return st.ExitCode()
+}
+
+// authLogin is `recite auth login` (AUTH-08): it runs `<codex> login` with the resolved
+// executable and CODEX_HOME, attached to the user's terminal, then classifies again with a
+// new app-server child, because a running child keeps reporting the old sign-in (A#5).
+func (c *CLI) authLogin(deviceAuth bool) int {
+	switch {
+	case c.globals.JSON:
+		c.errorf("recite auth login: --json is not supported: Codex's sign-in output would corrupt the event stream")
+		return ExitUsage
+	case !c.StdinIsTTY():
+		c.errorf("recite auth login: stdin is not a terminal; the Codex sign-in is interactive. Run it in a terminal")
+		return ExitUsage
+	}
+	st := c.probe(context.Background())
+	switch st.State {
+	case auth.StateAPIKey, auth.StateUnsupported, auth.StateNoCodex, auth.StateCodexTooOld:
+		// Changing how Codex itself signs in is the user's decision (api-key, unsupported-auth),
+		// and without a usable Codex there is nothing to run: print the guide instead.
+		defer func() { _ = st.Close() }()
+		g, _ := st.Guide()
+		_, _ = io.WriteString(c.Stderr, logx.Scrub(g.Text()))
+		return st.ExitCode()
+	}
+	rc := st.Context
+	// The old child must be gone before the state is read again; Close reaps it.
+	if err := st.Close(); err != nil {
+		c.Logger.Debug("close codex app-server", "err", err)
+	}
+	if rc.Source != auth.SourceCodex || rc.CodexBin == "" {
+		c.errorf("recite auth login: needs the Codex executable; --auth-source file cannot sign in")
+		return ExitUsage
+	}
+	err := codexapp.Login(codexapp.Config{Bin: rc.CodexBin, Home: rc.CodexHome}, deviceAuth,
+		codexapp.Streams{Stdin: c.Stdin, Stdout: c.Stdout, Stderr: c.Stderr})
+	if err != nil {
+		c.errorf("recite auth login: %v", err)
+		return exitcode.Auth
+	}
+	return c.authStatus()
 }
 
 // statusJSON is the --json form of a ready auth status.

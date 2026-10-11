@@ -13,6 +13,10 @@
 //	FAKECODEX_LEAK          misbehaviour of getAuthStatus that leaks FAKECODEX_CANARY:
 //	                        rpc-error (in the error message), malformed (in a truncated JSON
 //	                        line), token (as authToken even with includeToken false)
+//	FAKECODEX_STATE_FILE    when the file exists, its content replaces FAKECODEX_MODE
+//	FAKECODEX_LOGIN_RECORD  `login`/`logout` append argv0=, args=, home= (CODEX_HOME) and
+//	                        stdin= (one line read from stdin) lines here
+//	FAKECODEX_LOGIN_SETS    the mode `login` writes into FAKECODEX_STATE_FILE
 package fake
 
 import (
