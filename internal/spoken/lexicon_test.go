@@ -196,3 +196,18 @@ func FuzzLexiconMatch(f *testing.F) {
 		}
 	})
 }
+
+// A one-letter entry matching at every word of a large text: the overlap check was quadratic
+// in the number of matches.
+func BenchmarkLexiconMatchDense(b *testing.B) {
+	l, err := ParseLexicon(map[string]any{"x": map[string]any{"say": "ex"}, "x x": map[string]any{"say": "double ex"}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	s := strings.Repeat("x ", 200_000)
+	for b.Loop() {
+		if got := l.Match(s, "", nil); len(got) != 100_000 {
+			b.Fatalf("%d matches, want 100000", len(got))
+		}
+	}
+}

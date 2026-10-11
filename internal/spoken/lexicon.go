@@ -230,10 +230,17 @@ func (l Lexicon) Match(s, lang string, skip []Range) []LexMatch {
 		}
 		return a.start - b.start
 	})
+	// taken marks the bytes of chosen matches, so each overlap test costs the term's length,
+	// not the number of matches so far: a lexicon matching everywhere in a large text stays
+	// linear.
+	taken := make([]bool, len(s))
 	var out []LexMatch
 	for _, c := range cs {
-		if slices.ContainsFunc(out, func(m LexMatch) bool { return c.start < m.End && m.Start < c.end }) {
+		if slices.Contains(taken[c.start:c.end], true) {
 			continue
+		}
+		for k := c.start; k < c.end; k++ {
+			taken[k] = true
 		}
 		out = append(out, LexMatch{Range: Range{c.start, c.end}, Entry: l[c.entry]})
 	}
