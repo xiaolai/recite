@@ -244,6 +244,44 @@ func sentText(t *testing.T, srv *rtfake.Server) string {
 	return ""
 }
 
+// An OPENAI_API_KEY in the environment never reaches the service: every mint request, WebSocket
+// handshake and client event the fake server recorded is free of it, and the mint still carries
+// the ChatGPT bearer.
+//
+// accept: AUTH-03#2
+func TestSayNeverSendsOpenAIAPIKey(t *testing.T) {
+	const canary = "sk-canary"
+	e := newSayEnv(t)
+	e.env = map[string]string{"OPENAI_API_KEY": canary}
+	t.Setenv("OPENAI_API_KEY", canary) // the fake codex child inherits the process environment
+	r := e.run("Hello from recite.", "-o", "h.wav")
+	if r.code != exitcode.OK {
+		t.Fatalf("code %d stderr %q", r.code, r.stderr)
+	}
+	mints, handshakes, events := e.srv.MintRequests(), e.srv.WebSocketHeaders(), e.srv.ClientEvents()
+	if len(mints) == 0 || len(handshakes) == 0 || len(events) == 0 {
+		t.Fatalf("recorded %d mints, %d handshakes, %d client events; want each non-empty", len(mints), len(handshakes), len(events))
+	}
+	var seen []string
+	for i, m := range mints {
+		if !strings.HasPrefix(m.Header.Get("Authorization"), "Bearer eyJ") {
+			t.Errorf("mint %d: no ChatGPT bearer", i)
+		}
+		seen = append(seen, fmt.Sprint(m.Header), string(m.Body))
+	}
+	for _, h := range handshakes {
+		seen = append(seen, fmt.Sprint(h))
+	}
+	for _, ev := range events {
+		seen = append(seen, string(ev))
+	}
+	for i, s := range seen {
+		if strings.Contains(s, canary) {
+			t.Fatalf("recorded request %d carries OPENAI_API_KEY", i)
+		}
+	}
+}
+
 // accept: CLI-03#1
 // accept: CLI-02#1
 func TestSayExit0WritesWAV(t *testing.T) {
