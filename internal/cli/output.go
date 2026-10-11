@@ -32,17 +32,19 @@ func defaultOutput(file string, now time.Time, ext string) string {
 }
 
 // preflight fails fast, before any network call, when the target exists and
-// --force is absent (OUT-01), or its directory is missing. Lstat, so a dangling symlink counts as existing.
+// --force is absent (OUT-01), the target is a directory, or its directory is missing. Lstat, so a dangling symlink counts as existing.
 func preflight(target string, force bool) error {
 	dir := filepath.Dir(target)
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return usagef("output directory %s does not exist", dir)
 	}
-	if force {
-		return nil
-	}
-	_, err := os.Lstat(target)
+	fi, err := os.Lstat(target)
 	switch {
+	case err == nil && fi.IsDir():
+		// rename(2) cannot replace a directory, so --force would only fail after the renders.
+		return usagef("%s is a directory; name an output file", target)
+	case err == nil && force:
+		return nil
 	case err == nil:
 		return usagef("%s already exists; pass --force to overwrite it", target)
 	case errors.Is(err, fs.ErrNotExist):

@@ -401,6 +401,25 @@ func TestExistingTargetFailsBeforeNetwork(t *testing.T) {
 	}
 }
 
+// A directory at the target is refused before the network even with --force: rename(2) could
+// not replace it, so the run would fail only after spending every render.
+func TestDirectoryTargetFailsBeforeNetwork(t *testing.T) {
+	e := newSayEnv(t)
+	if err := os.Mkdir(e.path("d.wav"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, force := range []bool{false, true} {
+		args := []string{"Hi", "-o", "d.wav"}
+		if force {
+			args = append(args, "--force")
+		}
+		r := e.run(args...)
+		if r.code != exitcode.Usage || !strings.Contains(r.stderr, "is a directory") || len(e.srv.MintRequests()) != 0 {
+			t.Fatalf("force=%v: %+v, %d mints", force, r, len(e.srv.MintRequests()))
+		}
+	}
+}
+
 // racingSynth creates the target while the run is rendering: after pre-flight,
 // before publication.
 type racingSynth struct {
