@@ -84,9 +84,11 @@ doctor_numbers() {
 		END { printf "ok=%d, warn=%d, fail=%d", c["ok"], c["warn"], c["fail"] }' "$1"
 }
 
-# redact replaces the home directory with ~, so no row names the local account.
+# redact replaces the repository root with . and the home directory with ~, so no row names
+# the local account or the checkout's location.
 redact() {
 	local s="$1"
+	s="${s//"$PWD"\//./}"
 	printf '%s' "${s//"$HOME"/\~}"
 }
 
