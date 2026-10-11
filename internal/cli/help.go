@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -31,9 +32,15 @@ func (c *CLI) writeCommandHelp(w io.Writer, cmd command) {
 	fmt.Fprintf(&b, "Usage: %s\n\n%s\n", usage, cmd.summary)
 	fs := newFlagSet("recite " + cmd.name)
 	cmd.setup(fs, c)
+	shown := newFlagSet("recite " + cmd.name)
+	fs.VisitAll(func(f *flag.Flag) {
+		if !hiddenFlags[f.Name] {
+			shown.Var(f.Value, f.Name, f.Usage)
+		}
+	})
 	var own strings.Builder
-	fs.SetOutput(&own)
-	fs.PrintDefaults()
+	shown.SetOutput(&own)
+	shown.PrintDefaults()
 	if own.Len() > 0 {
 		b.WriteString("\nFlags:\n")
 		b.WriteString(own.String())

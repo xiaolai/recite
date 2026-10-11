@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/xiaolai/recite/internal/realtime"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -104,6 +106,7 @@ func TestDefaultCommandResolution(t *testing.T) {
 				t.Fatalf("code %d, says %d, stderr %q", r.code, len(r.says), r.stderr)
 			}
 			tc.want.Globals = defaultGlobals()
+			tc.want.Settings = realtime.DefaultSettings()
 			if got := r.says[0]; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %+v, want %+v", got, tc.want)
 			}
@@ -149,6 +152,7 @@ func TestInterspersedFlags(t *testing.T) {
 	got := r.says[0]
 	want := SayRequest{File: "x.md", Text: []string{"Hello", "world"}}
 	want.Globals = defaultGlobals()
+	want.Settings = realtime.DefaultSettings()
 	want.Globals.JSON, want.Globals.Verbose, want.Globals.AuthSource = true, 2, "codex"
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)

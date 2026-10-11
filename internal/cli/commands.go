@@ -2,8 +2,10 @@ package cli
 
 import (
 	"flag"
+	"strings"
 
 	"github.com/xiaolai/recite/internal/exitcode"
+	"github.com/xiaolai/recite/internal/realtime"
 )
 
 // Exit codes used by the router; the values live in internal/exitcode (design §12.3).
@@ -62,17 +64,74 @@ func (c *CLI) notImplemented(name string) int {
 
 // SayRequest is what the router resolved for `say`.
 type SayRequest struct {
-	Globals Globals
-	File    string
-	Text    []string
+	Globals  Globals
+	File     string
+	Text     []string
+	Settings realtime.Settings
+}
+
+// hiddenFlags are registered but left out of help (design §12.2).
+var hiddenFlags = map[string]bool{"instructions-version": true}
+
+// sayFlags holds the raw speech flags; validation happens after parsing so
+// every error lists the valid values and nothing touches the network first.
+type sayFlags struct {
+	model, voice, speed, effort string
+	modelUnchecked              bool
+	instructionsVersion         int
+}
+
+func (f *sayFlags) register(fs *flag.FlagSet) {
+	fs.StringVar(&f.model, "model", realtime.DefaultModel, "speech `MODEL`: "+strings.Join(realtime.Models, ", "))
+	fs.BoolVar(&f.modelUnchecked, "model-unchecked", false, "accept any --model name")
+	fs.StringVar(&f.voice, "voice", realtime.DefaultVoice, "`VOICE`: "+strings.Join(realtime.Voices, ", "))
+	fs.StringVar(&f.speed, "speed", "1.0", "`SPEED` from 0.25 to 1.5 in steps of 0.01")
+	fs.StringVar(&f.effort, "effort", string(realtime.DefaultEffort), "reasoning `EFFORT`: minimal, low, medium, high, xhigh")
+	fs.IntVar(&f.instructionsVersion, "instructions-version", realtime.InstructionsVersion, "instruction `VERSION` (regression comparison only)")
+}
+
+func (f *sayFlags) settings() (realtime.Settings, error) {
+	var s realtime.Settings
+	var err error
+	if s.Model, err = realtime.ParseModel(f.model, f.modelUnchecked); err != nil {
+		return s, err
+	}
+	if s.Voice, err = realtime.ParseVoice(f.voice); err != nil {
+		return s, err
+	}
+	if s.Speed, err = realtime.ParseSpeed(f.speed); err != nil {
+		return s, err
+	}
+	if s.Effort, err = realtime.ParseEffort(f.effort); err != nil {
+		return s, err
+	}
+	if _, err = realtime.Instructions(f.instructionsVersion); err != nil {
+		return s, err
+	}
+	s.InstructionsVersion = f.instructionsVersion
+	return s, nil
 }
 
 func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	var file string
+	var sf sayFlags
 	fs.StringVar(&file, "f", "", "read text from `PATH`")
 	fs.StringVar(&file, "file", "", "read text from `PATH`")
+	sf.register(fs)
 	return func(args []string) int {
-		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args})
+		settings, err := sf.settings()
+		if err != nil {
+			c.errorf("recite say: %v", err)
+			return ExitUsage
+		}
+		// M1 precondition: marker escaping (TXT-09) arrives in M2 (WP-2.2 removes this).
+		for _, a := range args {
+			if strings.Contains(a, "<<<") || strings.Contains(a, ">>>") {
+				c.errorf("recite say: the text contains <<< or >>>; this is supported from M2")
+				return ExitUsage
+			}
+		}
+		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Settings: settings})
 	}
 }
 

@@ -3,10 +3,20 @@ Usage: recite say [flags] [TEXT...]
 Text to verified audio file (default command)
 
 Flags:
+  -effort EFFORT
+    	reasoning EFFORT: minimal, low, medium, high, xhigh (default "minimal")
   -f PATH
     	read text from PATH
   -file PATH
     	read text from PATH
+  -model MODEL
+    	speech MODEL: gpt-realtime-2.1, gpt-realtime-2, gpt-realtime-2.1-mini (default "gpt-realtime-2.1")
+  -model-unchecked
+    	accept any --model name
+  -speed SPEED
+    	SPEED from 0.25 to 1.5 in steps of 0.01 (default "1.0")
+  -voice VOICE
+    	VOICE: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar (default "cedar")
 
 Global flags:
   -auth-source SOURCE
