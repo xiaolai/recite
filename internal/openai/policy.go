@@ -2,6 +2,7 @@ package openai
 
 import (
 	"fmt"
+	"github.com/xiaolai/recite/internal/testguard"
 	"net/http"
 )
 
@@ -17,6 +18,7 @@ const (
 type originPolicy struct {
 	base        http.RoundTripper
 	testOrigins map[string]bool
+	realNetwork bool // base is the production transport, not an injected fake
 }
 
 func (p *originPolicy) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -48,6 +50,10 @@ func (p *originPolicy) check(req *http.Request) error {
 		return policyError(fmt.Sprintf("host %q", u.Hostname()))
 	case u.Port() != "" && u.Port() != "443":
 		return policyError(fmt.Sprintf("port %q", u.Port()))
+	case p.realNetwork && testguard.Active():
+		// A unit test was about to reach the real API over the network: it must use a
+		// fake. Only the live suites (RECITE_LIVE=1) may spend real usage.
+		return policyError("real OpenAI origin over the real network in a non-live test run")
 	}
 	return nil
 }

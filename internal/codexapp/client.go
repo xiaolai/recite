@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/xiaolai/recite/internal/testguard"
 	"io"
 	"log/slog"
 	"os"
@@ -95,6 +96,9 @@ func codexError(msg string, cause error) error {
 func Start(ctx context.Context, cfg Config) (*Client, error) {
 	if !filepath.IsAbs(cfg.Bin) {
 		return nil, fmt.Errorf("codexapp: executable path %q is not absolute", cfg.Bin)
+	}
+	if testguard.Active() && !testguard.TempPath(cfg.Bin) {
+		return nil, fmt.Errorf("codexapp: a non-live test tried to run %s; tests must use the fake codex", cfg.Bin)
 	}
 	c := &Client{
 		timeout: cfg.Timeout,

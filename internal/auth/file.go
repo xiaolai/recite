@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/xiaolai/recite/internal/testguard"
 	"io"
 	"io/fs"
 	"os"
@@ -81,6 +82,9 @@ var errNoFile = errors.New("auth.json does not exist")
 // token. A missing file is auth-mode wrapping errNoFile; an unreadable,
 // oversized or malformed one is codex-error.
 func (s *FileSource) load() (mode, bearer string, err error) {
+	if testguard.Active() && !testguard.TempPath(s.path) {
+		return "", "", fmt.Errorf("auth: a non-live test tried to read %s; tests must use a temporary CODEX_HOME", s.path)
+	}
 	f, err := os.OpenFile(s.path, os.O_RDONLY, 0)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", "", &openai.Error{Class: openai.ClassAuthMode, Message: fmt.Sprintf("Codex is not signed in: %s does not exist; run `codex login`", s.path), Err: errNoFile}

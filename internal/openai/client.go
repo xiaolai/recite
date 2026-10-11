@@ -123,7 +123,7 @@ func NewClient(opts ...Option) (*http.Client, error) {
 		base = newTransport(c.rootCAs)
 	}
 	return &http.Client{
-		Transport:     &originPolicy{base: base, testOrigins: c.testOrigins},
+		Transport:     &originPolicy{base: base, testOrigins: c.testOrigins, realNetwork: c.base == nil},
 		CheckRedirect: refuseRedirect,
 	}, nil
 }
