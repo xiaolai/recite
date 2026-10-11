@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,22 +9,17 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"time"
 
 	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/openai"
+	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/spoken"
+	"github.com/xiaolai/recite/internal/stt"
 	"github.com/xiaolai/recite/internal/text"
-)
-
-// M1 renders one chunk: input longer than the segmentation budget waits for the
-// segmenter (implementation plan §5).
-const (
-	m1ChunkBudget = 25 * time.Second
-	m1ChunkID     = "c0001"
+	"github.com/xiaolai/recite/internal/verify"
 )
 
 // productionSynth is the real synthesizer over the production client.
@@ -40,6 +36,27 @@ func productionSynth(c *CLI) func(*auth.Credentials) (realtime.Synthesizer, erro
 			Logger:  c.Logger,
 			Dumps:   &realtime.Dumps{Dir: c.globals.DebugDir, StateDir: c.stateDir()},
 		}, nil
+	}
+}
+
+// productionTranscriber is the verifier over the production client: HTTP transcription, with
+// the realtime transcription session as the fallback once HTTP is route-denied (VER-02).
+func productionTranscriber(c *CLI) func(*auth.Credentials) (stt.Transcriber, func() error, error) {
+	return func(creds *auth.Credentials) (stt.Transcriber, func() error, error) {
+		hc, err := openai.NewClient()
+		if err != nil {
+			return nil, nil, fmt.Errorf("http client: %w", err)
+		}
+		rt := &stt.Realtime{
+			Minter: &realtime.Minter{Client: hc, BaseURL: openai.APIBase, Creds: creds},
+			Client: hc, BaseURL: openai.APIBase, Logger: c.Logger,
+		}
+		chain := &stt.Chain{
+			Primary:  &stt.HTTP{Client: hc, BaseURL: openai.APIBase, Creds: creds, Logger: c.Logger},
+			Fallback: rt,
+			Logger:   c.Logger,
+		}
+		return chain, rt.Close, nil
 	}
 }
 
@@ -66,8 +83,9 @@ func stdinIsTTY() bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-// runSay is `say` (CLI-02, M1 slice): every local check runs before the login
-// probe, and the probe before any request.
+// runSay is `say` (CLI-02): every local check — input, guard, spoken form, plan, gaps and
+// output target — runs before the login probe, and the probe before any request. The chunks
+// are rendered and verified by the scheduler and assembled in order (design §10).
 func (c *CLI) runSay(req SayRequest) int {
 	target := req.Output
 	if target == "" {
@@ -90,19 +108,27 @@ func (c *CLI) runSay(req SayRequest) int {
 		}
 		return ExitInternal
 	}
-	input, code := c.guardText(req, input)
+	g, code := c.guardText(req, input)
 	if code != ExitOK {
 		return code
 	}
 	// The spoken form is what the model is asked to say; form.Display keeps
-	// the cleaned text for the manifest and subtitles.
-	form, code := c.spokenForm(req, input)
+	// the cleaned text for the plan, the manifest and subtitles.
+	form, code := c.spokenForm(req, g.Text)
 	if code != ExitOK {
 		return code
 	}
-	input = form.Spoken
-	if est := realtime.EstimateDuration(input, req.Settings.Speed); est > m1ChunkBudget {
-		c.errorf("recite say: the text is about %.0f s of speech, over one %v chunk; multi-chunk input arrives in M2", est.Seconds(), m1ChunkBudget)
+	plan, seg, err := planChunks(input, g, form, req.ChunkSeconds, req.Settings)
+	if err != nil {
+		c.errorf("recite say: %v", err)
+		return ExitInternal
+	}
+	for _, w := range seg.Warnings {
+		c.Logger.Warn("segmentation", "code", w.Code, "chunk", plan.Chunks[w.Chunk].ID, "detail", w.Msg)
+	}
+	gaps, err := audio.GapSamples(req.Gaps, plan.Joins())
+	if err != nil {
+		c.errorf("recite say: %v", err)
 		return ExitUsage
 	}
 	spec, err := req.Settings.SessionSpec()
@@ -110,65 +136,140 @@ func (c *CLI) runSay(req SayRequest) int {
 		c.errorf("recite say: %v", err)
 		return ExitUsage
 	}
+	tasks := tasksFor(plan, spec)
 	if err := preflight(target, req.Force); err != nil {
 		return c.reportFailure(err)
 	}
+	c.Logger.Info("plan", "chunks", len(tasks), "jobs", req.Jobs)
 	return c.withCredentials(func(ctx context.Context, creds *auth.Credentials) error {
-		pcm, err := c.render(ctx, creds, spec, input)
-		if err != nil {
-			return err
-		}
-		if c.interrupted() {
-			return nil // withCredentials reports 130; an interrupted run publishes nothing
-		}
-		if err := publishOutput(target, req.Force, func(w io.Writer) error { return audio.Write(w, format, pcm) }); err != nil {
-			return err
-		}
-		c.Logger.Info("wrote output", "path", target, "seconds", pcm.Duration().Seconds())
-		return nil
+		return c.renderAll(ctx, creds, req, tasks, gaps, target, format)
 	})
 }
 
-// render speaks text as one chunk. The session is closed on every path.
-func (c *CLI) render(ctx context.Context, creds *auth.Credentials, spec realtime.SessionSpec, input string) (audio.PCM, error) {
+// renderAll renders, verifies and assembles every chunk, then publishes the output when the
+// verdicts allow it (VER-09). An unverified chunk makes exit 5 after the file is written,
+// unless --allow-unverified or --strict-output says otherwise.
+func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayRequest, tasks []pipeline.Task, gaps []int, target string, format audio.Format) error {
 	synth, err := c.NewSynth(creds)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	sess, err := synth.Open(ctx, spec)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if cerr := sess.Close(); cerr != nil {
-			c.Logger.Debug("close speech session", "err", cerr)
+	var tr stt.Transcriber
+	if req.Verify.Mode != verify.ModeOff {
+		t, closeTr, err := c.NewTranscriber(creds)
+		if err != nil {
+			return err
 		}
-	}()
-	take, err := sess.Render(ctx, realtime.RenderRequest{ChunkID: m1ChunkID, Text: input})
+		defer func() {
+			if cerr := closeTr(); cerr != nil {
+				c.Logger.Debug("close transcription session", "err", cerr)
+			}
+		}()
+		tr = t
+	}
+	var pcm bytes.Buffer
+	asm := audio.NewAssembler(&pcm, gaps)
+	cfg := pipeline.Config{
+		Jobs: req.Jobs, VerifyJobs: req.VerifyJobs, SessionChunks: req.SessionChunks,
+		Verify: req.Verify, Synth: synth, Transcriber: tr,
+		Deliver: func(i int, r verify.ChunkResult) error {
+			c.reportChunk(r)
+			return asm.Add(i, r.PCM)
+		},
+		DrainTimeout: c.DrainTimeout,
+		DebugDir:     c.globals.DebugDir,
+		Logger:       c.Logger,
+	}
+	if c.intr != nil {
+		cfg.Stop = c.intr.Stop()
+	}
+	res, err := c.RunPipeline(ctx, cfg, tasks)
+	code, write := pipeline.ExitCode(res, err, req.Policy)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if take.Status != realtime.StatusCompleted {
-		return nil, &openai.Error{Class: openai.ClassProtocol, Message: fmt.Sprintf("chunk %s ended %s", m1ChunkID, take.Status)}
+	if c.interrupted() {
+		return nil // withCredentials reports 130; an interrupted run publishes nothing
 	}
-	pcm := audio.PCM(take.PCM)
-	if err := pcm.Validate(); err != nil {
-		return nil, &openai.Error{Class: openai.ClassProtocol, Message: "the speech audio holds a partial sample", Err: err}
+	if write {
+		if err := asm.Close(); err != nil {
+			return err
+		}
+		out := audio.PCM(pcm.Bytes())
+		if err := publishOutput(target, req.Force, func(w io.Writer) error { return audio.Write(w, format, out) }); err != nil {
+			return err
+		}
+		c.Logger.Info("wrote output", "path", target, "seconds", out.Duration().Seconds())
 	}
-	return pcm, nil
+	if code != ExitOK {
+		return verdictError(res, code, write)
+	}
+	return nil
+}
+
+// reportChunk logs a delivered chunk; a chunk that is not verified is always reported.
+func (c *CLI) reportChunk(r verify.ChunkResult) {
+	switch r.State {
+	case verify.StateVerified:
+		c.Logger.Info("chunk verified", "chunk", r.ChunkID, "attempt", r.Final, "score", r.Score)
+	case verify.StateUnverified:
+		c.errorf("recite: chunk %s unverified after %d attempt(s): kept attempt %d, score %.3f%s",
+			r.ChunkID, len(r.Attempts), r.Final, r.Score, lastRejection(r))
+	default:
+		c.errorf("recite: chunk %s: no take passed the guards in %d attempt(s)%s", r.ChunkID, len(r.Attempts), lastRejection(r))
+	}
+}
+
+func lastRejection(r verify.ChunkResult) string {
+	for i := len(r.Attempts) - 1; i >= 0; i-- {
+		if rej := r.Attempts[i].Rejection; rej != nil {
+			return fmt.Sprintf(" (last rejection: %s: %s)", rej.Reason, rej.Detail)
+		}
+	}
+	return ""
+}
+
+// exitError is a finished run whose verdict is a non-zero exit code.
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e *exitError) Error() string { return e.msg }
+
+// ExitCode is the run's exit code.
+func (e *exitError) ExitCode() int { return e.code }
+
+func verdictError(res pipeline.Result, code int, written bool) error {
+	var unverified, none int
+	for _, r := range res.Chunks {
+		switch r.State {
+		case verify.StateUnverified:
+			unverified++
+		case verify.StateNoEligible:
+			none++
+		}
+	}
+	msg := fmt.Sprintf("%d of %d chunk(s) unverified, %d with no usable take", unverified, len(res.Chunks), none)
+	if written {
+		msg += "; the output was written (pass --allow-unverified to accept it)"
+	} else {
+		msg += "; no output was written"
+	}
+	return &exitError{code: code, msg: msg}
 }
 
 // guardText runs the text guard (TXT-09) before anything touches the network.
 // Findings go to stderr, one per line, unless -q; a guard failure (a fail
 // action, strict with warn-level findings, nothing speakable) is exit 2 and
 // always prints its findings.
-func (c *CLI) guardText(req SayRequest, input string) (string, int) {
+func (c *CLI) guardText(req SayRequest, input string) (guard.Result, int) {
 	res, err := guard.Run(input, req.Guard)
 	var ge *guard.Error
 	failed := errors.As(err, &ge)
 	if err != nil && !failed {
 		c.errorf("recite say: %v", err)
-		return "", ExitInternal
+		return res, ExitInternal
 	}
 	if failed || !c.globals.Quiet {
 		for _, f := range res.Findings {
@@ -177,9 +278,9 @@ func (c *CLI) guardText(req SayRequest, input string) (string, int) {
 	}
 	if failed {
 		c.errorf("recite say: %v", err)
-		return "", ExitUsage
+		return res, ExitUsage
 	}
-	return res.Text, ExitOK
+	return res, ExitOK
 }
 
 // spokenForm applies the spoken-form rules (TXT-10, TXT-11) for the text's

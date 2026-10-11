@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	rtfake "github.com/xiaolai/recite/internal/realtime/fake"
+	"github.com/xiaolai/recite/internal/stt"
 )
 
 // sayEnv is one end-to-end `say` run against the fake Codex and the fake
@@ -37,13 +39,14 @@ type sayEnv struct {
 	stdin    io.Reader
 	tty      bool
 	newSynth func(*auth.Credentials) (realtime.Synthesizer, error) // nil = Synth over srv
+	said     *lastSaid                                             // what the echo wrapper last rendered
 }
 
 func newSayEnv(t *testing.T, opts ...rtfake.Option) *sayEnv {
 	t.Helper()
 	dir := t.TempDir()
 	t.Chdir(dir)
-	return &sayEnv{t: t, dir: dir, mode: "chatgpt", tty: true, srv: rtfake.NewServer(t, speakScenario(t), opts...)}
+	return &sayEnv{t: t, dir: dir, mode: "chatgpt", tty: true, srv: rtfake.NewServer(t, speakScenario(t), opts...), said: &lastSaid{}}
 }
 
 // testClient is the production client wired to the plain-HTTP fake at rawURL.
@@ -78,9 +81,19 @@ func (e *sayEnv) run(args ...string) result {
 	c.Now = func() time.Time { return cliNow }
 	c.Stdin = e.stdin
 	c.StdinIsTTY = func() bool { return e.tty }
-	c.NewSynth = e.fakeSynth
+	newSynth := e.fakeSynth
 	if e.newSynth != nil {
-		c.NewSynth = e.newSynth
+		newSynth = e.newSynth
+	}
+	c.NewSynth = func(creds *auth.Credentials) (realtime.Synthesizer, error) {
+		s, err := newSynth(creds)
+		if err != nil {
+			return nil, err
+		}
+		return echoSynth{s, e.said}, nil
+	}
+	c.NewTranscriber = func(*auth.Credentials) (stt.Transcriber, func() error, error) {
+		return echoTranscriber{e.said}, func() error { return nil }, nil
 	}
 	full := append([]string{"--codex-bin", fakeCodex, "--codex-home", e.t.TempDir(), "--auth-source", "codex", "say"}, args...)
 	code := c.Run(full)
@@ -88,6 +101,84 @@ func (e *sayEnv) run(args ...string) result {
 }
 
 func (e *sayEnv) path(name string) string { return filepath.Join(e.dir, name) }
+
+// The speak fixture always says "Hello from recite." in 1.8 s of mostly quiet audio, which
+// the silence trim cuts to under the 200 ms empty-take guard. The plumbing tests below speak
+// other texts through it, so echoSynth makes each take say the requested text with loud audio
+// of the estimated length (rtfake.TaggedPCM), unless keepAudio asks for the fixture's audio
+// (with --no-trim); echoTranscriber hears the text. Verification itself is tested with
+// scripted fakes (say_multi_test.go).
+type lastSaid struct {
+	mu        sync.Mutex
+	text      string
+	pcm       []byte
+	keepAudio bool
+}
+
+func (l *lastSaid) set(s string, pcm []byte) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.text, l.pcm = s, pcm
+}
+
+func (l *lastSaid) get() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.text
+}
+
+// lastPCM is the audio of the last take, as rendered.
+func (l *lastSaid) lastPCM() []byte {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.pcm
+}
+
+type echoSynth struct {
+	realtime.Synthesizer
+	said *lastSaid
+}
+
+func (s echoSynth) Open(ctx context.Context, spec realtime.SessionSpec) (realtime.SpeechSession, error) {
+	ss, err := s.Synthesizer.Open(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	return echoSession{ss, s.said}, nil
+}
+
+type echoSession struct {
+	realtime.SpeechSession
+	said *lastSaid
+}
+
+func (s echoSession) Render(ctx context.Context, req realtime.RenderRequest) (realtime.Take, error) {
+	t, err := s.SpeechSession.Render(ctx, req)
+	if err != nil {
+		return t, err
+	}
+	t.Said = req.Text
+	s.said.mu.Lock()
+	keep := s.said.keepAudio
+	s.said.mu.Unlock()
+	if !keep {
+		// At least 250 ms, so a very short text is not an empty take.
+		t.PCM = rtfake.TaggedPCM(req.ChunkID, max(req.Attempt, 1), max(req.Estimate, 250*time.Millisecond))
+	}
+	s.said.set(req.Text, t.PCM)
+	return t, nil
+}
+
+type echoTranscriber struct{ said *lastSaid }
+
+func (e echoTranscriber) Transcribe(context.Context, []byte, stt.Hint) (stt.Transcript, error) {
+	return stt.Transcript{Text: e.said.get(), Languages: []stt.DetectedLanguage{}}, nil
+}
+
+// assembledPCM is the last take as a one-chunk output holds it: trimmed and faded.
+func (e *sayEnv) assembledPCM() []byte {
+	return audio.Fade(audio.Trim(e.said.lastPCM()))
+}
 
 // scenarioPCM is the audio the speak fixture streams.
 func scenarioPCM(t *testing.T) []byte {
@@ -142,12 +233,13 @@ func sentText(t *testing.T, srv *rtfake.Server) string {
 // accept: CLI-02#1
 func TestSayExit0WritesWAV(t *testing.T) {
 	e := newSayEnv(t)
-	r := e.run("Hello from recite.", "-o", "h.wav")
+	e.said.keepAudio = true // the fixture's own audio, untrimmed, reaches the file
+	r := e.run("Hello from recite.", "-o", "h.wav", "--no-trim")
 	if r.code != exitcode.OK {
 		t.Fatalf("code %d stderr %q", r.code, r.stderr)
 	}
-	if got := readWAV(t, e.path("h.wav")); !bytes.Equal(got, scenarioPCM(t)) {
-		t.Fatalf("WAV holds %d bytes, want the fixture's %d", len(got), len(scenarioPCM(t)))
+	if want := audio.Fade(scenarioPCM(t)); !bytes.Equal(readWAV(t, e.path("h.wav")), want) {
+		t.Fatalf("the WAV does not hold the fixture's %d bytes, faded", len(want))
 	}
 	if !strings.Contains(sentText(t, e.srv), "Hello from recite.") || !strings.Contains(sentText(t, e.srv), `"c0001"`) {
 		t.Fatalf("request: %s", sentText(t, e.srv))
@@ -187,7 +279,7 @@ func TestSayFlagsReachComponents(t *testing.T) {
 	if r := e.run("-o", "out.pcm"); r.code != 0 {
 		t.Fatalf("stdin: %+v", r)
 	}
-	if b, err := os.ReadFile(e.path("out.pcm")); err != nil || !bytes.Equal(b, scenarioPCM(t)) {
+	if b, err := os.ReadFile(e.path("out.pcm")); err != nil || !bytes.Equal(b, e.assembledPCM()) {
 		t.Fatalf("pcm: %v", err)
 	}
 	e = newSayEnv(t)
@@ -235,7 +327,6 @@ func TestSayInputErrorsExit2(t *testing.T) {
 		{[]string{"hello\x00world"}, "NUL byte at byte offset 5"},
 		{[]string{" \n "}, "nothing to speak"},
 		{[]string{"\u200b 🎉"}, "nothing speakable"},
-		{[]string{strings.Repeat("A long sentence of speech. ", 20)}, "multi-chunk input arrives in M2"},
 		{nil, "no input"}, // stdin is a terminal
 	} {
 		r := e.run(tc.args...)
@@ -336,7 +427,7 @@ func TestLinkPublicationNeverOverwrites(t *testing.T) {
 		t.Fatalf("no temp path in %q", r.stderr)
 	}
 	kept := strings.TrimSpace(r.stderr[i+len("kept at "):])
-	if got := readWAV(t, kept); !bytes.Equal(got, scenarioPCM(t)) {
+	if got := readWAV(t, kept); !bytes.Equal(got, e.assembledPCM()) {
 		t.Fatalf("kept audio differs")
 	}
 }

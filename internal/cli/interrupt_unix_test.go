@@ -25,6 +25,7 @@ import (
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	rtfake "github.com/xiaolai/recite/internal/realtime/fake"
+	"github.com/xiaolai/recite/internal/stt"
 )
 
 const (
@@ -74,6 +75,9 @@ func sigintHelper(dir string) int {
 	c.DrainTimeout = 200 * time.Millisecond
 	c.NewSynth = func(creds *auth.Credentials) (realtime.Synthesizer, error) {
 		return &realtime.Synth{Minter: &realtime.Minter{Client: hc, BaseURL: base, Creds: creds}, Client: hc, BaseURL: base}, nil
+	}
+	c.NewTranscriber = func(*auth.Credentials) (stt.Transcriber, func() error, error) {
+		return echoTranscriber{&lastSaid{text: "Hello from recite."}}, func() error { return nil }, nil
 	}
 	code := c.Run([]string{"--codex-bin", os.Getenv(sigintFakeCodexEnv), "--codex-home", filepath.Join(dir, "home"),
 		"--auth-source", "codex", "say", "Hello from recite.", "-o", filepath.Join(dir, "out", "h.wav")})

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
+	"github.com/xiaolai/recite/internal/stt"
 )
 
 // CLI is one invocation of recite. Say is injectable so tests can observe how
@@ -32,6 +34,11 @@ type CLI struct {
 	StdinIsTTY func() bool
 	// NewSynth builds the speech synthesizer over the probed credentials.
 	NewSynth func(*auth.Credentials) (realtime.Synthesizer, error)
+	// NewTranscriber builds the verifier over the probed credentials; close ends any session
+	// it opened.
+	NewTranscriber func(*auth.Credentials) (tr stt.Transcriber, close func() error, err error)
+	// RunPipeline is the scheduler (pipeline.Run); tests wrap it to observe its configuration.
+	RunPipeline func(context.Context, pipeline.Config, []pipeline.Task) (pipeline.Result, error)
 	// Signals subscribes to SIGINT and SIGTERM and returns the unsubscribe function.
 	Signals func() (<-chan os.Signal, func())
 	// DrainTimeout bounds the graceful drain after the first interrupt; 0 means
@@ -47,6 +54,8 @@ func New(stdout, stderr io.Writer) *CLI {
 	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now, Stdin: os.Stdin, StdinIsTTY: stdinIsTTY, Signals: notifySignals}
 	c.Say = c.runSay
 	c.NewSynth = productionSynth(c)
+	c.NewTranscriber = productionTranscriber(c)
+	c.RunPipeline = pipeline.Run
 	return c
 }
 

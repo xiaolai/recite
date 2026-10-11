@@ -1,14 +1,21 @@
 package cli
 
 import (
+	"errors"
 	"flag"
+	"fmt"
+	"math"
 	"strings"
+
+	"github.com/xiaolai/recite/internal/audio"
 
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/guard"
+	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/text"
+	"github.com/xiaolai/recite/internal/verify"
 )
 
 // Exit codes used by the router; the values live in internal/exitcode (design §12.3).
@@ -35,7 +42,7 @@ func (c *CLI) commands() []command {
 	return []command{
 		{"say", "[TEXT...]", "Text to verified audio file (default command)", setupSay},
 		{"render", "PROJECT.toml", "Render a batch or project into many outputs", stub("render")},
-		{"check", "FILE", "Text guard, spoken form and chunk plan, no network", stub("check")},
+		{"check", "FILE", "Text guard, spoken form and chunk plan, no network", setupCheck},
 		{"prepare", "FILE", "Write the editable spoken-form script", stub("prepare")},
 		{"voices", "", "List voices", stub("voices")},
 		{"doctor", "", "Check the environment and the route", stub("doctor")},
@@ -79,6 +86,14 @@ type SayRequest struct {
 	Settings realtime.Settings
 	Guard    guard.Options
 	Spoken   spoken.Options
+
+	ChunkSeconds  float64 // segmentation budget (TXT-03)
+	Gaps          audio.Gaps
+	Jobs          int // render workers (RUN-02)
+	VerifyJobs    int // verify workers; 0 means 2 × Jobs
+	SessionChunks int // renders per pooled session before rotation (SPK-06)
+	Verify        verify.Options
+	Policy        verify.OutputPolicy
 }
 
 // hiddenFlags are registered but left out of help (design §12.2).
@@ -123,37 +138,146 @@ func (f *sayFlags) settings() (realtime.Settings, error) {
 	return s, nil
 }
 
+// textFlags are the text-stage flags `say` and `check` share: input limit,
+// guard, spoken form and segmentation.
+type textFlags struct {
+	maxInput     int64
+	policy       string
+	actionSpecs  []string
+	normalize    string
+	dateStyle    string
+	disableSpecs []string
+	chunkSeconds float64
+}
+
+func (f *textFlags) register(fs *flag.FlagSet) {
+	f.maxInput = text.DefaultMaxInput
+	fs.Int64Var(&f.maxInput, "max-input", f.maxInput, "input size limit in `BYTES`")
+	f.policy = string(guard.PolicyFix)
+	fs.StringVar(&f.policy, "guard", f.policy, "text guard `POLICY`: fix, strict, warn or off")
+	fs.Func("guard-action", "set a guard rule's action, `CODE=ACTION` (repeatable)", func(s string) error {
+		f.actionSpecs = append(f.actionSpecs, s)
+		return nil
+	})
+	f.normalize, f.dateStyle = string(spoken.ModeAuto), string(spoken.DateUS)
+	fs.StringVar(&f.normalize, "normalize", f.normalize, "spoken-form `MODE`: auto or off")
+	fs.Func("normalize-disable", "turn off spoken-form rules, `RULE,…` (repeatable)", func(s string) error {
+		f.disableSpecs = append(f.disableSpecs, s)
+		return nil
+	})
+	fs.StringVar(&f.dateStyle, "date-style", f.dateStyle, "spoken date `STYLE`: us, uk or iso")
+	f.chunkSeconds = text.DefaultChunkSeconds
+	fs.Float64Var(&f.chunkSeconds, "chunk-seconds", f.chunkSeconds, "segmentation budget in `SECONDS` per chunk")
+}
+
+func (f *textFlags) resolve() (guard.Options, spoken.Options, error) {
+	if f.maxInput <= 0 {
+		return guard.Options{}, spoken.Options{}, errors.New("--max-input must be a positive number of bytes")
+	}
+	if !(f.chunkSeconds > 0) || math.IsInf(f.chunkSeconds, 0) {
+		return guard.Options{}, spoken.Options{}, fmt.Errorf("--chunk-seconds %v: want a positive number of seconds", f.chunkSeconds)
+	}
+	g, err := guardOptions(f.policy, f.actionSpecs)
+	if err != nil {
+		return guard.Options{}, spoken.Options{}, err
+	}
+	so, err := spokenOptions(f.normalize, f.dateStyle, f.disableSpecs)
+	if err != nil {
+		return guard.Options{}, spoken.Options{}, err
+	}
+	return g, so, nil
+}
+
+// runFlags are the M2 rendering flags of `say`: scheduling, verification and gaps.
+type runFlags struct {
+	jobs, verifyJobs, sessionChunks   int
+	verify                            string
+	maxAttempts, requestExtraAttempts int
+	noTrim                            bool
+	allowUnverified, strictOutput     bool
+	gapSentence, gapList              string
+	gapParagraph, gapSection          string
+	gapSeed                           int64
+}
+
+func (f *runFlags) register(fs *flag.FlagSet) {
+	fs.IntVar(&f.jobs, "jobs", pipeline.DefaultJobs, fmt.Sprintf("render `N` chunks at once, 1 to %d", pipeline.MaxJobs))
+	fs.IntVar(&f.verifyJobs, "verify-jobs", 0, "verify `N` takes at once (default 2 × --jobs)")
+	fs.IntVar(&f.sessionChunks, "session-chunks", realtime.DefaultSessionChunks, "renders per speech session before it is replaced, `N`")
+	fs.StringVar(&f.verify, "verify", string(verify.ModeNormal), "verification `MODE`: strict, normal or off")
+	fs.IntVar(&f.maxAttempts, "max-attempts", verify.DefaultMaxAttempts, "renders per chunk, `N`")
+	fs.IntVar(&f.requestExtraAttempts, "request-extra-attempts", verify.DefaultRequestExtraAttempts, "extra renders for a request-like chunk, `N`")
+	fs.BoolVar(&f.noTrim, "no-trim", false, "keep the leading and trailing silence of each take")
+	fs.BoolVar(&f.allowUnverified, "allow-unverified", false, "exit 0 when a chunk stays unverified")
+	fs.BoolVar(&f.strictOutput, "strict-output", false, "write no output when a chunk stays unverified")
+	d := audio.DefaultGaps()
+	fs.StringVar(&f.gapSentence, "gap-sentence", d.Sentence.String(), "gap after a sentence, `DUR` or MIN..MAX")
+	fs.StringVar(&f.gapList, "gap-list", d.List.String(), "gap after a list item, `DUR` or MIN..MAX")
+	fs.StringVar(&f.gapParagraph, "gap-paragraph", d.Paragraph.String(), "gap after a paragraph, `DUR` or MIN..MAX")
+	fs.StringVar(&f.gapSection, "gap-section", d.Section.String(), "gap after a section, `DUR` or MIN..MAX")
+	fs.Int64Var(&f.gapSeed, "gap-seed", 0, "`SEED` of the random gaps; the same seed gives the same gaps")
+}
+
+// apply validates the flags into req. Every error is a usage error (exit 2).
+func (f *runFlags) apply(req *SayRequest) error {
+	if err := pipeline.ValidateJobs(f.jobs, f.verifyJobs); err != nil {
+		return err
+	}
+	if f.sessionChunks < 1 {
+		return fmt.Errorf("--session-chunks %d: want at least 1", f.sessionChunks)
+	}
+	mode, err := verify.ParseMode(f.verify)
+	if err != nil {
+		return err
+	}
+	if f.maxAttempts < 1 {
+		return fmt.Errorf("--max-attempts %d: want at least 1", f.maxAttempts)
+	}
+	if f.requestExtraAttempts < 0 {
+		return fmt.Errorf("--request-extra-attempts %d: want 0 or more", f.requestExtraAttempts)
+	}
+	g := audio.Gaps{Seed: f.gapSeed}
+	for _, x := range []struct {
+		name, val string
+		dst       *audio.GapRange
+	}{
+		{"--gap-sentence", f.gapSentence, &g.Sentence},
+		{"--gap-list", f.gapList, &g.List},
+		{"--gap-paragraph", f.gapParagraph, &g.Paragraph},
+		{"--gap-section", f.gapSection, &g.Section},
+	} {
+		r, err := audio.ParseGapRange(x.val)
+		if err != nil {
+			return fmt.Errorf("%s: %w", x.name, err)
+		}
+		*x.dst = r
+	}
+	req.Jobs, req.VerifyJobs, req.SessionChunks = f.jobs, f.verifyJobs, f.sessionChunks
+	req.Verify = verify.Options{Mode: mode, MaxAttempts: f.maxAttempts, RequestExtraAttempts: f.requestExtraAttempts, NoTrim: f.noTrim}
+	req.Policy = verify.OutputPolicy{AllowUnverified: f.allowUnverified, StrictOutput: f.strictOutput}
+	req.Gaps = g
+	return nil
+}
+
 func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	var file string
 	var sf sayFlags
+	var tf textFlags
+	var rf runFlags
 	fs.StringVar(&file, "f", "", "read text from `PATH`")
 	fs.StringVar(&file, "file", "", "read text from `PATH`")
 	var output string
 	var force bool
-	var maxInput int64
 	fs.StringVar(&output, "o", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
 	fs.StringVar(&output, "output", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
 	fs.BoolVar(&force, "force", false, "overwrite the output")
-	fs.Int64Var(&maxInput, "max-input", text.DefaultMaxInput, "input size limit in `BYTES`")
 	sf.register(fs)
-	policy := string(guard.PolicyFix)
-	var actionSpecs []string
-	fs.StringVar(&policy, "guard", policy, "text guard `POLICY`: fix, strict, warn or off")
-	fs.Func("guard-action", "set a guard rule's action, `CODE=ACTION` (repeatable)", func(s string) error {
-		actionSpecs = append(actionSpecs, s)
-		return nil
-	})
-	normalize, dateStyle := string(spoken.ModeAuto), string(spoken.DateUS)
-	var disableSpecs []string
-	fs.StringVar(&normalize, "normalize", normalize, "spoken-form `MODE`: auto or off")
-	fs.Func("normalize-disable", "turn off spoken-form rules, `RULE,…` (repeatable)", func(s string) error {
-		disableSpecs = append(disableSpecs, s)
-		return nil
-	})
-	fs.StringVar(&dateStyle, "date-style", dateStyle, "spoken date `STYLE`: us, uk or iso")
+	tf.register(fs)
+	rf.register(fs)
 	return func(args []string) int {
-		if maxInput <= 0 {
-			c.errorf("recite say: --max-input must be a positive number of bytes")
+		g, so, err := tf.resolve()
+		if err != nil {
+			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
 		settings, err := sf.settings()
@@ -161,17 +285,13 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
-		g, err := guardOptions(policy, actionSpecs)
-		if err != nil {
+		req := SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: tf.maxInput,
+			Settings: settings, Guard: g, Spoken: so, ChunkSeconds: tf.chunkSeconds}
+		if err := rf.apply(&req); err != nil {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
-		so, err := spokenOptions(normalize, dateStyle, disableSpecs)
-		if err != nil {
-			c.errorf("recite say: %v", err)
-			return ExitUsage
-		}
-		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: maxInput, Settings: settings, Guard: g, Spoken: so})
+		return c.Say(req)
 	}
 }
 

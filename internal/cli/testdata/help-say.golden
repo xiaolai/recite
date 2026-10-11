@@ -3,6 +3,10 @@ Usage: recite say [flags] [TEXT...]
 Text to verified audio file (default command)
 
 Flags:
+  -allow-unverified
+    	exit 0 when a chunk stays unverified
+  -chunk-seconds SECONDS
+    	segmentation budget in SECONDS per chunk (default 25)
   -date-style STYLE
     	spoken date STYLE: us, uk or iso (default "us")
   -effort EFFORT
@@ -13,16 +17,32 @@ Flags:
     	read text from PATH
   -force
     	overwrite the output
+  -gap-list DUR
+    	gap after a list item, DUR or MIN..MAX (default "350ms..500ms")
+  -gap-paragraph DUR
+    	gap after a paragraph, DUR or MIN..MAX (default "550ms..800ms")
+  -gap-section DUR
+    	gap after a section, DUR or MIN..MAX (default "1.1s..1.5s")
+  -gap-seed SEED
+    	SEED of the random gaps; the same seed gives the same gaps
+  -gap-sentence DUR
+    	gap after a sentence, DUR or MIN..MAX (default "200ms..350ms")
   -guard POLICY
     	text guard POLICY: fix, strict, warn or off (default "fix")
   -guard-action CODE=ACTION
     	set a guard rule's action, CODE=ACTION (repeatable)
+  -jobs N
+    	render N chunks at once, 1 to 6 (default 3)
+  -max-attempts N
+    	renders per chunk, N (default 3)
   -max-input BYTES
     	input size limit in BYTES (default 10485760)
   -model MODEL
     	speech MODEL: gpt-realtime-2.1, gpt-realtime-2, gpt-realtime-2.1-mini (default "gpt-realtime-2.1")
   -model-unchecked
     	accept any --model name
+  -no-trim
+    	keep the leading and trailing silence of each take
   -normalize MODE
     	spoken-form MODE: auto or off (default "auto")
   -normalize-disable RULE,…
@@ -31,8 +51,18 @@ Flags:
     	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
   -output PATH
     	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
+  -request-extra-attempts N
+    	extra renders for a request-like chunk, N (default 1)
+  -session-chunks N
+    	renders per speech session before it is replaced, N (default 50)
   -speed SPEED
     	SPEED from 0.25 to 1.5 in steps of 0.01 (default "1.0")
+  -strict-output
+    	write no output when a chunk stays unverified
+  -verify MODE
+    	verification MODE: strict, normal or off (default "normal")
+  -verify-jobs N
+    	verify N takes at once (default 2 × --jobs)
   -voice VOICE
     	VOICE: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar (default "cedar")
 

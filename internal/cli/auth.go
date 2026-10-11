@@ -217,6 +217,19 @@ func (c *CLI) reportFailure(err error) int {
 		c.errorf("recite: %v", err)
 		return ExitUsage
 	}
+	// A run's failures are each reported; the exit code is the most severe (CLI-03).
+	var re *pipeline.RunError
+	if errors.As(err, &re) {
+		for _, e := range re.Errs {
+			c.reportFailure(e)
+		}
+		return re.ExitCode()
+	}
+	var coded interface{ ExitCode() int }
+	if errors.As(err, &coded) {
+		c.errorf("recite: %v", err)
+		return coded.ExitCode()
+	}
 	var e *openai.Error
 	if !errors.As(err, &e) {
 		c.errorf("recite: %v", err)

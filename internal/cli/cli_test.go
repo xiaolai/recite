@@ -9,10 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/guard"
+	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/text"
+	"github.com/xiaolai/recite/internal/verify"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -93,6 +96,14 @@ func TestHelpGolden(t *testing.T) {
 	}
 }
 
+// sayDefaults sets the M2 rendering defaults of a SayRequest.
+func sayDefaults(r *SayRequest) {
+	r.ChunkSeconds = text.DefaultChunkSeconds
+	r.Gaps = audio.DefaultGaps()
+	r.Jobs, r.SessionChunks = pipeline.DefaultJobs, realtime.DefaultSessionChunks
+	r.Verify = verify.DefaultOptions()
+}
+
 // accept: CLI-01#1
 func TestDefaultCommandResolution(t *testing.T) {
 	cases := []struct {
@@ -119,6 +130,7 @@ func TestDefaultCommandResolution(t *testing.T) {
 			tc.want.MaxInput = text.DefaultMaxInput
 			tc.want.Guard = guard.Options{Policy: guard.PolicyFix}
 			tc.want.Spoken = spoken.Options{Mode: spoken.ModeAuto, DateStyle: spoken.DateUS}
+			sayDefaults(&tc.want)
 			if got := r.says[0]; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %+v, want %+v", got, tc.want)
 			}
@@ -130,7 +142,7 @@ func TestDefaultCommandResolution(t *testing.T) {
 		t.Errorf("recite Hello %+v != recite say Hello %+v", a.says, b.says)
 	}
 	// A first argument naming a command is that command, not text.
-	if r := run("check", "x.md"); len(r.says) != 0 || !strings.Contains(r.stderr, "recite check: not implemented yet") {
+	if r := run("check", "x.md"); len(r.says) != 0 || !strings.Contains(r.stderr, "recite check: cannot read input file") {
 		t.Errorf("check routed to say: %+v", r)
 	}
 }
@@ -168,6 +180,7 @@ func TestInterspersedFlags(t *testing.T) {
 	want.MaxInput = text.DefaultMaxInput
 	want.Guard = guard.Options{Policy: guard.PolicyFix}
 	want.Spoken = spoken.Options{Mode: spoken.ModeAuto, DateStyle: spoken.DateUS}
+	sayDefaults(&want)
 	want.Globals.JSON, want.Globals.Verbose, want.Globals.AuthSource = true, 2, "codex"
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -186,7 +199,7 @@ func TestInterspersedFlags(t *testing.T) {
 
 func TestStubs(t *testing.T) {
 	for _, cmd := range New(nil, nil).commands() {
-		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" {
+		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" || cmd.name == "check" {
 			continue
 		}
 		r := run(cmd.name)

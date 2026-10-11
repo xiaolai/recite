@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xiaolai/recite/docs/schema/findings.schema.json",
+  "title": "recite check --json",
+  "description": "The report of `recite check --json` (CLI-14, design §7.10): guard findings, ambiguous spans, request-like chunks, the chunk plan and a risk summary. One JSON document on stdout. Version 1 (M2).",
+  "version": 1,
+  "type": "object",
+  "required": ["schema", "input", "guard_policy", "language", "findings", "ambiguous", "request_like", "plan", "risk", "exit"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "recite/findings@1" },
+    "input": { "description": "The FILE argument; - is stdin.", "type": "string", "minLength": 1 },
+    "guard_policy": { "enum": ["fix", "strict", "warn", "off"] },
+    "language": { "description": "The resolved language of the guarded text; empty when nothing speakable is left.", "type": "string" },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "ambiguous": { "type": "array", "items": { "$ref": "#/$defs/ambiguous" } },
+    "request_like": {
+      "description": "IDs of chunks holding a G-REQUEST finding; each gets the extra attempt of TXT-14.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/chunk_id" }
+    },
+    "plan": { "$ref": "#/$defs/plan" },
+    "risk": { "$ref": "#/$defs/risk" },
+    "exit": { "description": "The exit code: 0, or 2 when `say` with the same flags would stop at the text stage.", "enum": [0, 2] }
+  },
+  "$defs": {
+    "chunk_id": { "type": "string", "pattern": "^c[0-9]{4,}$" },
+    "position": { "type": "integer", "minimum": 1 },
+    "finding": {
+      "description": "A guard finding (design §7.6) at its 1-based line and column (in characters) of the input.",
+      "type": "object",
+      "required": ["code", "line", "col", "severity", "action", "before", "after"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "pattern": "^G-[A-Z-]+$" },
+        "line": { "$ref": "#/$defs/position" },
+        "col": { "$ref": "#/$defs/position" },
+        "severity": { "enum": ["info", "warn", "error"] },
+        "action": { "type": "string", "minLength": 1 },
+        "before": { "type": "string" },
+        "after": { "type": "string" }
+      }
+    },
+    "ambiguous": {
+      "description": "An N-AMBIGUOUS span (design §7.7) at its line and column of the guarded text, left as written.",
+      "type": "object",
+      "required": ["code", "rule", "line", "col", "text", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "const": "N-AMBIGUOUS" },
+        "rule": { "type": "string", "minLength": 1 },
+        "line": { "$ref": "#/$defs/position" },
+        "col": { "$ref": "#/$defs/position" },
+        "text": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string" }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "required": ["chunks", "est_seconds", "items", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "chunks": { "type": "integer", "minimum": 0 },
+        "est_seconds": { "type": "number", "minimum": 0 },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "est_ms", "boundary", "display", "spoken", "findings"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/chunk_id" },
+              "est_ms": { "type": "integer", "minimum": 0 },
+              "boundary": { "enum": ["char", "word", "clause", "sentence", "list-item", "paragraph", "section", "pause", "end"] },
+              "display": { "type": "string" },
+              "spoken": { "type": "string" },
+              "findings": { "description": "Codes of the findings inside the chunk.", "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "chunk", "seconds", "message"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "enum": ["S-SPLIT", "S-OVERLONG"] },
+              "chunk": { "$ref": "#/$defs/chunk_id" },
+              "seconds": { "type": "number", "minimum": 0 },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "required": ["errors", "warnings", "info", "ambiguous", "request_like", "split", "overlong", "strict_would_fail"],
+      "additionalProperties": false,
+      "properties": {
+        "errors": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 },
+        "info": { "type": "integer", "minimum": 0 },
+        "ambiguous": { "type": "integer", "minimum": 0 },
+        "request_like": { "type": "integer", "minimum": 0 },
+        "split": { "type": "integer", "minimum": 0 },
+        "overlong": { "type": "integer", "minimum": 0 },
+        "strict_would_fail": { "type": "boolean" }
+      }
+    }
+  }
+}
