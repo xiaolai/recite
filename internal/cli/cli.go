@@ -5,7 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"strings"
+
+	"github.com/xiaolai/recite/internal/logx"
 )
 
 // CLI is one invocation of recite. Say is injectable so tests can observe how
@@ -14,6 +18,8 @@ type CLI struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	Say    func(SayRequest) int
+	// Logger is the redacting logger, set up from the global flags before a command runs.
+	Logger *slog.Logger
 
 	globals Globals
 }
@@ -28,6 +34,7 @@ func New(stdout, stderr io.Writer) *CLI {
 // Run executes recite with args (without the program name) and returns the exit code.
 func (c *CLI) Run(args []string) int {
 	c.globals = defaultGlobals()
+	args = expandVerbose(args)
 
 	// Global flags come first. An unknown flag here is a `say` flag
 	// (`recite -f x.md`), so the whole line goes to `say`.
@@ -80,7 +87,32 @@ func (c *CLI) runCommand(cmd command, args []string) int {
 		}
 		return c.usageErr("recite "+cmd.name, err)
 	}
+	closeLog, err := c.setupLogging()
+	if err != nil {
+		c.errorf("recite: %v", err)
+		return ExitUsage
+	}
+	defer closeLog()
 	return run(positional)
+}
+
+// expandVerbose rewrites stacked verbosity flags (-vv, -vvv) into repeated -v,
+// which the flag package parses as a counter. Arguments after "--" are text.
+func expandVerbose(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i, a := range args {
+		if a == "--" {
+			return append(out, args[i:]...)
+		}
+		if len(a) > 2 && strings.Trim(a[1:], "v") == "" && a[0] == '-' {
+			for range len(a) - 1 {
+				out = append(out, "-v")
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // parseInterspersed parses flags anywhere among the positional arguments.
@@ -123,9 +155,31 @@ func (c *CLI) usageErr(prefix string, err error) int {
 	return ExitUsage
 }
 
+// setupLogging builds c.Logger from the global flags (OBS-01): text on stderr,
+// or JSON appended to --log-file. Every handler is wrapped by the redactor.
+func (c *CLI) setupLogging() (closeFn func(), err error) {
+	level := logx.Level(c.globals.Quiet, c.globals.Verbose)
+	if c.globals.LogFile == "" {
+		c.Logger = logx.New(c.Stderr, level, false)
+		return func() {}, nil
+	}
+	f, err := os.OpenFile(c.globals.LogFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+	c.Logger = logx.New(f, level, true)
+	return func() {
+		if err := f.Close(); err != nil {
+			c.errorf("recite: close log file: %v", err)
+		}
+	}, nil
+}
+
+// errorf writes a user-facing error. It passes through the scrubber, so a
+// secret embedded in a wrapped error never reaches the terminal (AUTH-05).
 func (c *CLI) errorf(format string, a ...any) {
 	// A failed write to stderr has nowhere left to be reported.
-	_, _ = fmt.Fprintf(c.Stderr, format+"\n", a...)
+	_, _ = io.WriteString(c.Stderr, logx.Scrub(fmt.Sprintf(format, a...))+"\n")
 }
 
 func (c *CLI) writeResult(err error) int {
