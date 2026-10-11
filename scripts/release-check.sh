@@ -24,6 +24,8 @@ if [ ! -x "$bin" ]; then
 	echo "release-check.sh: ${bin} is not an executable; run make release or set RECITE_BIN" >&2
 	exit 2
 fi
+# The round-trip test runs in its package directory, so it gets the binary by absolute path.
+abs_bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 work="dist/release-check-${stamp}"
 report="dist/release-check-${stamp}.md"
@@ -130,7 +132,7 @@ for effort in minimal low medium; do
 done
 step "compressed format m4a" "${work}/en.m4a.json" say "${work}/en.m4a" -f "${work}/en.txt"
 step "transcription round-trip (binary renders, independent STT)" "" \
-	go test -tags live -count=1 -run '^TestLiveSayHello$' -v ./internal/cli
+	env RECITE_BIN="$abs_bin" go test -tags live -count=1 -run '^TestLiveSayHello$' -v ./internal/cli
 step "transcription of a known sentence" "" \
 	go test -tags live -count=1 -run '^TestLiveHTTPKnownSentence$' -v ./internal/stt
 

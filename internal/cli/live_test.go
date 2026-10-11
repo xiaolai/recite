@@ -28,9 +28,16 @@ func TestLiveSayHello(t *testing.T) {
 		t.Skip("set RECITE_LIVE=1 to run against the real service")
 	}
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "recite")
-	if out, err := exec.Command("go", "build", "-o", bin, "../../cmd/recite").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
+	// RECITE_BIN names a release binary to test (scripts/release-check.sh sets it); otherwise
+	// the test builds one from this tree.
+	bin := os.Getenv("RECITE_BIN")
+	if bin == "" {
+		bin = filepath.Join(dir, "recite")
+		if out, err := exec.Command("go", "build", "-o", bin, "../../cmd/recite").CombinedOutput(); err != nil {
+			t.Fatalf("build: %v\n%s", err, out)
+		}
+	} else if !filepath.IsAbs(bin) {
+		t.Fatalf("RECITE_BIN %q: want an absolute path (go test runs in the package directory)", bin)
 	}
 	wav := filepath.Join(dir, "h.wav")
 	cmd := exec.Command(bin, "say", "Hello", "-o", wav)
