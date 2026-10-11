@@ -85,7 +85,7 @@ func TestHelpGolden(t *testing.T) {
 			golden(t, tc.name, r.stdout)
 		})
 	}
-	// Every registered command has help, and `mcp` (post-1.0) is not registered.
+	// Every registered command has help, and `mcp` (rejected, design D21) is not registered.
 	for _, cmd := range New(nil, nil).commands() {
 		if r := run("help", cmd.name); r.code != ExitOK || !strings.HasPrefix(r.stdout, "Usage: recite "+cmd.name) {
 			t.Errorf("help %s: code %d, %q", cmd.name, r.code, r.stdout)

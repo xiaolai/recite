@@ -29,7 +29,6 @@ const (
 	Request     Code = "G-REQUEST"
 	Marker      Code = "G-MARKER"
 	Mark        Code = "G-MARK"
-	Typo        Code = "G-TYPO"
 	Empty       Code = "G-EMPTY"
 )
 
@@ -110,7 +109,7 @@ var rules = map[Code]rule{
 // Codes lists every code in report order.
 func Codes() []Code {
 	return []Code{Encoding, Control, Whitespace, RepeatPunct, Markup, URL, Email, Path, CodeToken,
-		LongToken, Footnote, Emoji, Symbol, Homoglyph, Request, Marker, Mark, Typo, Empty}
+		LongToken, Footnote, Emoji, Symbol, Homoglyph, Request, Marker, Mark, Empty}
 }
 
 // Allowed lists the actions code may be set to, default first.
@@ -181,9 +180,6 @@ func ParsePolicy(s string) (Policy, error) {
 
 // ParseAction validates a per-code action from config [guard] (TXT-09).
 func ParseAction(code Code, s string) (Action, error) {
-	if code == Typo {
-		return "", fmt.Errorf("G-TYPO is not detected; its report action needs the Codex proofreading pass (INT-04)")
-	}
 	allowed := Allowed(code)
 	if allowed == nil {
 		return "", fmt.Errorf("unknown guard code %q", code)

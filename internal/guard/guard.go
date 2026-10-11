@@ -11,12 +11,6 @@ import (
 	"github.com/xiaolai/recite/internal/text"
 )
 
-// TypoChecker is the G-TYPO hook. Nothing is detected by default; the Codex
-// proofreading pass (INT-04) plugs in here and only reports, never edits.
-type TypoChecker interface {
-	Check(s string) []Finding
-}
-
 // Options configures one guard run.
 type Options struct {
 	Policy Policy // "" means fix
@@ -24,7 +18,6 @@ type Options struct {
 	Actions map[Code]Action
 	// Markdown says the input is Markdown, so ** ## ` are syntax, not residue.
 	Markdown bool
-	Typo     TypoChecker
 	// Marks parses speech marks (§7.8) before the guard: each becomes its
 	// display text, which no detector touches, and a malformed one is G-MARK.
 	Marks bool
@@ -110,9 +103,6 @@ func Run(s string, o Options) (Result, error) {
 		for _, m := range findRequest(out) {
 			fs.add(m, out)
 		}
-		if o.Typo != nil {
-			fs.extra = append(fs.extra, o.Typo.Check(out)...)
-		}
 	}
 	res := Result{Text: out, Findings: fs.list(), Edits: d.edits(), Marks: marks, Placed: d.marks()}
 	if !Speakable(out) {
@@ -176,7 +166,6 @@ type findingSet struct {
 	d     *spanDoc
 	byKey map[findingKey]int
 	items []item
-	extra []Finding
 }
 
 type findingKey struct {
@@ -222,11 +211,11 @@ func (fs *findingSet) list() []Finding {
 		}
 		return codeOrder(a.f.Code) < codeOrder(b.f.Code)
 	})
-	out := make([]Finding, 0, len(fs.items)+len(fs.extra))
+	out := make([]Finding, 0, len(fs.items))
 	for _, it := range fs.items {
 		out = append(out, it.f)
 	}
-	return append(out, fs.extra...)
+	return out
 }
 
 func codeOrder(c Code) int {

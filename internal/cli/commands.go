@@ -38,8 +38,7 @@ type command struct {
 	setup   func(fs *flag.FlagSet, c *CLI) func(args []string) int
 }
 
-// commands lists every 1.0 command of design §12.1 in help order. `mcp` is
-// post-1.0 (M8) and deliberately absent.
+// commands lists every command of design §12.1 in help order.
 func (c *CLI) commands() []command {
 	return []command{
 		{"say", "[TEXT...]", "Text to verified audio file (default command)", setupSay},

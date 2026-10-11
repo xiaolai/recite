@@ -216,7 +216,6 @@ func TestParseAction(t *testing.T) {
 		{"G-NOPE", "keep", "unknown guard code"},
 		{URL, "keep", "G-URL takes host, full, drop, fail"},
 		{Request, "drop", "G-REQUEST takes flag"},
-		{Typo, "report", "INT-04"},
 		{Marker, "keep", "G-MARKER takes escape"},
 		{Encoding, "keep", "G-ENCODING takes fail"},
 	} {
@@ -327,23 +326,6 @@ func TestEncodingFinding(t *testing.T) {
 	}
 	if _, ok := EncodingFinding(raw, errors.New("other")); ok {
 		t.Fatal("non-input error mapped")
-	}
-}
-
-type typoStub struct{}
-
-func (typoStub) Check(string) []Finding {
-	return []Finding{{Code: Typo, Line: 1, Col: 1, Action: "report", Before: "Ths", After: "Ths"}}
-}
-
-func TestTypoHook(t *testing.T) {
-	r, err := Run("Ths is fine.", Options{})
-	if err != nil || slices.ContainsFunc(r.Findings, func(f Finding) bool { return f.Code == Typo }) {
-		t.Fatalf("typo detected by default: %v %v", r.Findings, err)
-	}
-	r, err = Run("Ths is fine.", Options{Typo: typoStub{}})
-	if err != nil || r.Text != "Ths is fine." || !slices.ContainsFunc(r.Findings, func(f Finding) bool { return f.Code == Typo }) {
-		t.Fatalf("hook: %q %v %v", r.Text, r.Findings, err)
 	}
 }
 
