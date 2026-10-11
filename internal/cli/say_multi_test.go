@@ -44,6 +44,8 @@ type multiEnv struct {
 	sigs   chan os.Signal               // when set, the run's interrupts come from here
 	drain  time.Duration                // CLI.DrainTimeout; 0 is the default
 	look   func(string) (string, error) // CLI.LookPath when set
+	// stderrTTY is what CLI.StderrIsTTY reports (CLI-07); false, as for a pipe, by default.
+	stderrTTY bool
 }
 
 func newMultiEnv(t *testing.T) *multiEnv {
@@ -71,6 +73,7 @@ func (m *multiEnv) runCmd(command string, args ...string) result {
 	c.Getenv = func(k string) string { return m.env[k] }
 	c.Now = func() time.Time { return cliNow }
 	c.StdinIsTTY = func() bool { return true }
+	c.StderrIsTTY = func() bool { return m.stderrTTY }
 	c.DrainTimeout = m.drain
 	if m.look != nil {
 		c.LookPath = m.look

@@ -14,6 +14,7 @@ import (
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/logx"
+	"github.com/xiaolai/recite/internal/manifest"
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/stt"
@@ -33,6 +34,8 @@ type CLI struct {
 	// Stdin and StdinIsTTY are the input stream and whether it is a terminal.
 	Stdin      io.Reader
 	StdinIsTTY func() bool
+	// StderrIsTTY reports whether Stderr is a terminal, for the progress line (CLI-07).
+	StderrIsTTY func() bool
 	// NewSynth builds the speech synthesizer over the probed credentials.
 	NewSynth func(*auth.Credentials) (realtime.Synthesizer, error)
 	// NewTranscriber builds the verifier over the probed credentials; close ends any session
@@ -50,12 +53,14 @@ type CLI struct {
 
 	globals Globals
 	intr    *pipeline.Interrupt // set while a command with credentials runs
+	written *manifest.Output    // the output `say` published, for the done event
 }
 
 // New returns a CLI writing to stdout and stderr.
 func New(stdout, stderr io.Writer) *CLI {
 	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now, Stdin: os.Stdin, StdinIsTTY: stdinIsTTY, Signals: notifySignals, LookPath: exec.LookPath}
 	c.Say = c.runSay
+	c.StderrIsTTY = func() bool { return stderrIsTTY(c.Stderr) }
 	c.NewSynth = productionSynth(c)
 	c.NewTranscriber = productionTranscriber(c)
 	c.RunPipeline = pipeline.Run
@@ -116,12 +121,12 @@ func (c *CLI) runCommand(cmd command, args []string) int {
 			c.writeCommandHelp(c.Stdout, cmd)
 			return ExitOK
 		}
-		return c.usageErr("recite "+cmd.name, err)
+		return c.commandDone(cmd, c.usageErr("recite "+cmd.name, err))
 	}
 	closeLog, err := c.setupLogging()
 	if err != nil {
 		c.errorf("recite: %v", err)
-		return ExitUsage
+		return c.commandDone(cmd, ExitUsage)
 	}
 	defer closeLog()
 	return run(positional)
@@ -165,6 +170,18 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 		positional = append(positional, rest[0])
 		args = rest[1:]
 	}
+}
+
+// commandDone ends a `say` that failed before it ran with the done event under --json
+// (CLI-06): its stdout is an event stream whatever happens.
+func (c *CLI) commandDone(cmd command, code int) int {
+	if cmd.name != "say" {
+		return code
+	}
+	if c.Logger == nil {
+		c.Logger = logx.New(io.Discard, logx.Level(true, 0), false) // event logs need a logger
+	}
+	return c.sayDone(code)
 }
 
 func newFlagSet(name string) *flag.FlagSet {

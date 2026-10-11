@@ -241,7 +241,12 @@ func TestSayStreamConflictsExit2(t *testing.T) {
 		{[]string{"--loudness", "podcast"}, "loudness"},
 	} {
 		r := m.run(append([]string{"Hi", "-o", "-"}, tc.args...)...)
-		if r.code != exitcode.Usage || !strings.Contains(r.stderr, tc.want) || r.stdout != "" {
+		// Under --json stdout is the event stream, so it holds only the done event (CLI-06).
+		wantOut := ""
+		if tc.args[0] == "--json" {
+			wantOut = `{"event":"done","exit":2}` + "\n"
+		}
+		if r.code != exitcode.Usage || !strings.Contains(r.stderr, tc.want) || r.stdout != wantOut {
 			t.Errorf("%q: code %d stdout %d bytes stderr %q", tc.args, r.code, len(r.stdout), r.stderr)
 		}
 	}

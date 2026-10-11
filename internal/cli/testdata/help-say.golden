@@ -9,6 +9,8 @@ Flags:
     	segmentation budget in SECONDS per chunk (default 25)
   -date-style STYLE
     	spoken date STYLE: us, uk or iso (default "us")
+  -dry-run
+    	print the chunk plan and estimates (cache hits, audio, wall time, list price); no network, no login
   -effort EFFORT
     	reasoning EFFORT: minimal, low, medium, high, xhigh (default "minimal")
   -f PATH

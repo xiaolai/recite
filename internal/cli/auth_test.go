@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -89,7 +90,9 @@ func authRun(t *testing.T, mode string, args ...string) result {
 
 func eventsSchema(t *testing.T) *jsonschema.Schema {
 	t.Helper()
-	f, err := os.Open(filepath.Join("..", "..", "docs", "schema", "events.schema.json"))
+	// Located from this file, not the working directory: say tests change directory.
+	_, here, _, _ := runtime.Caller(0)
+	f, err := os.Open(filepath.Join(filepath.Dir(here), "..", "..", "docs", "schema", "events.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

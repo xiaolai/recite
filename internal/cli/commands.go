@@ -108,6 +108,8 @@ type SayRequest struct {
 	NoManifest   bool   // --no-manifest
 	KeepRejected string // --keep-rejected DIR; "" keeps none
 
+	DryRun bool // --dry-run: plan and estimate only, no network (RUN-06)
+
 	Command string // the command named in error messages; "" means say
 }
 
@@ -334,8 +336,10 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.StringVar(&manifestPath, "manifest", "", "write the manifest to `PATH` (default <output>.json)")
 	fs.BoolVar(&noManifest, "no-manifest", false, "write no manifest")
 	fs.StringVar(&keepRejected, "keep-rejected", "", "save every rejected take and its report in `DIR`")
+	var dryRun bool
+	fs.BoolVar(&dryRun, "dry-run", false, "print the chunk plan and estimates (cache hits, audio, wall time, list price); no network, no login")
 	all.register(fs)
-	return func(args []string) int {
+	run := func(args []string) int {
 		req, err := c.sayRequest(fs, &all)
 		if err != nil {
 			c.errorf("recite say: %v", err)
@@ -347,6 +351,7 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			return ExitUsage
 		}
 		req.Manifest, req.NoManifest, req.KeepRejected = manifestPath, noManifest, keepRejected
+		req.DryRun = dryRun
 		if format != "" {
 			if req.Format, err = audio.ParseFormat(format); err != nil {
 				c.errorf("recite say: --format: %v", err)
@@ -359,6 +364,8 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 		}
 		return c.Say(req)
 	}
+	// Under --json the last line is done, whatever ended the run (CLI-06).
+	return func(args []string) int { return c.sayDone(run(args)) }
 }
 
 // sayRequest resolves every setting of fs (flags, environment, config) into a request with no

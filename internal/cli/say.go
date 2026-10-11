@@ -91,11 +91,23 @@ func stdinIsTTY() bool {
 // output target — runs before the login probe, and the probe before any request. The chunks
 // are rendered and verified by the scheduler and assembled in order (design §10).
 func (c *CLI) runSay(req SayRequest) int {
+	c.written = nil
 	job, code := c.prepareSay(req)
 	if code != ExitOK {
 		return code
 	}
 	c.Logger.Info("plan", "chunks", len(job.tasks), "jobs", req.Jobs)
+	if req.DryRun || c.globals.JSON {
+		ev := c.estimate(req, job, req.DryRun)
+		switch {
+		case req.DryRun && !c.globals.JSON:
+			return c.writePlan(ev, req.Settings.Model)
+		case req.DryRun:
+			c.event(ev)
+			return ExitOK
+		}
+		c.event(ev)
+	}
 	return c.withCredentials(func(ctx context.Context, creds *auth.Credentials) error {
 		return c.renderAll(ctx, creds, req, job)
 	})
@@ -135,6 +147,18 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 		return sayJob{}, ExitUsage
 	}
 	tasks := tasksFor(plan, spec)
+	if req.DryRun {
+		// A dry run writes nothing and needs no output target; it reads the cache if one exists.
+		job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc}
+		if req.CacheDir != "" && !req.NoCache {
+			if _, err := os.Stat(req.CacheDir); err == nil {
+				if job.cache, err = c.takeCache(req); err != nil {
+					c.Logger.Warn("take cache not read", "err", err)
+				}
+			}
+		}
+		return job, ExitOK
+	}
 	if !stream {
 		if err := preflight(target, req.Force); err != nil {
 			return sayJob{}, c.reportFailure(err)
@@ -267,6 +291,11 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		sink = stream
 	}
 	asm := audio.NewAssembler(sink, job.gaps)
+	var estTotal float64
+	for _, t := range job.tasks {
+		estTotal += t.Chunk.Estimate.Seconds()
+	}
+	prog := c.newProgress(len(job.tasks), estTotal)
 	cfg := pipeline.Config{
 		Jobs: req.Jobs, VerifyJobs: req.VerifyJobs, SessionChunks: req.SessionChunks,
 		Verify: req.Verify, Synth: synth, Transcriber: tr, Cache: job.cache,
@@ -276,6 +305,12 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 			if req.Verify.Mode != verify.ModeOff || r.State != verify.StateUnverified {
 				c.reportChunk(r)
 			}
+			if c.globals.JSON {
+				for _, ev := range chunkEvents(r) {
+					c.event(ev)
+				}
+			}
+			prog.chunk(r, job.tasks[i].Chunk.Estimate.Seconds())
 			return asm.Add(i, r.PCM)
 		},
 		DrainTimeout: c.DrainTimeout,
@@ -290,6 +325,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		cfg.Stop = c.intr.Stop()
 	}
 	res, err := c.RunPipeline(ctx, cfg, job.tasks)
+	prog.finish()
 	code, write := pipeline.ExitCode(res, err, req.Policy)
 	status := manifest.StatusNoOutput
 	switch {
@@ -332,6 +368,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		out = &manifest.Output{Path: job.target, Format: string(job.enc.Format), DurationS: seconds,
 			SampleRate: job.enc.Rate, Loudness: "none"}
 	}
+	c.written = out
 	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out); merr != nil {
 		if err == nil {
 			return merr

@@ -2,73 +2,363 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/xiaolai/recite/docs/schema/events.schema.json",
   "title": "recite --json events",
-  "description": "One NDJSON line on stdout per event (design §12.5). Version 1 (M1); WP-3.8 extends it.",
-  "version": 1,
+  "description": "One NDJSON line on stdout per event (design §12.5). The version is raised whenever an event is added or a field changes. Version 1 (M1): auth_error, auth_status, doctor_check, voice. Version 2 (WP-3.8): plan, chunk and done of `say --json`; done is always the last line of `say`.",
+  "version": 2,
   "oneOf": [
-    { "$ref": "#/$defs/auth_error" },
-    { "$ref": "#/$defs/auth_status" },
-    { "$ref": "#/$defs/doctor_check" },
-    { "$ref": "#/$defs/voice" }
+    {
+      "$ref": "#/$defs/auth_error"
+    },
+    {
+      "$ref": "#/$defs/auth_status"
+    },
+    {
+      "$ref": "#/$defs/doctor_check"
+    },
+    {
+      "$ref": "#/$defs/voice"
+    },
+    {
+      "$ref": "#/$defs/plan"
+    },
+    {
+      "$ref": "#/$defs/chunk"
+    },
+    {
+      "$ref": "#/$defs/done"
+    }
   ],
   "$defs": {
     "state": {
-      "enum": ["ready", "no-codex", "codex-too-old", "not-signed-in", "api-key", "unsupported-auth", "expired", "codex-error"]
+      "enum": [
+        "ready",
+        "no-codex",
+        "codex-too-old",
+        "not-signed-in",
+        "api-key",
+        "unsupported-auth",
+        "expired",
+        "codex-error"
+      ]
     },
     "auth_error": {
       "description": "The login guide of a non-ready state (design §5.1a, AUTH-07).",
       "type": "object",
-      "required": ["event", "state", "message", "fix_commands", "link"],
+      "required": [
+        "event",
+        "state",
+        "message",
+        "fix_commands",
+        "link"
+      ],
       "additionalProperties": false,
       "properties": {
-        "event": { "const": "auth_error" },
-        "state": {
-          "allOf": [ { "$ref": "#/$defs/state" }, { "not": { "const": "ready" } } ]
+        "event": {
+          "const": "auth_error"
         },
-        "message": { "type": "string", "minLength": 1 },
-        "fix_commands": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "link": { "type": "string", "format": "uri", "pattern": "^https://" }
+        "state": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/state"
+            },
+            {
+              "not": {
+                "const": "ready"
+              }
+            }
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fix_commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "link": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        }
       }
     },
     "auth_status": {
       "description": "`recite auth status --json` when the state is ready (AUTH-06). Never a token, email or account ID.",
       "type": "object",
-      "required": ["event", "state", "source", "codex_path", "codex_version", "auth_method", "plan_type", "token_expires_in_s"],
+      "required": [
+        "event",
+        "state",
+        "source",
+        "codex_path",
+        "codex_version",
+        "auth_method",
+        "plan_type",
+        "token_expires_in_s"
+      ],
       "additionalProperties": false,
       "properties": {
-        "event": { "const": "auth_status" },
-        "state": { "const": "ready" },
-        "source": { "enum": ["codex app-server", "file"] },
-        "codex_path": { "type": "string" },
-        "codex_version": { "type": "string" },
-        "auth_method": { "const": "chatgpt" },
-        "plan_type": { "type": "string" },
-        "token_expires_in_s": { "type": "integer" }
+        "event": {
+          "const": "auth_status"
+        },
+        "state": {
+          "const": "ready"
+        },
+        "source": {
+          "enum": [
+            "codex app-server",
+            "file"
+          ]
+        },
+        "codex_path": {
+          "type": "string"
+        },
+        "codex_version": {
+          "type": "string"
+        },
+        "auth_method": {
+          "const": "chatgpt"
+        },
+        "plan_type": {
+          "type": "string"
+        },
+        "token_expires_in_s": {
+          "type": "integer"
+        }
       }
     },
     "doctor_check": {
       "description": "One check of `recite doctor --json` (design §12.4, CLI-05). exit is the code a failure contributes; 0 for ok and warn.",
       "type": "object",
-      "required": ["event", "check", "status", "detail", "exit"],
+      "required": [
+        "event",
+        "check",
+        "status",
+        "detail",
+        "exit"
+      ],
       "additionalProperties": false,
       "properties": {
-        "event": { "const": "doctor_check" },
-        "check": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["ok", "warn", "fail"] },
-        "detail": { "type": "string" },
-        "fix": { "type": "string", "minLength": 1 },
-        "exit": { "enum": [0, 1, 2, 3, 4, 5, 6, 7, 130] }
+        "event": {
+          "const": "doctor_check"
+        },
+        "check": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "warn",
+            "fail"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "fix": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exit": {
+          "$ref": "#/$defs/exit"
+        }
       }
     },
     "voice": {
       "description": "One voice of `recite voices --json` (CLI-04).",
       "type": "object",
-      "required": ["event", "name", "default", "recommended"],
+      "required": [
+        "event",
+        "name",
+        "default",
+        "recommended"
+      ],
       "additionalProperties": false,
       "properties": {
-        "event": { "const": "voice" },
-        "name": { "type": "string", "minLength": 1 },
-        "default": { "type": "boolean" },
-        "recommended": { "type": "boolean" }
+        "event": {
+          "const": "voice"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default": {
+          "type": "boolean"
+        },
+        "recommended": {
+          "type": "boolean"
+        }
+      }
+    },
+    "exit": {
+      "description": "An exit code of design §12.3.",
+      "enum": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        130
+      ]
+    },
+    "plan": {
+      "description": "The plan of a `say` run, first under --json; with --dry-run it is the whole report (RUN-06). Estimates are list prices, not billed.",
+      "type": "object",
+      "required": [
+        "event",
+        "dry_run",
+        "chunks",
+        "cached",
+        "est_seconds",
+        "est_wall_seconds",
+        "jobs",
+        "estimate_usd",
+        "price_note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "const": "plan"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "chunks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "est_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "est_wall_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "jobs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6
+        },
+        "estimate_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "price_note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "chunk": {
+      "description": "One step of a chunk, in delivery order: each attempt `rendered` (and `rejected` with the guard's reason), then the final state. A chunk reused from the cache has only its final state, with cached true.",
+      "type": "object",
+      "required": [
+        "event",
+        "id",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "const": "chunk"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "rendered",
+            "rejected",
+            "verified",
+            "unverified",
+            "no-eligible"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cached": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "rejected"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "attempt",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "done": {
+      "description": "The last line of `say --json`: the exit code, and the output and its duration when one was written.",
+      "type": "object",
+      "required": [
+        "event",
+        "exit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "const": "done"
+        },
+        "exit": {
+          "$ref": "#/$defs/exit"
+        },
+        "output": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duration_s": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "dependentRequired": {
+        "output": [
+          "duration_s"
+        ],
+        "duration_s": [
+          "output"
+        ]
       }
     }
   }
