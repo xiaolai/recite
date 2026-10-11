@@ -46,7 +46,7 @@ type spk07Record struct {
 	Attempts  int          `json:"attempts"`
 	Score     float64      `json:"score"`
 	Seconds   float64      `json:"seconds"`  // the kept take, trimmed
-	RMSdBFS   float64      `json:"rms_dbfs"` // the kept take; -Inf has no audio
+	RMSdBFS   *float64     `json:"rms_dbfs"` // the kept take; null without audio or for digital silence
 	Rejection string       `json:"rejection,omitempty"`
 }
 
@@ -132,9 +132,10 @@ func TestQualifyDeliveryPresets(t *testing.T) {
 
 	synth, tr, gate := liveServices(t)
 	budget := livebudget.New(liveBudget)
+	kept := newDeliveredAudio()
 	res, err := budget.Pipeline(pipeline.Run)(context.Background(), pipeline.Config{
 		Jobs: 3, Verify: opts, Synth: synth, Transcriber: tr, Gate: gate,
-		Deliver: func(int, verify.ChunkResult) error { return nil },
+		Deliver: kept.Deliver,
 	}, part)
 	if err != nil {
 		t.Fatalf("run: %v (audio received %v)", err, budget.Used().Round(time.Second))
@@ -144,7 +145,7 @@ func TestQualifyDeliveryPresets(t *testing.T) {
 	for _, r := range res.Chunks {
 		kk := keys[r.ChunkID]
 		rec := spk07Record{Preset: kk.preset, Passage: kk.passage, Take: kk.take, Verdict: r.State,
-			Attempts: len(r.Attempts), Score: r.Score, Seconds: r.PCM.Duration().Seconds(), RMSdBFS: rmsDBFS(r.PCM)}
+			Attempts: len(r.Attempts), Score: r.Score, Seconds: kept.Of(t, r).Duration().Seconds(), RMSdBFS: rmsDBFS(kept.Of(t, r))}
 		for _, a := range r.Attempts {
 			if a.Rejection != nil {
 				rec.Rejection = string(a.Rejection.Reason) + ": " + a.Rejection.Detail
@@ -232,8 +233,8 @@ func spk07Summarize(records []spk07Record) []spk07Row {
 			if r.Verdict == verify.StateVerified {
 				row.Verified++
 			}
-			if r.Seconds > 0 {
-				secs, rms = append(secs, r.Seconds), append(rms, r.RMSdBFS)
+			if r.Seconds > 0 && r.RMSdBFS != nil {
+				secs, rms = append(secs, r.Seconds), append(rms, *r.RMSdBFS)
 			}
 		}
 		row.MedianSeconds, row.MedianRMSdBFS = median(secs), median(rms)
@@ -273,18 +274,23 @@ func median(xs []float64) float64 {
 	return (s[len(s)/2-1] + s[len(s)/2]) / 2
 }
 
-// rmsDBFS is the RMS level of 16-bit little-endian PCM in dB relative to full scale.
-func rmsDBFS(p audio.PCM) float64 {
+// rmsDBFS is the RMS level of 16-bit little-endian PCM in dB relative to full scale, or nil
+// when there is no audio or only digital silence: -Inf has no JSON encoding.
+func rmsDBFS(p audio.PCM) *float64 {
 	n := len(p) / 2
 	if n == 0 {
-		return math.Inf(-1)
+		return nil
 	}
 	var sum float64
 	for i := 0; i < n; i++ {
 		v := float64(int16(binary.LittleEndian.Uint16(p[2*i:]))) / 32768
 		sum += v * v
 	}
-	return 10 * math.Log10(sum/float64(n))
+	if sum == 0 {
+		return nil
+	}
+	db := 10 * math.Log10(sum/float64(n))
+	return &db
 }
 
 // liveServices signs in through the local Codex login and builds the real synthesizer and the

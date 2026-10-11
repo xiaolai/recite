@@ -108,9 +108,10 @@ func TestQ12EmphasisListening(t *testing.T) {
 
 	synth, tr, gate := liveServices(t)
 	budget := livebudget.New(liveBudget)
+	kept := newDeliveredAudio()
 	res, err := budget.Pipeline(pipeline.Run)(context.Background(), pipeline.Config{
 		Jobs: 3, Verify: opts, Synth: synth, Transcriber: tr, Gate: gate,
-		Deliver: func(int, verify.ChunkResult) error { return nil },
+		Deliver: kept.Deliver,
 	}, tasks)
 	if err != nil {
 		t.Fatalf("run: %v (audio received %v)", err, budget.Used().Round(time.Second))
@@ -132,8 +133,8 @@ func TestQ12EmphasisListening(t *testing.T) {
 		if emphFirst[i] {
 			first, second, emphLabel = emph, plain, "A"
 		}
-		writeClip(t, filepath.Join(clips, fmt.Sprintf("%02d-A.wav", i+1)), first.PCM)
-		writeClip(t, filepath.Join(clips, fmt.Sprintf("%02d-B.wav", i+1)), second.PCM)
+		writeClip(t, filepath.Join(clips, fmt.Sprintf("%02d-A.wav", i+1)), kept.Of(t, first))
+		writeClip(t, filepath.Join(clips, fmt.Sprintf("%02d-B.wav", i+1)), kept.Of(t, second))
 		fmt.Fprintf(&sheet, "| %d | %s | %s | |\n", i+1, s.text, s.stress)
 		fmt.Fprintf(&key, "| %d | %s | %s | %s |\n", i+1, emphLabel, plain.State, emph.State)
 	}
