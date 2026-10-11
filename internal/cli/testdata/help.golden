@@ -1,0 +1,47 @@
+recite turns text into verified speech.
+
+Usage:
+  recite [global flags] <command> [flags] [arguments]
+  recite [flags] TEXT...       same as: recite say TEXT...
+
+Commands:
+  say       Text to verified audio file (default command)
+  render    Render a batch or project into many outputs
+  check     Text guard, spoken form and chunk plan, no network
+  prepare   Write the editable spoken-form script
+  voices    List voices
+  doctor    Check the environment and the route
+  auth      Login state, or sign in through codex
+  usage     Local ledger summary and Codex plan status
+  cache     Manage the take cache
+  config    Effective merged config and its sources
+  version   Version, commit, build date and Go version
+  help      Show help for recite or a command
+
+Global flags:
+  -auth-source SOURCE
+    	auth SOURCE: auto, codex or file (default auto)
+  -codex-bin PATH
+    	codex binary PATH
+  -codex-home DIR
+    	codex home DIR
+  -config PATH
+    	read config from PATH
+  -debug-dir DIR
+    	write debug artifacts to DIR
+  -json
+    	machine-readable output
+  -log-file PATH
+    	write the log to PATH
+  -no-color
+    	disable colour
+  -profile NAME
+    	use config profile NAME
+  -q	quiet: errors only
+  -quiet
+    	quiet: errors only
+  -v	verbose (repeatable)
+  -verbose
+    	verbose (repeatable)
+
+Run "recite help <command>" for a command's flags.

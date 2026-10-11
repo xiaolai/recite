@@ -5,8 +5,15 @@ FUZZTIME      := 60s
 
 .PHONY: build test check fuzz bench live qualify calibrate
 
+BUILDINFO := github.com/xiaolai/recite/internal/buildinfo
+VERSION   ?= $(shell git describe --always --dirty 2>/dev/null)
+COMMIT    ?= $(shell git rev-parse HEAD 2>/dev/null)
+DATE      ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS   := -X $(BUILDINFO).version=$(VERSION) -X $(BUILDINFO).commit=$(COMMIT) -X $(BUILDINFO).date=$(DATE)
+
+# Empty values (no git repository) fall back to dev/unknown at run time (FND-02).
 build:
-	go build -o bin/recite ./cmd/recite
+	go build -ldflags '$(LDFLAGS)' -o bin/recite ./cmd/recite
 
 test:
 	go test -race ./...

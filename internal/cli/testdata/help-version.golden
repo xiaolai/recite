@@ -1,0 +1,29 @@
+Usage: recite version [flags]
+
+Version, commit, build date and Go version
+
+Global flags:
+  -auth-source SOURCE
+    	auth SOURCE: auto, codex or file (default auto)
+  -codex-bin PATH
+    	codex binary PATH
+  -codex-home DIR
+    	codex home DIR
+  -config PATH
+    	read config from PATH
+  -debug-dir DIR
+    	write debug artifacts to DIR
+  -json
+    	machine-readable output
+  -log-file PATH
+    	write the log to PATH
+  -no-color
+    	disable colour
+  -profile NAME
+    	use config profile NAME
+  -q	quiet: errors only
+  -quiet
+    	quiet: errors only
+  -v	verbose (repeatable)
+  -verbose
+    	verbose (repeatable)
