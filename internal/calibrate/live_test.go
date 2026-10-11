@@ -313,7 +313,7 @@ func TestCalibrateReport(t *testing.T) {
 	labels, err := calibrate.ParseLabels(f)
 	_ = f.Close()
 	if err != nil {
-		t.Fatalf("%v (fill %s after listening to %s)", err, m.labelsFile(), filepath.Join(m.dir, "clips"))
+		t.Fatalf("%v (fill %s by listening to %s, or by a machine labeller declared with \"#! labeller: <name>\")", err, m.labelsFile(), filepath.Join(m.dir, "clips"))
 	}
 	held := map[string]bool{}
 	for _, s := range m.heldOut {
@@ -327,7 +327,7 @@ func TestCalibrateReport(t *testing.T) {
 			propose = append(propose, r)
 		}
 	}
-	ev, err := calibrate.Evaluate(heldOut, labels)
+	ev, err := calibrate.Evaluate(heldOut, labels.ByID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestCalibrateReport(t *testing.T) {
 	opts := calibrate.Options(verify.DefaultOptions())
 	err = calibrate.WriteReport(out, calibrate.Report{
 		Title: m.title, Date: now, Source: m.source, Seed: seed, Mode: opts.Mode, Thresholds: opts.Mode.Thresholds(),
-		Propose: propose, HeldOut: ev,
+		Propose: propose, HeldOut: ev, Labeller: labels.Labeller,
 	})
 	if cerr := out.Close(); err == nil {
 		err = cerr
@@ -348,7 +348,7 @@ func TestCalibrateReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("report written to %s; %d construction-vs-human disagreements", path, len(ev.Disagreements()))
+	t.Logf("report written to %s; %d construction-vs-label disagreements", path, len(ev.Disagreements()))
 	if err := ev.Check(); err != nil {
 		t.Fatalf("%s: %v", m.acceptCriterion, err)
 	}

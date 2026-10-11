@@ -35,22 +35,47 @@ func WriteLabelsTemplate(w io.Writer, heldOut []Sample, clipDir, run string) err
 	return err
 }
 
+// Labels is a parsed labels file.
+type Labels struct {
+	ByID map[string]Label
+	// Labeller names the machine labeller that filled the file (design D22); "" means the
+	// labels come from human listening.
+	Labeller string
+}
+
+// labellerDirective declares a machine labeller; it is the one "#" line that is not a comment.
+const labellerDirective = "#! labeller:"
+
 // ParseLabels reads a filled labels file. Every non-comment line is an ID and a label (good,
 // g, bad, b, corrupted or c); a blank label, an unknown label or a repeated ID is an error.
-func ParseLabels(r io.Reader) (map[string]Label, error) {
+// One optional "#! labeller: <name>" line declares a machine labeller; a second one or an
+// empty name is an error.
+func ParseLabels(r io.Reader) (Labels, error) {
 	out := map[string]Label{}
+	labeller := ""
 	sc := bufio.NewScanner(r)
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
+		if rest, ok := strings.CutPrefix(line, labellerDirective); ok {
+			name := strings.TrimSpace(rest)
+			if name == "" {
+				return Labels{}, fmt.Errorf("calibrate: labels line %d: the labeller directive names no labeller", n)
+			}
+			if labeller != "" {
+				return Labels{}, fmt.Errorf("calibrate: labels line %d: a second labeller directive", n)
+			}
+			labeller = name
+			continue
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		f := strings.Fields(line)
 		if len(f) < 2 {
-			return nil, fmt.Errorf("calibrate: labels line %d: %s is not labelled", n, f[0])
+			return Labels{}, fmt.Errorf("calibrate: labels line %d: %s is not labelled", n, f[0])
 		}
 		if len(f) > 2 {
-			return nil, fmt.Errorf("calibrate: labels line %d: want \"<id> <label>\", got %q", n, line)
+			return Labels{}, fmt.Errorf("calibrate: labels line %d: want \"<id> <label>\", got %q", n, line)
 		}
 		var l Label
 		switch strings.ToLower(f[1]) {
@@ -59,15 +84,15 @@ func ParseLabels(r io.Reader) (map[string]Label, error) {
 		case "bad", "b", "corrupted", "c":
 			l = LabelCorrupted
 		default:
-			return nil, fmt.Errorf("calibrate: labels line %d: label %q: want good or bad", n, f[1])
+			return Labels{}, fmt.Errorf("calibrate: labels line %d: label %q: want good or bad", n, f[1])
 		}
 		if _, dup := out[f[0]]; dup {
-			return nil, fmt.Errorf("calibrate: labels line %d: %s is labelled twice", n, f[0])
+			return Labels{}, fmt.Errorf("calibrate: labels line %d: %s is labelled twice", n, f[0])
 		}
 		out[f[0]] = l
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("calibrate: read labels: %w", err)
+		return Labels{}, fmt.Errorf("calibrate: read labels: %w", err)
 	}
-	return out, nil
+	return Labels{ByID: out, Labeller: labeller}, nil
 }

@@ -19,6 +19,9 @@ type Report struct {
 	Thresholds verify.Thresholds
 	Propose    []Record // the 60% part: thresholds may be proposed on it only
 	HeldOut    Evaluation
+	// Labeller names the machine labeller of the held-out clips (design D22); "" means human
+	// listening. With one, the report says the labels are machine labels, never listening.
+	Labeller string
 }
 
 // ReportName is the report's file name for date: calibration-YYYYMMDD.md.
@@ -30,7 +33,7 @@ func ScriptReportName(date time.Time, sc Script) string {
 	return "calibration-" + date.Format("20060102") + "-" + string(sc) + ".md"
 }
 
-// WriteReport writes the markdown report: method, human labels, per-type results with Wilson
+// WriteReport writes the markdown report: method, held-out labels (human or machine), per-type results with Wilson
 // 95% intervals, the said guard's catch rate, construction-vs-human disagreements and the
 // held-out verdict.
 func WriteReport(w io.Writer, r Report) error {
@@ -50,7 +53,12 @@ func WriteReport(w io.Writer, r Report) error {
 		title = "VER-07 mini calibration"
 	}
 	p("# Verifier calibration, %s (%s)\n\n", r.Date.Format("2006-01-02"), title)
-	p("**Held-out verdict: %s**\n\n", verdict)
+	machine := r.Labeller != ""
+	if machine {
+		p("**Held-out verdict (machine-labelled): %s**\n\n", verdict)
+	} else {
+		p("**Held-out verdict: %s**\n\n", verdict)
+	}
 	p("## Method\n\n")
 	p("- Corpus: %s.\n", r.Source)
 	p("- Candidates: %d good (the passage rendered as is) and %d corrupted (an edited passage rendered: %s), built with seed %d.\n",
@@ -60,7 +68,15 @@ func WriteReport(w io.Writer, r Report) error {
 	p("- The said guard is bypassed so every take reaches STT; the run fails unless every take was transcribed. Its would-be catch rate is reported separately below.\n")
 	p("- Split 60/40, stratified by construction kind and seeded: %d proposal samples, %d held out. Thresholds may be proposed on the proposal part only.\n",
 		len(r.Propose), len(held))
-	p("- Held-out labels come from listening: the owner heard each clip under an anonymised ID and judged whether it says the original passage exactly. Construction labels are used only to stratify.\n")
+	if machine {
+		p("- Held-out labels are machine labels from %s, not listening: they are weaker evidence than human listening, and a human labelling pass supersedes them. Construction labels are used only to stratify.\n", r.Labeller)
+	} else {
+		p("- Held-out labels come from listening: the owner heard each clip under an anonymised ID and judged whether it says the original passage exactly. Construction labels are used only to stratify.\n")
+	}
+	labelHead, labelCol, versus := "Human labels (held out)", "Human label", "human"
+	if machine {
+		labelHead, labelCol, versus = "Machine labels (held out)", "Machine label", "machine-label"
+	}
 	p("- Criteria (VER-07): 0 false accepts on clips labelled corrupted; at most %.0f%% false rejects on clips labelled good. Intervals are Wilson 95%%.\n\n", MaxFalseRejectRate*100)
 
 	p("## Held-out criteria\n\n| Measure | Count | Rate | Wilson 95%% |\n|---|---|---|---|\n")
@@ -68,7 +84,7 @@ func WriteReport(w io.Writer, r Report) error {
 	rateRow(p, "False rejects (of clips labelled good)", r.HeldOut.FalseRejects, r.HeldOut.Good)
 	p("\n")
 
-	p("## Human labels (held out)\n\n| Clip | Construction | Human label | Verifier | Score | Heard | Rejection |\n|---|---|---|---|---|---|---|\n")
+	p("## %s\n\n| Clip | Construction | %s | Verifier | Score | Heard | Rejection |\n|---|---|---|---|---|---|---|\n", labelHead, labelCol)
 	for _, row := range r.HeldOut.Rows {
 		v := "rejected"
 		if row.Accepted {
@@ -90,11 +106,11 @@ func WriteReport(w io.Writer, r Report) error {
 	}
 	p("\n")
 
-	p("## Construction vs human disagreements\n\n")
+	p("## Construction vs %s disagreements\n\n", versus)
 	if d := r.HeldOut.Disagreements(); len(d) == 0 {
 		p("None: every held-out label agrees with its construction.\n\n")
 	} else {
-		p("| Clip | Construction | Human label | Rendered text |\n|---|---|---|---|\n")
+		p("| Clip | Construction | %s | Rendered text |\n|---|---|---|---|\n", labelCol)
 		for _, row := range d {
 			p("| %s | %s | %s | %s |\n", row.ID, row.Kind, row.Human, cell(row.Rendered))
 		}

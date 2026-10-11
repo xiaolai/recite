@@ -341,10 +341,20 @@ func TestLabelsTemplateAndParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["s01"] != calibrate.LabelGood || got["s02"] != calibrate.LabelCorrupted || len(got) != 2 {
-		t.Fatalf("labels %v", got)
+	if got.ByID["s01"] != calibrate.LabelGood || got.ByID["s02"] != calibrate.LabelCorrupted || len(got.ByID) != 2 || got.Labeller != "" {
+		t.Fatalf("labels %+v", got)
 	}
-	for _, bad := range []string{"s01 maybe\n", "s01 good\ns01 bad\n", "s01 good extra\n"} {
+	machine, err := calibrate.ParseLabels(strings.NewReader("#! labeller: whisper.cpp large-v3-turbo\n" + filled))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if machine.Labeller != "whisper.cpp large-v3-turbo" || len(machine.ByID) != 2 {
+		t.Fatalf("machine labels %+v", machine)
+	}
+	for _, bad := range []string{
+		"s01 maybe\n", "s01 good\ns01 bad\n", "s01 good extra\n",
+		"#! labeller: a\n#! labeller: b\ns01 good\n", "#! labeller:   \ns01 good\n",
+	} {
 		if _, err := calibrate.ParseLabels(strings.NewReader(bad)); err == nil {
 			t.Fatalf("%q parsed", bad)
 		}
@@ -408,16 +418,22 @@ func TestEvaluateCriteria(t *testing.T) {
 	}
 }
 
-func TestWriteReport(t *testing.T) {
+func reportEvaluation(t *testing.T) calibrate.Evaluation {
+	t.Helper()
 	held := []calibrate.Record{rec("s01", calibrate.Good, true, 1), rec("s02", calibrate.NameChange, false, 0.8), rec("s03", calibrate.WordSwap, true, 0.96)}
 	labels := map[string]calibrate.Label{"s01": calibrate.LabelGood, "s02": calibrate.LabelCorrupted, "s03": calibrate.LabelGood}
 	ev, err := calibrate.Evaluate(held, labels)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return ev
+}
+
+func TestWriteReport(t *testing.T) {
+	ev := reportEvaluation(t)
 	date := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
 	var b bytes.Buffer
-	err = calibrate.WriteReport(&b, calibrate.Report{
+	err := calibrate.WriteReport(&b, calibrate.Report{
 		Date: date, Source: "test corpus", Seed: 7, Mode: verify.ModeNormal, Thresholds: verify.ModeNormal.Thresholds(),
 		Propose: []calibrate.Record{rec("s04", calibrate.Good, true, 0.99)}, HeldOut: ev,
 	})
@@ -436,6 +452,39 @@ func TestWriteReport(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("report lacks %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"machine", "Machine"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("a human-labelled report mentions %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+// A machine-labelled report (design D22) says so and never claims listening.
+func TestWriteReportMachineLabelled(t *testing.T) {
+	var b bytes.Buffer
+	err := calibrate.WriteReport(&b, calibrate.Report{
+		Date: time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC), Source: "test corpus", Seed: 7, Mode: verify.ModeNormal,
+		Thresholds: verify.ModeNormal.Thresholds(), HeldOut: reportEvaluation(t), Labeller: "whisper.cpp large-v3-turbo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"**Held-out verdict (machine-labelled): PASS**",
+		"machine labels from whisper.cpp large-v3-turbo", "weaker evidence than human listening", "a human labelling pass supersedes them",
+		"## Machine labels (held out)\n\n| Clip | Construction | Machine label |",
+		"## Construction vs machine-label disagreements\n\n| Clip | Construction | Machine label | Rendered text |",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("report lacks %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"Human label", "come from listening", "**Held-out verdict: "} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("a machine-labelled report contains %q:\n%s", unwanted, out)
 		}
 	}
 }
