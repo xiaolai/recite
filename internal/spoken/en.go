@@ -56,7 +56,9 @@ func enTech(s string, i int, _ *Options) (Match, bool) {
 
 // --- phone numbers ---
 
-var phoneRe = regexp.MustCompile(`^(?:\+(\d{1,3})[ -]?)?(?:\((\d{3})\) ?|(\d{3})[-.])(\d{3})[-.](\d{4})|^(\d{3})-(\d{4})`)
+// The anchor sits outside the alternation: with one ^ per branch, Go's regexp does not treat
+// the pattern as anchored and scans the whole remainder, making Run quadratic on long input.
+var phoneRe = regexp.MustCompile(`^(?:(?:\+(\d{1,3})[ -]?)?(?:\((\d{3})\) ?|(\d{3})[-.])(\d{3})[-.](\d{4})|(\d{3})-(\d{4}))`)
 
 func enPhone(s string, i int, _ *Options) (Match, bool) {
 	if c := s[i]; c != '+' && c != '(' && !isDigit(c) || !wordStart(s, i) || prevRune(s, i) == '-' {
