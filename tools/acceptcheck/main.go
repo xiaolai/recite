@@ -285,7 +285,8 @@ func scanRefs(root string) (refs, error) {
 			return err
 		}
 		if d.IsDir() {
-			if path != root && (d.Name() == ".git" || d.Name() == "testdata" || d.Name() == "dev-docs") {
+			// Hidden directories (.git, .claude worktrees, ...) are not part of this checkout.
+			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "dev-docs") {
 				return filepath.SkipDir
 			}
 			return nil

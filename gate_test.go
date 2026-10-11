@@ -43,7 +43,7 @@ func readFile(t *testing.T, path string) string {
 func TestMakeCheckRunsEveryStepInOrder(t *testing.T) {
 	recipe := makeRecipe(t, readFile(t, "Makefile"), "check")
 	steps := []string{
-		"gofmt -l .",
+		"gofmt -l",
 		"go vet ./...",
 		"$(GOLANGCI_LINT) run",
 		"go test -race ./...",
