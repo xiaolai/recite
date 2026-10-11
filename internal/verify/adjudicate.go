@@ -121,6 +121,7 @@ type ChunkResult struct {
 	Final    int       // 1-based attempt whose take is kept; 0 for StateNoEligible
 	PCM      audio.PCM // the kept take, trimmed; nil for StateNoEligible
 	Score    float64
+	Cached   bool // reused from the take cache: no render and no transcription this run
 }
 
 // Adjudicate renders and verifies one chunk until a take is accepted or attempts run out

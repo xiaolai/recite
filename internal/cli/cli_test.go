@@ -102,6 +102,7 @@ func sayDefaults(r *SayRequest) {
 	r.Gaps = audio.DefaultGaps()
 	r.Jobs, r.SessionChunks = pipeline.DefaultJobs, realtime.DefaultSessionChunks
 	r.Verify = verify.DefaultOptions()
+	r.CacheDir = defaultCacheDir(os.Getenv) // the process environment, which run passes on
 }
 
 // accept: CLI-01#1

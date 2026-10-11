@@ -33,6 +33,15 @@ func (c *Chain) Switched() bool {
 	return c.switched
 }
 
+// Route names the verifier route in use and its STT model; cached verification records it
+// (RUN-04).
+func (c *Chain) Route() (route, model string) {
+	if c.Switched() {
+		return "realtime", RealtimeModel
+	}
+	return "http", HTTPModel
+}
+
 // Transcribe implements Transcriber.
 func (c *Chain) Transcribe(ctx context.Context, pcm []byte, hint Hint) (Transcript, error) {
 	if !c.Switched() {

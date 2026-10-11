@@ -12,6 +12,8 @@ import (
 
 	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/auth"
+	"github.com/xiaolai/recite/internal/cache"
+	"github.com/xiaolai/recite/internal/fsx"
 	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/pipeline"
@@ -140,16 +142,37 @@ func (c *CLI) runSay(req SayRequest) int {
 	if err := preflight(target, req.Force); err != nil {
 		return c.reportFailure(err)
 	}
+	tc, err := c.takeCache(req)
+	if err != nil {
+		c.errorf("recite say: %v", err)
+		if errors.Is(err, fsx.ErrUnsafePath) {
+			return ExitUsage
+		}
+		return ExitInternal
+	}
 	c.Logger.Info("plan", "chunks", len(tasks), "jobs", req.Jobs)
 	return c.withCredentials(func(ctx context.Context, creds *auth.Credentials) error {
-		return c.renderAll(ctx, creds, req, tasks, gaps, target, format)
+		return c.renderAll(ctx, creds, req, tasks, tc, gaps, target, format)
 	})
+}
+
+// takeCache opens the take cache (RUN-04): nil under --no-cache or without a cache directory.
+func (c *CLI) takeCache(req SayRequest) (*pipeline.TakeCache, error) {
+	if req.NoCache || req.CacheDir == "" {
+		c.Logger.Debug("take cache off", "no_cache", req.NoCache)
+		return nil, nil
+	}
+	st, err := cache.Open(req.CacheDir, c.Now)
+	if err != nil {
+		return nil, err
+	}
+	return &pipeline.TakeCache{Store: st, Refresh: req.Refresh, AllowUnverified: req.Policy.AllowUnverified}, nil
 }
 
 // renderAll renders, verifies and assembles every chunk, then publishes the output when the
 // verdicts allow it (VER-09). An unverified chunk makes exit 5 after the file is written,
 // unless --allow-unverified or --strict-output says otherwise.
-func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayRequest, tasks []pipeline.Task, gaps []int, target string, format audio.Format) error {
+func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayRequest, tasks []pipeline.Task, tc *pipeline.TakeCache, gaps []int, target string, format audio.Format) error {
 	synth, err := c.NewSynth(creds)
 	if err != nil {
 		return err
@@ -171,7 +194,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 	asm := audio.NewAssembler(&pcm, gaps)
 	cfg := pipeline.Config{
 		Jobs: req.Jobs, VerifyJobs: req.VerifyJobs, SessionChunks: req.SessionChunks,
-		Verify: req.Verify, Synth: synth, Transcriber: tr,
+		Verify: req.Verify, Synth: synth, Transcriber: tr, Cache: tc,
 		Deliver: func(i int, r verify.ChunkResult) error {
 			c.reportChunk(r)
 			return asm.Add(i, r.PCM)
@@ -211,7 +234,11 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 func (c *CLI) reportChunk(r verify.ChunkResult) {
 	switch r.State {
 	case verify.StateVerified:
-		c.Logger.Info("chunk verified", "chunk", r.ChunkID, "attempt", r.Final, "score", r.Score)
+		if r.Cached {
+			c.Logger.Info("chunk reused from cache", "chunk", r.ChunkID, "score", r.Score)
+		} else {
+			c.Logger.Info("chunk verified", "chunk", r.ChunkID, "attempt", r.Final, "score", r.Score)
+		}
 	case verify.StateUnverified:
 		c.errorf("recite: chunk %s unverified after %d attempt(s): kept attempt %d, score %.3f%s",
 			r.ChunkID, len(r.Attempts), r.Final, r.Score, lastRejection(r))

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/xiaolai/recite/internal/audio"
-
+	"github.com/xiaolai/recite/internal/config"
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/pipeline"
@@ -94,6 +94,9 @@ type SayRequest struct {
 	SessionChunks int // renders per pooled session before rotation (SPK-06)
 	Verify        verify.Options
 	Policy        verify.OutputPolicy
+	CacheDir      string // the take cache root (cache_dir); "" means no cache
+	NoCache       bool   // --no-cache: no cache reads or writes
+	Refresh       bool   // --refresh: no cache reads
 }
 
 // hiddenFlags are registered but left out of help (design §12.2).
@@ -189,6 +192,7 @@ type runFlags struct {
 	maxAttempts, requestExtraAttempts int
 	noTrim                            bool
 	allowUnverified, strictOutput     bool
+	noCache, refresh                  bool
 	gapSentence, gapList              string
 	gapParagraph, gapSection          string
 	gapSeed                           int64
@@ -204,6 +208,8 @@ func (f *runFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&f.noTrim, "no-trim", false, "keep the leading and trailing silence of each take")
 	fs.BoolVar(&f.allowUnverified, "allow-unverified", false, "exit 0 when a chunk stays unverified")
 	fs.BoolVar(&f.strictOutput, "strict-output", false, "write no output when a chunk stays unverified")
+	fs.BoolVar(&f.noCache, "no-cache", false, "neither read nor write the take cache")
+	fs.BoolVar(&f.refresh, "refresh", false, "render every chunk anew; the takes still go to the cache")
 	d := audio.DefaultGaps()
 	fs.StringVar(&f.gapSentence, "gap-sentence", d.Sentence.String(), "gap after a sentence, `DUR` or MIN..MAX")
 	fs.StringVar(&f.gapList, "gap-list", d.List.String(), "gap after a list item, `DUR` or MIN..MAX")
@@ -250,6 +256,7 @@ func (f *runFlags) apply(req *SayRequest) error {
 	req.Verify = verify.Options{Mode: mode, MaxAttempts: f.maxAttempts, RequestExtraAttempts: f.requestExtraAttempts, NoTrim: f.noTrim}
 	req.Policy = verify.OutputPolicy{AllowUnverified: f.allowUnverified, StrictOutput: f.strictOutput}
 	req.Gaps = g
+	req.NoCache, req.Refresh = f.noCache, f.refresh
 	return nil
 }
 
@@ -268,16 +275,17 @@ func (s *settingFlags) register(fs *flag.FlagSet) {
 }
 
 // textSettings resolves every layer into fs (CFG-04) and validates the text-stage settings.
-func (c *CLI) textSettings(fs *flag.FlagSet, tf *textFlags) (guard.Options, spoken.Options, error) {
+func (c *CLI) textSettings(fs *flag.FlagSet, tf *textFlags) (guard.Options, spoken.Options, config.Settings, error) {
 	st, err := c.resolveSettings(fs)
 	if err != nil {
-		return guard.Options{}, spoken.Options{}, err
+		return guard.Options{}, spoken.Options{}, st, err
 	}
 	actions, err := guardActions(st)
 	if err != nil {
-		return guard.Options{}, spoken.Options{}, err
+		return guard.Options{}, spoken.Options{}, st, err
 	}
-	return tf.resolve(actions)
+	g, so, err := tf.resolve(actions)
+	return g, so, st, err
 }
 
 func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
@@ -293,7 +301,7 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.BoolVar(&force, "force", false, "overwrite the output")
 	all.register(fs)
 	return func(args []string) int {
-		g, so, err := c.textSettings(fs, tf)
+		g, so, st, err := c.textSettings(fs, tf)
 		if err != nil {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
@@ -304,7 +312,7 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			return ExitUsage
 		}
 		req := SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: tf.maxInput,
-			Settings: settings, Guard: g, Spoken: so, ChunkSeconds: tf.chunkSeconds}
+			Settings: settings, Guard: g, Spoken: so, ChunkSeconds: tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
 		if err := rf.apply(&req); err != nil {
 			c.errorf("recite say: %v", err)
 			return ExitUsage

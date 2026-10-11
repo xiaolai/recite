@@ -39,6 +39,8 @@ Flags:
     	speech MODEL: gpt-realtime-2.1, gpt-realtime-2, gpt-realtime-2.1-mini (default "gpt-realtime-2.1")
   -model-unchecked
     	accept any --model name
+  -no-cache
+    	neither read nor write the take cache
   -no-trim
     	keep the leading and trailing silence of each take
   -normalize MODE
@@ -49,6 +51,8 @@ Flags:
     	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
   -output PATH
     	write audio to PATH (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)
+  -refresh
+    	render every chunk anew; the takes still go to the cache
   -request-extra-attempts N
     	extra renders for a request-like chunk, N (default 1)
   -session-chunks N

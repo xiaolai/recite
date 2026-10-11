@@ -31,6 +31,11 @@ const (
 	ReasonScore         Reason = "score"
 )
 
+// GuardVersion identifies the behaviour of the guard set (pre-STT and post-STT guards and
+// their limits). Bump it on any change that can turn a guard's verdict: cached verification
+// records it, and a cached take judged by another version is re-verified (RUN-04).
+const GuardVersion = 1
+
 // Pre-STT guard limits (design §8.1).
 const (
 	MinTakeDuration  = 200 * time.Millisecond

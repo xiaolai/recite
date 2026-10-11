@@ -98,7 +98,7 @@ func setupCheck(fs *flag.FlagSet, c *CLI) func([]string) int {
 	tf.register(fs)
 	speed := fs.String("speed", "1.0", "`SPEED` the estimates assume, 0.25 to 1.5")
 	return func(args []string) int {
-		g, so, err := c.textSettings(fs, &tf)
+		g, so, _, err := c.textSettings(fs, &tf)
 		if err != nil {
 			c.errorf("recite check: %v", err)
 			return ExitUsage

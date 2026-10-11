@@ -37,6 +37,10 @@ type multiEnv struct {
 	cfgs      []pipeline.Config
 	tasks     [][]pipeline.Task
 	synthOpen int
+
+	env   map[string]string // the environment Getenv sees; nil is empty
+	sigs  chan os.Signal    // when set, the run's interrupts come from here
+	drain time.Duration     // CLI.DrainTimeout; 0 is the default
 }
 
 func newMultiEnv(t *testing.T) *multiEnv {
@@ -54,9 +58,13 @@ func (m *multiEnv) run(args ...string) result {
 	m.t.Setenv("FAKECODEX_TOKEN_EXP", fmt.Sprint(cliNow.Add(time.Hour).Unix()))
 	var out, errb bytes.Buffer
 	c := New(&out, &errb)
-	c.Getenv = func(string) string { return "" }
+	c.Getenv = func(k string) string { return m.env[k] }
 	c.Now = func() time.Time { return cliNow }
 	c.StdinIsTTY = func() bool { return true }
+	c.DrainTimeout = m.drain
+	if m.sigs != nil {
+		c.Signals = func() (<-chan os.Signal, func()) { return m.sigs, func() {} }
+	}
 	c.NewSynth = func(*auth.Credentials) (realtime.Synthesizer, error) {
 		m.mu.Lock()
 		m.synthOpen++

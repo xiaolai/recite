@@ -107,7 +107,8 @@ func tasksFor(p pipeline.Plan, spec realtime.SessionSpec) []pipeline.Task {
 				Estimate:    time.Duration(max(c.EstMillis, 1)) * time.Millisecond,
 				RequestLike: requestLike,
 			},
-			Spec: spec,
+			Spec:     spec,
+			CacheKey: c.CacheKey,
 		}
 	}
 	return tasks

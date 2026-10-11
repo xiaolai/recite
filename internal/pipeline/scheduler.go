@@ -63,6 +63,9 @@ type Task struct {
 	// reference the take is verified against. Only the calibration harness sets it (VER-07):
 	// it renders an edited passage and verifies it against the original.
 	Render string
+	// CacheKey is the chunk's take cache key (Plan CacheKey); "" keeps the chunk out of the
+	// cache.
+	CacheKey string
 }
 
 // Config configures Run. Synth, Transcriber (unless verification is off) and Deliver are
@@ -93,6 +96,8 @@ type Config struct {
 	Stop         <-chan struct{}
 	DrainTimeout time.Duration                        // 0 means DrainTimeout
 	After        func(time.Duration) <-chan time.Time // nil means time.After
+
+	Cache *TakeCache // the take cache (RUN-04); nil is --no-cache
 
 	DebugDir string       // --debug-dir: each STT result is appended to its render's event dump
 	Logger   *slog.Logger // nil discards
@@ -162,9 +167,10 @@ var errSpeechDenied = &openai.Error{Class: openai.ClassRouteDenied, Route: opena
 type renderJob struct{ i, n int }
 
 type renderOut struct {
-	i, n int
-	take realtime.Take
-	err  error
+	i, n  int
+	take  realtime.Take
+	reuse *verify.ChunkResult // a cached take reused without verification
+	err   error
 }
 
 type verifyOut struct {
@@ -210,8 +216,7 @@ func Run(ctx context.Context, cfg Config, tasks []Task) (Result, error) {
 	for range s.cfg.Jobs {
 		wg.Go(func() {
 			for j := range renderCh {
-				take, err := s.render(work, j)
-				renderRes <- renderOut{i: j.i, n: j.n, take: take, err: err}
+				renderRes <- s.renderOrReuse(work, j)
 			}
 		})
 	}
@@ -227,7 +232,8 @@ func Run(ctx context.Context, cfg Config, tasks []Task) (Result, error) {
 	defer close(verifyCh)
 	defer close(renderCh)
 
-	c := coordinator{s: s, n: len(tasks), states: make([]verify.ChunkResult, len(tasks)), held: map[int]verify.ChunkResult{}}
+	c := coordinator{s: s, n: len(tasks), states: make([]verify.ChunkResult, len(tasks)),
+		held: map[int]verify.ChunkResult{}, takes: map[int]map[int]realtime.Take{}}
 	stop, ctxDone := s.cfg.Stop, ctx.Done()
 	var drain <-chan time.Time
 	for c.low < c.n || c.inflightR+c.inflightV > 0 {
@@ -344,8 +350,9 @@ type coordinator struct {
 	low      int // the lowest chunk not yet delivered
 	rerender []renderJob
 	verifyQ  []verifyJob
-	states   []verify.ChunkResult       // attempts so far, per chunk
-	held     map[int]verify.ChunkResult // finished, waiting for the prefix before them
+	states   []verify.ChunkResult          // attempts so far, per chunk
+	held     map[int]verify.ChunkResult    // finished, waiting for the prefix before them
+	takes    map[int]map[int]realtime.Take // raw takes of unfinished chunks, by attempt, for the cache
 	results  []verify.ChunkResult
 
 	inflightR, inflightV int
@@ -378,6 +385,16 @@ func (c *coordinator) rendered(o renderOut) {
 		c.fail(o.i, o.err)
 		return
 	}
+	if o.reuse != nil {
+		c.finish(o.i, *o.reuse)
+		return
+	}
+	if c.s.cfg.Cache != nil {
+		if c.takes[o.i] == nil {
+			c.takes[o.i] = map[int]realtime.Take{}
+		}
+		c.takes[o.i][o.n] = o.take
+	}
 	c.verifyQ = append(c.verifyQ, verifyJob{i: o.i, n: o.n, take: o.take})
 }
 
@@ -392,8 +409,20 @@ func (c *coordinator) verified(o verifyOut) {
 		c.rerender = append(c.rerender, renderJob{i: o.i, n: o.a.N + 1})
 		return
 	}
-	c.held[o.i] = *st
+	r := *st
 	c.states[o.i] = verify.ChunkResult{}
+	if r.Final > 0 {
+		if take, ok := c.takes[o.i][r.Final]; ok {
+			c.s.store(o.i, r, take)
+		}
+	}
+	delete(c.takes, o.i)
+	c.finish(o.i, r)
+}
+
+// finish holds chunk i's final result and delivers every chunk whose prefix is complete.
+func (c *coordinator) finish(i int, r verify.ChunkResult) {
+	c.held[i] = r
 	for {
 		r, ok := c.held[c.low]
 		if !ok || len(c.errs) > 0 {
@@ -417,6 +446,18 @@ func stripAudio(r verify.ChunkResult) verify.ChunkResult {
 		r.Attempts[i].PCM = nil
 	}
 	return r
+}
+
+// renderOrReuse serves a chunk's first attempt from the cache when it can (RUN-04), and
+// renders otherwise.
+func (s *sched) renderOrReuse(ctx context.Context, j renderJob) renderOut {
+	if j.n == 1 {
+		if take, reuse, hit := s.lookup(j.i); hit {
+			return renderOut{i: j.i, n: j.n, take: take, reuse: reuse}
+		}
+	}
+	take, err := s.render(ctx, j)
+	return renderOut{i: j.i, n: j.n, take: take, err: err}
 }
 
 // render runs one render job with retries (NET-06) on a pooled session (SPK-06).
