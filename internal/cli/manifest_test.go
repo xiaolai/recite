@@ -122,6 +122,13 @@ func TestManifestValidatesAgainstSchema(t *testing.T) {
 	if got := validManifest(t, sch, m.path("rs.wav.json")); got.Output == nil || got.Output.SampleRate != 16000 {
 		t.Fatalf("resampled manifest output: %+v", got.Output)
 	}
+	// An encoded output records its format, which the schema must accept too (AUD-04).
+	if r := m.run(threeParagraphs, "-o", "enc.mp3", "--loudness", "none"); r.code != exitcode.OK {
+		t.Fatalf("mp3: %+v", r)
+	}
+	if got := validManifest(t, sch, m.path("enc.mp3.json")); got.Output == nil || got.Output.Format != "mp3" {
+		t.Fatalf("mp3 manifest output: %+v", got.Output)
+	}
 	m.look = nil
 
 	m.tr.mishear("c0002", unrelated)

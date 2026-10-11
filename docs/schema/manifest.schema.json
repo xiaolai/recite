@@ -93,7 +93,7 @@
           "additionalProperties": false,
           "properties": {
             "path": { "type": "string", "minLength": 1 },
-            "format": { "enum": ["wav", "pcm"] },
+            "format": { "enum": ["wav", "pcm", "mp3", "m4a", "m4b", "opus", "ogg", "flac"] },
             "duration_s": { "type": "number", "minimum": 0 },
             "sample_rate": { "enum": [16000, 22050, 24000, 44100, 48000] },
             "loudness": { "type": "string", "minLength": 1 }
