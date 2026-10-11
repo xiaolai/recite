@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
+	"github.com/xiaolai/recite/internal/livebudget"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
@@ -17,6 +18,9 @@ import (
 	"github.com/xiaolai/recite/internal/text"
 	"github.com/xiaolai/recite/internal/verify"
 )
+
+// liveBudget is the per-invocation cap of `make qualify` (implementation plan §1.4).
+const liveBudget = 30 * time.Minute
 
 // BenchmarkLiveThroughput renders about five minutes of English with gpt-realtime-2.1 in 25 s
 // chunks, 3 render and 6 verify workers, cold cache (no cache exists yet), and reports the
@@ -64,17 +68,30 @@ func BenchmarkLiveThroughput(b *testing.B) {
 			Spec: spec,
 		})
 	}
+	// Two attempts keep the worst case (estimate × 2.2 × 2) under one invocation's budget; the
+	// benchmark measures throughput, not retries. The budget spans every loop iteration.
+	opts := verify.DefaultOptions()
+	opts.MaxAttempts = 2
+	var est time.Duration
+	for _, t := range tasks {
+		est += t.Chunk.Estimate
+	}
+	if err := livebudget.Preflight(est, opts.MaxAttempts+opts.RequestExtraAttempts, liveBudget); err != nil {
+		b.Fatal(err)
+	}
+	budget := livebudget.New(liveBudget)
+	run := budget.Pipeline(pipeline.Run)
 	for b.Loop() {
 		var audioSeconds float64
 		cfg := pipeline.Config{
-			Jobs: 3, VerifyJobs: 6, Verify: verify.DefaultOptions(), Synth: synth, Transcriber: tr, Gate: gate,
+			Jobs: 3, VerifyJobs: 6, Verify: opts, Synth: synth, Transcriber: tr, Gate: gate,
 			Deliver: func(_ int, r verify.ChunkResult) error {
 				audioSeconds += r.PCM.Duration().Seconds()
 				return nil
 			},
 		}
 		start := time.Now()
-		res, err := pipeline.Run(ctx, cfg, tasks)
+		res, err := run(ctx, cfg, tasks)
 		wall := time.Since(start)
 		if code, _ := pipeline.ExitCode(res, err, verify.OutputPolicy{AllowUnverified: true}); code != 0 {
 			b.Fatalf("exit %d: %v", code, err)
