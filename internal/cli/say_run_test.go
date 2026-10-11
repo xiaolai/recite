@@ -40,6 +40,8 @@ type sayEnv struct {
 	tty      bool
 	newSynth func(*auth.Credentials) (realtime.Synthesizer, error) // nil = Synth over srv
 	said     *lastSaid                                             // what the echo wrapper last rendered
+	env      map[string]string                                     // the environment Getenv sees; nil is empty
+	tr       stt.Transcriber                                       // nil = echoTranscriber
 }
 
 func newSayEnv(t *testing.T, opts ...rtfake.Option) *sayEnv {
@@ -77,7 +79,7 @@ func (e *sayEnv) run(args ...string) result {
 	e.t.Setenv("FAKECODEX_TOKEN_EXP", fmt.Sprint(cliNow.Add(time.Hour).Unix()))
 	var out, errb bytes.Buffer
 	c := New(&out, &errb)
-	c.Getenv = func(string) string { return "" }
+	c.Getenv = func(k string) string { return e.env[k] }
 	c.Now = func() time.Time { return cliNow }
 	c.Stdin = e.stdin
 	c.StdinIsTTY = func() bool { return e.tty }
@@ -93,6 +95,9 @@ func (e *sayEnv) run(args ...string) result {
 		return echoSynth{s, e.said}, nil
 	}
 	c.NewTranscriber = func(*auth.Credentials) (stt.Transcriber, func() error, error) {
+		if e.tr != nil {
+			return e.tr, func() error { return nil }, nil
+		}
 		return echoTranscriber{e.said}, func() error { return nil }, nil
 	}
 	full := append([]string{"--codex-bin", fakeCodex, "--codex-home", e.t.TempDir(), "--auth-source", "codex", "say"}, args...)
@@ -245,8 +250,8 @@ func TestSayExit0WritesWAV(t *testing.T) {
 		t.Fatalf("request: %s", sentText(t, e.srv))
 	}
 	entries, _ := os.ReadDir(e.dir)
-	if len(entries) != 1 {
-		t.Fatalf("temp file left behind: %v", entries)
+	if len(entries) != 2 || entries[0].Name() != "h.wav" || entries[1].Name() != "h.wav.json" {
+		t.Fatalf("want the output and its manifest, no temp file: %v", entries)
 	}
 }
 

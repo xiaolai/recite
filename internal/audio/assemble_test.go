@@ -256,3 +256,34 @@ func TestAssemblerStreamsPrefixAndRejectsMisuse(t *testing.T) {
 		t.Error("partial sample accepted")
 	}
 }
+
+// Spans place each chunk at the sum of the chunks and gaps before it, whatever the arrival
+// order: the timeline the manifest records.
+// accept: OUT-02#3
+func TestAssemblerSpans(t *testing.T) {
+	chunks := []PCM{dc(100, 1000), dc(250, 1000), dc(40, 1000)}
+	gaps := []int{30, 7, 0}
+	var buf bytes.Buffer
+	a := NewAssembler(&buf, gaps)
+	for _, i := range []int{2, 0, 1} {
+		if err := a.Add(i, chunks[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []Span{{0, 100}, {130, 380}, {387, 427}}
+	got := a.Spans()
+	if len(got) != len(want) {
+		t.Fatalf("spans %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("spans %v, want %v", got, want)
+		}
+		if !bytes.Equal(buf.Bytes()[got[i].Start*BytesPerSample:got[i].End*BytesPerSample], Fade(chunks[i])) {
+			t.Fatalf("chunk %d is not at its span", i)
+		}
+	}
+	if int64(buf.Len()) != want[2].End*BytesPerSample {
+		t.Fatalf("assembly %d bytes, last span ends at %d samples", buf.Len(), want[2].End)
+	}
+}

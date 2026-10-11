@@ -98,6 +98,7 @@ type Transcription struct {
 	Language   string // first detected language, "" when none was reported
 	Result     Result
 	Confidence []SpanConfidence // per mismatched heard span
+	Seconds    int              // billed audio seconds the STT reported; 0 when unknown
 }
 
 // Attempt records one render and its verdict.
@@ -108,7 +109,8 @@ type Attempt struct {
 	SaidMismatch   bool       // the said guard would have rejected, but Options.BypassSaid skipped it
 	Rejection      *Rejection // nil when accepted
 	Transcriptions []Transcription
-	Score          float64 // the best transcription's score; 0 when not transcribed
+	Score          float64             // the best transcription's score; 0 when not transcribed
+	Usage          realtime.TokenUsage // the render's token usage, for the manifest and the ledger
 	PCM            audio.PCM
 }
 
@@ -164,7 +166,7 @@ func (o Options) Validate(c Chunk) error { return o.validate(c) }
 // exposed so a scheduler can render and verify on separate workers (design §10).
 func Check(ctx context.Context, c Chunk, o Options, n int, take realtime.Take, tr stt.Transcriber) (Attempt, int, error) {
 	calls := 0
-	a := Attempt{N: n, Status: take.Status}
+	a := Attempt{N: n, Status: take.Status, Usage: take.Usage}
 	pcm, rej := preSTT(c, take, o.NoTrim, o.BypassSaid)
 	a.PCM, a.Rejection, a.Eligible = pcm, rej, rej == nil
 	a.SaidMismatch = o.BypassSaid && !Equivalent(take.Said, c.Spoken)
@@ -239,7 +241,7 @@ func verifyTake(ctx context.Context, c Chunk, th Thresholds, hint stt.Hint, tr s
 			return fmt.Errorf("transcribe: %w", err)
 		}
 		j := judge(c, t)
-		rec := Transcription{Text: t.Text, Result: j.result, Confidence: confidences(t, j.result.Edits)}
+		rec := Transcription{Text: t.Text, Result: j.result, Confidence: confidences(t, j.result.Edits), Seconds: t.Seconds}
 		if len(t.Languages) > 0 {
 			rec.Language = t.Languages[0].Code
 		}

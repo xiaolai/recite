@@ -31,6 +31,10 @@ Flags:
     	text guard POLICY: fix, strict, warn or off (default "fix")
   -jobs N
     	render N chunks at once, 1 to 6 (default 3)
+  -keep-rejected DIR
+    	save every rejected take and its report in DIR
+  -manifest PATH
+    	write the manifest to PATH (default <output>.json)
   -max-attempts N
     	renders per chunk, N (default 3)
   -max-input BYTES
@@ -41,6 +45,8 @@ Flags:
     	accept any --model name
   -no-cache
     	neither read nor write the take cache
+  -no-manifest
+    	write no manifest
   -no-trim
     	keep the leading and trailing silence of each take
   -normalize MODE

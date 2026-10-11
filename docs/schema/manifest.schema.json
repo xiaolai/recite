@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xiaolai/recite/docs/schema/manifest.schema.json",
+  "title": "recite manifest",
+  "description": "The record written next to the output as <output>.json, or at --manifest PATH (design §11.2, OUT-02). Version 1. It never holds a token, an email or an account ID.",
+  "version": 1,
+  "type": "object",
+  "required": ["schema", "tool", "created_at", "status", "input", "settings", "verifier", "output", "summary", "chunks", "usage_estimate_usd_list_price", "usage_estimate_note"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "recite/manifest@1" },
+    "tool": {
+      "type": "object",
+      "required": ["version", "commit"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "commit": { "type": "string", "minLength": 1 }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "status": {
+      "description": "complete: the output was written; no-output: the verdicts allowed none (VER-09); interrupted: SIGINT, partial state; failed: a render or transcription failure.",
+      "enum": ["complete", "no-output", "interrupted", "failed"]
+    },
+    "input": {
+      "type": "object",
+      "required": ["source", "format", "sha256", "chars"],
+      "additionalProperties": false,
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "format": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "chars": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "required": ["model", "voice", "speed", "effort", "instructions_version", "style", "verify"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "voice": { "type": "string", "minLength": 1 },
+        "speed": { "type": "number", "exclusiveMinimum": 0 },
+        "effort": { "enum": ["minimal", "low", "medium", "high", "xhigh"] },
+        "instructions_version": { "type": "integer", "minimum": 1 },
+        "style": { "type": ["string", "null"] },
+        "verify": {
+          "type": "object",
+          "required": ["mode", "accept", "gray", "max_attempts", "request_extra_attempts"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["normal", "strict", "off"] },
+            "accept": { "$ref": "#/$defs/unit" },
+            "gray": { "$ref": "#/$defs/unit" },
+            "max_attempts": { "type": "integer", "minimum": 1 },
+            "request_extra_attempts": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "verifier": {
+      "description": "The verifier route the run ended on; fallback records the VER-02 switch to the realtime transcription session.",
+      "type": "object",
+      "required": ["route", "stt_model", "fallback"],
+      "additionalProperties": false,
+      "properties": {
+        "route": { "enum": ["http", "realtime", "none"] },
+        "stt_model": { "type": ["string", "null"] },
+        "fallback": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["from", "to", "cause"],
+              "additionalProperties": false,
+              "properties": {
+                "from": { "const": "http" },
+                "to": { "const": "realtime" },
+                "cause": { "type": "string" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "output": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["path", "format", "duration_s", "sample_rate", "loudness"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "format": { "enum": ["wav", "pcm"] },
+            "duration_s": { "type": "number", "minimum": 0 },
+            "sample_rate": { "const": 24000 },
+            "loudness": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "required": ["chunks", "verified", "unverified", "no_eligible", "pending", "cached", "findings", "request_like_chunks", "renders", "stt_calls"],
+      "additionalProperties": false,
+      "properties": {
+        "chunks": { "$ref": "#/$defs/count" },
+        "verified": { "$ref": "#/$defs/count" },
+        "unverified": { "$ref": "#/$defs/count" },
+        "no_eligible": { "$ref": "#/$defs/count" },
+        "pending": { "$ref": "#/$defs/count" },
+        "cached": { "$ref": "#/$defs/count" },
+        "findings": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } },
+        "request_like_chunks": { "$ref": "#/$defs/count" },
+        "renders": { "$ref": "#/$defs/count" },
+        "stt_calls": { "$ref": "#/$defs/count" }
+      }
+    },
+    "chunks": { "type": "array", "items": { "$ref": "#/$defs/chunk" } },
+    "usage_estimate_usd_list_price": { "type": "number", "minimum": 0 },
+    "usage_estimate_note": { "type": "string" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "unit": { "type": "number", "minimum": 0, "maximum": 1 },
+    "count": { "type": "integer", "minimum": 0 },
+    "seconds": { "type": ["number", "null"], "minimum": 0 },
+    "chunk": {
+      "type": "object",
+      "required": ["id", "section", "text_sha256", "spoken_sha256", "chars", "lang", "findings", "request_like", "start_s", "end_s", "gap_after_s", "gap_type", "cache_key", "cached", "state", "verified", "attempts", "final_attempt", "score", "stt_calls", "attempt_log", "usage"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^c[0-9]{4,}$" },
+        "section": { "type": ["string", "null"] },
+        "text_sha256": { "$ref": "#/$defs/sha256" },
+        "spoken_sha256": { "$ref": "#/$defs/sha256" },
+        "chars": { "$ref": "#/$defs/count" },
+        "lang": { "type": "string" },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "at", "action"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "minLength": 1 },
+              "at": { "type": "string", "pattern": "^[0-9]+:[0-9]+$" },
+              "action": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "request_like": { "type": "boolean" },
+        "start_s": { "$ref": "#/$defs/seconds" },
+        "end_s": { "$ref": "#/$defs/seconds" },
+        "gap_after_s": { "$ref": "#/$defs/seconds" },
+        "gap_type": { "enum": ["none", "sentence", "list", "paragraph", "section", "pause"] },
+        "cache_key": { "$ref": "#/$defs/sha256" },
+        "cached": { "type": "boolean" },
+        "state": { "enum": ["verified", "unverified", "no-eligible", "pending"] },
+        "verified": { "type": "boolean" },
+        "attempts": { "$ref": "#/$defs/count" },
+        "final_attempt": { "$ref": "#/$defs/count" },
+        "score": { "$ref": "#/$defs/unit" },
+        "stt_calls": { "$ref": "#/$defs/count" },
+        "attempt_log": {
+          "description": "The VER-08 attempt record: one entry per take.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["n", "status", "eligible", "stt_scores", "score", "rejection"],
+            "additionalProperties": false,
+            "properties": {
+              "n": { "type": "integer", "minimum": 1 },
+              "status": { "type": "string" },
+              "eligible": { "type": "boolean" },
+              "stt_scores": { "type": "array", "items": { "$ref": "#/$defs/unit" } },
+              "score": { "$ref": "#/$defs/unit" },
+              "rejection": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "required": ["reason", "detail"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "reason": { "enum": ["said", "empty", "duration", "status", "language", "protected-token", "edge-insertion", "content-word", "score"] },
+                      "detail": { "type": "string" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "required": ["text_in", "text_out", "audio_out", "stt_seconds"],
+          "additionalProperties": false,
+          "properties": {
+            "text_in": { "$ref": "#/$defs/count" },
+            "text_out": { "$ref": "#/$defs/count" },
+            "audio_out": { "$ref": "#/$defs/count" },
+            "stt_seconds": { "$ref": "#/$defs/count" }
+          }
+        }
+      }
+    }
+  }
+}

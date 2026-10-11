@@ -101,6 +101,32 @@ type Config struct {
 
 	DebugDir string       // --debug-dir: each STT result is appended to its render's event dump
 	Logger   *slog.Logger // nil discards
+
+	// OnUsage, if set, receives every render and every STT call as it completes (the usage
+	// ledger, OBS-03). It is called from worker goroutines and must be safe for concurrent use.
+	OnUsage func(UsageEvent)
+	// OnRejected, if set, receives every rejected take with its raw audio (--keep-rejected,
+	// OUT-06). It is called from verify workers and must be safe for concurrent use.
+	OnRejected func(c verify.Chunk, a verify.Attempt, take realtime.Take)
+}
+
+// UsageKind is what a UsageEvent accounts for.
+type UsageKind string
+
+// Usage event kinds.
+const (
+	UsageRender UsageKind = "render"
+	UsageSTT    UsageKind = "stt"
+)
+
+// UsageEvent is one completed render or STT call.
+type UsageEvent struct {
+	Kind       UsageKind
+	ChunkID    string
+	Attempt    int
+	Model      string              // the speech model, or the STT model of the verifier route in use
+	Tokens     realtime.TokenUsage // a render's usage
+	STTSeconds int                 // an STT call's billed seconds
 }
 
 // Result is the record of a run.
@@ -495,6 +521,9 @@ func (s *sched) render(ctx context.Context, j renderJob) (realtime.Take, error) 
 		take = tk
 		return nil
 	})
+	if err == nil && s.cfg.OnUsage != nil {
+		s.cfg.OnUsage(UsageEvent{Kind: UsageRender, ChunkID: t.Chunk.ID, Attempt: j.n, Model: t.Spec.Model, Tokens: take.Usage})
+	}
 	return take, err
 }
 
@@ -509,8 +538,17 @@ func (s *sched) noteDenied(err error) {
 func (s *sched) check(ctx context.Context, j verifyJob) (verify.Attempt, int, error) {
 	t := s.tasks[j.i]
 	a, calls, err := verify.Check(ctx, t.Chunk, s.cfg.Verify, j.n, j.take, s.tr)
+	if s.cfg.OnUsage != nil && len(a.Transcriptions) > 0 {
+		_, model := s.route()
+		for _, tr := range a.Transcriptions {
+			s.cfg.OnUsage(UsageEvent{Kind: UsageSTT, ChunkID: t.Chunk.ID, Attempt: j.n, Model: model, STTSeconds: tr.Seconds})
+		}
+	}
 	if err == nil && s.cfg.DebugDir != "" {
 		s.dumpSTT(t.Chunk.ID, a)
+	}
+	if err == nil && a.Rejection != nil && s.cfg.OnRejected != nil {
+		s.cfg.OnRejected(t.Chunk, a, j.take)
 	}
 	return a, calls, err
 }

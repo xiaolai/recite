@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xiaolai/recite/internal/logx"
 )
@@ -152,4 +153,58 @@ func VersionLess(a, b string) bool {
 func (c *Client) ReadRateLimits(ctx context.Context) (json.RawMessage, error) {
 	var out json.RawMessage
 	return out, c.Call(ctx, "account/rateLimits/read", nil, &out)
+}
+
+// RateLimits is the Codex plan status from account/rateLimits/read (OBS-04). Only these fields
+// are decoded; nothing that identifies the account reaches a Go value.
+type RateLimits struct {
+	PlanType             string
+	OrdinaryUsageAllowed bool
+	Windows              []RateWindow // the primary window, then the secondary one, when present
+}
+
+// RateWindow is one usage window of the plan.
+type RateWindow struct {
+	Name        string // "primary" or "secondary"
+	UsedPercent float64
+	WindowMins  int
+	ResetsAt    time.Time // zero when not reported
+}
+
+// PlanStatus calls account/rateLimits/read and decodes the plan status.
+func (c *Client) PlanStatus(ctx context.Context) (RateLimits, error) {
+	type window struct {
+		UsedPercent        float64 `json:"usedPercent"`
+		WindowDurationMins int     `json:"windowDurationMins"`
+		ResetsAt           *int64  `json:"resetsAt"`
+	}
+	var raw struct {
+		OrdinaryUsageAllowed bool `json:"ordinaryUsageAllowed"`
+		RateLimits           *struct {
+			PlanType  string  `json:"planType"`
+			Primary   *window `json:"primary"`
+			Secondary *window `json:"secondary"`
+		} `json:"rateLimits"`
+	}
+	if err := c.Call(ctx, "account/rateLimits/read", nil, &raw); err != nil {
+		return RateLimits{}, err
+	}
+	out := RateLimits{OrdinaryUsageAllowed: raw.OrdinaryUsageAllowed}
+	if rl := raw.RateLimits; rl != nil {
+		out.PlanType = logx.Scrub(rl.PlanType)
+		for _, w := range []struct {
+			name string
+			w    *window
+		}{{"primary", rl.Primary}, {"secondary", rl.Secondary}} {
+			if w.w == nil {
+				continue
+			}
+			rw := RateWindow{Name: w.name, UsedPercent: w.w.UsedPercent, WindowMins: w.w.WindowDurationMins}
+			if w.w.ResetsAt != nil {
+				rw.ResetsAt = time.Unix(*w.w.ResetsAt, 0).UTC()
+			}
+			out.Windows = append(out.Windows, rw)
+		}
+	}
+	return out, nil
 }

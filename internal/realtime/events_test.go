@@ -169,3 +169,18 @@ func FuzzDecodeEvent(f *testing.F) {
 		}
 	})
 }
+
+// The usage details split text from audio tokens for the manifest and the price estimate.
+func TestResponseDoneUsageDetails(t *testing.T) {
+	ev, err := realtime.DecodeEvent([]byte(`{"type":"response.done","response":{"id":"r","status":"completed",` +
+		`"usage":{"input_tokens":120,"output_tokens":435,"input_token_details":{"text_tokens":118,"audio_tokens":2},` +
+		`"output_token_details":{"text_tokens":80,"audio_tokens":355}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ev.(realtime.ResponseDone).Usage
+	want := realtime.TokenUsage{InputTokens: 120, OutputTokens: 435, InputTextTokens: 118, OutputTextTokens: 80, OutputAudioTokens: 355, Detailed: true}
+	if got != want {
+		t.Fatalf("usage %+v, want %+v", got, want)
+	}
+}

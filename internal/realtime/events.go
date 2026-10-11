@@ -172,8 +172,15 @@ type (
 			Reason string `json:"reason"`
 		} `json:"status_details"`
 		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens       int `json:"input_tokens"`
+			OutputTokens      int `json:"output_tokens"`
+			InputTokenDetails *struct {
+				TextTokens int `json:"text_tokens"`
+			} `json:"input_token_details"`
+			OutputTokenDetails *struct {
+				TextTokens  int `json:"text_tokens"`
+				AudioTokens int `json:"audio_tokens"`
+			} `json:"output_token_details"`
 		} `json:"usage"`
 		Metadata map[string]string `json:"metadata"`
 	}
@@ -317,6 +324,12 @@ func decodeDone(typ string, r *wireResponse) (Event, error) {
 	}
 	if r.Usage != nil {
 		ev.Usage = TokenUsage{InputTokens: r.Usage.InputTokens, OutputTokens: r.Usage.OutputTokens}
+		if d := r.Usage.InputTokenDetails; d != nil {
+			ev.Usage.InputTextTokens = d.TextTokens
+		}
+		if d := r.Usage.OutputTokenDetails; d != nil {
+			ev.Usage.OutputTextTokens, ev.Usage.OutputAudioTokens, ev.Usage.Detailed = d.TextTokens, d.AudioTokens, true
+		}
 	}
 	return ev, nil
 }

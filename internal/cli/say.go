@@ -15,12 +15,14 @@ import (
 	"github.com/xiaolai/recite/internal/cache"
 	"github.com/xiaolai/recite/internal/fsx"
 	"github.com/xiaolai/recite/internal/guard"
+	"github.com/xiaolai/recite/internal/manifest"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/stt"
 	"github.com/xiaolai/recite/internal/text"
+	"github.com/xiaolai/recite/internal/usage"
 	"github.com/xiaolai/recite/internal/verify"
 )
 
@@ -142,7 +144,17 @@ func (c *CLI) runSay(req SayRequest) int {
 	if err := preflight(target, req.Force); err != nil {
 		return c.reportFailure(err)
 	}
-	tc, err := c.takeCache(req)
+	mpath, mreplace, err := manifestTarget(req, target)
+	if err != nil {
+		return c.reportFailure(err)
+	}
+	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, format: format,
+		manifest: mpath, replaceManifest: mreplace}
+	if job.cache, err = c.takeCache(req); err == nil {
+		if err = keepRejectedDir(req.KeepRejected); err == nil {
+			job.ledger, err = c.openLedger()
+		}
+	}
 	if err != nil {
 		c.errorf("recite say: %v", err)
 		if errors.Is(err, fsx.ErrUnsafePath) {
@@ -152,8 +164,22 @@ func (c *CLI) runSay(req SayRequest) int {
 	}
 	c.Logger.Info("plan", "chunks", len(tasks), "jobs", req.Jobs)
 	return c.withCredentials(func(ctx context.Context, creds *auth.Credentials) error {
-		return c.renderAll(ctx, creds, req, tasks, tc, gaps, target, format)
+		return c.renderAll(ctx, creds, req, job)
 	})
+}
+
+// sayJob is a planned `say` run: everything decided before the first request.
+type sayJob struct {
+	input           string
+	plan            pipeline.Plan
+	tasks           []pipeline.Task
+	cache           *pipeline.TakeCache
+	ledger          *usage.Ledger
+	gaps            []int
+	target          string
+	format          audio.Format
+	manifest        string // "" under --no-manifest
+	replaceManifest bool
 }
 
 // takeCache opens the take cache (RUN-04): nil under --no-cache or without a cache directory.
@@ -171,12 +197,14 @@ func (c *CLI) takeCache(req SayRequest) (*pipeline.TakeCache, error) {
 
 // renderAll renders, verifies and assembles every chunk, then publishes the output when the
 // verdicts allow it (VER-09). An unverified chunk makes exit 5 after the file is written,
-// unless --allow-unverified or --strict-output says otherwise.
-func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayRequest, tasks []pipeline.Task, tc *pipeline.TakeCache, gaps []int, target string, format audio.Format) error {
+// unless --allow-unverified or --strict-output says otherwise. The manifest is written
+// whenever the scheduler ran, with partial state after an interrupt or a failure (design §10).
+func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayRequest, job sayJob) error {
 	synth, err := c.NewSynth(creds)
 	if err != nil {
 		return err
 	}
+	rec := &recorder{c: c, ledger: job.ledger, prices: usage.ListPrices, keepDir: req.KeepRejected}
 	var tr stt.Transcriber
 	if req.Verify.Mode != verify.ModeOff {
 		t, closeTr, err := c.NewTranscriber(creds)
@@ -189,12 +217,13 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 			}
 		}()
 		tr = t
+		rec.watch(tr)
 	}
 	var pcm bytes.Buffer
-	asm := audio.NewAssembler(&pcm, gaps)
+	asm := audio.NewAssembler(&pcm, job.gaps)
 	cfg := pipeline.Config{
 		Jobs: req.Jobs, VerifyJobs: req.VerifyJobs, SessionChunks: req.SessionChunks,
-		Verify: req.Verify, Synth: synth, Transcriber: tr, Cache: tc,
+		Verify: req.Verify, Synth: synth, Transcriber: tr, Cache: job.cache,
 		Deliver: func(i int, r verify.ChunkResult) error {
 			c.reportChunk(r)
 			return asm.Add(i, r.PCM)
@@ -202,31 +231,75 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		DrainTimeout: c.DrainTimeout,
 		DebugDir:     c.globals.DebugDir,
 		Logger:       c.Logger,
+		OnUsage:      rec.usage,
+	}
+	if req.KeepRejected != "" {
+		cfg.OnRejected = rec.rejected
 	}
 	if c.intr != nil {
 		cfg.Stop = c.intr.Stop()
 	}
-	res, err := c.RunPipeline(ctx, cfg, tasks)
+	res, err := c.RunPipeline(ctx, cfg, job.tasks)
 	code, write := pipeline.ExitCode(res, err, req.Policy)
+	status := manifest.StatusNoOutput
+	switch {
+	case c.interrupted() || res.Interrupted:
+		status, write = manifest.StatusInterrupted, false // an interrupted run publishes no audio
+	case err != nil:
+		status = manifest.StatusFailed
+	}
+	var out *manifest.Output
+	if write {
+		if err := asm.Close(); err != nil {
+			return err
+		}
+		audioOut := audio.PCM(pcm.Bytes())
+		if err := publishOutput(job.target, req.Force, func(w io.Writer) error { return audio.Write(w, job.format, audioOut) }); err != nil {
+			return err
+		}
+		c.Logger.Info("wrote output", "path", job.target, "seconds", audioOut.Duration().Seconds())
+		status = manifest.StatusComplete
+		out = &manifest.Output{Path: job.target, Format: string(job.format), DurationS: audioOut.Duration().Seconds(),
+			SampleRate: audio.SampleRate, Loudness: "none"}
+	}
+	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out); merr != nil {
+		if err == nil {
+			return merr
+		}
+		c.Logger.Warn("manifest not written", "err", merr)
+	}
 	if err != nil {
 		return err
 	}
 	if c.interrupted() {
 		return nil // withCredentials reports 130; an interrupted run publishes nothing
 	}
-	if write {
-		if err := asm.Close(); err != nil {
-			return err
-		}
-		out := audio.PCM(pcm.Bytes())
-		if err := publishOutput(target, req.Force, func(w io.Writer) error { return audio.Write(w, format, out) }); err != nil {
-			return err
-		}
-		c.Logger.Info("wrote output", "path", target, "seconds", out.Duration().Seconds())
-	}
 	if code != ExitOK {
 		return verdictError(res, code, write)
 	}
+	return nil
+}
+
+// writeRunManifest builds and publishes the run's manifest, unless --no-manifest.
+func (c *CLI) writeRunManifest(req SayRequest, job sayJob, rec *recorder, tr stt.Transcriber, res pipeline.Result,
+	spans []audio.Span, status manifest.Status, out *manifest.Output) error {
+	if job.manifest == "" {
+		return nil
+	}
+	estimate, fb := rec.totals()
+	m, err := manifest.Build(manifest.Run{
+		CreatedAt: c.Now(), Status: status, Input: inputOf(req, job.input), Settings: settingsOf(req),
+		Verifier: verifierOf(req.Verify.Mode, tr, fb), Output: out,
+		Plan: job.plan, Tasks: job.tasks, Results: res.Chunks, Spans: spans, Gaps: job.gaps,
+		EstimateUSD: estimate, PriceNote: usage.ListPrices.Label(),
+	})
+	if err != nil {
+		return err
+	}
+	if err := writeManifest(job.manifest, job.replaceManifest, m); err != nil {
+		return err
+	}
+	c.Logger.Info("wrote manifest", "path", job.manifest)
 	return nil
 }
 

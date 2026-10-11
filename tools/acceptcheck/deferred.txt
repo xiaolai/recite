@@ -3,8 +3,6 @@
 # Where a §1.7 row covers part of a bullet, the bullet is listed against the later WP.
 NET-05#1 WP-1.4 WebSocket close-code and error-event rows need NET-03/NET-04
 TXT-02#3 WP-2.2 G-CONTROL findings need TXT-09
-VER-02#2 WP-3.3 fallback recorded in the manifest needs OUT-02
-AUTH-05#1 WP-3.3 manifest, rejected-take and usage-ledger artifacts in the canary search need OUT-02, OUT-06, OBS-03
 AUTH-05#2 WP-1.3 the fake codex child leaking the canary via stderr, RPC errors and malformed JSON needs the codexapp client (WP-1.3 lists it)
 SPK-10#3 WP-1.6 each effort level renders live; needs the render function of SPK-01
 SPK-05#3 WP-1.6 the 87-take INSTR v2 qualification renders live; needs the render function of SPK-01

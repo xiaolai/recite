@@ -38,16 +38,19 @@ type multiEnv struct {
 	tasks     [][]pipeline.Task
 	synthOpen int
 
-	env   map[string]string // the environment Getenv sees; nil is empty
-	sigs  chan os.Signal    // when set, the run's interrupts come from here
-	drain time.Duration     // CLI.DrainTimeout; 0 is the default
+	env map[string]string // the environment Getenv sees; nil is empty
+	// wrapTr, when set, wraps the transcriber the run gets (a verifier chain, for VER-02).
+	wrapTr func(stt.Transcriber) stt.Transcriber
+	sigs   chan os.Signal // when set, the run's interrupts come from here
+	drain  time.Duration  // CLI.DrainTimeout; 0 is the default
 }
 
 func newMultiEnv(t *testing.T) *multiEnv {
 	t.Helper()
 	dir := t.TempDir()
 	t.Chdir(dir)
-	return &multiEnv{t: t, dir: dir, synth: rtfake.NewScriptedSynthesizer(), tr: &tagTranscriber{texts: map[string]string{}, said: map[string]string{}}}
+	return &multiEnv{t: t, dir: dir, synth: rtfake.NewScriptedSynthesizer(),
+		tr: &tagTranscriber{texts: map[string]string{}, said: map[string]string{}, saidAt: map[string]string{}}}
 }
 
 func (m *multiEnv) path(name string) string { return filepath.Join(m.dir, name) }
@@ -72,6 +75,9 @@ func (m *multiEnv) run(args ...string) result {
 		return fitSynth{m.synth}, nil
 	}
 	c.NewTranscriber = func(*auth.Credentials) (stt.Transcriber, func() error, error) {
+		if m.wrapTr != nil {
+			return m.wrapTr(m.tr), func() error { return nil }, nil
+		}
 		return m.tr, func() error { return nil }, nil
 	}
 	c.RunPipeline = func(ctx context.Context, cfg pipeline.Config, tasks []pipeline.Task) (pipeline.Result, error) {
@@ -147,12 +153,21 @@ func (f fitSession) Render(ctx context.Context, req realtime.RenderRequest) (rea
 	return t, nil
 }
 
-// tagTranscriber hears each take as its chunk's spoken text, or as said[chunk] when set.
+// tagTranscriber hears each take as its chunk's spoken text, or as said[chunk] when set, or
+// as saidAt["chunk#attempt"] for that one take.
 type tagTranscriber struct {
-	mu    sync.Mutex
-	texts map[string]string
-	said  map[string]string
-	calls int
+	mu     sync.Mutex
+	texts  map[string]string
+	said   map[string]string
+	saidAt map[string]string
+	calls  int
+}
+
+// mishearAttempt makes one take of chunk id be heard as s.
+func (tt *tagTranscriber) mishearAttempt(id string, attempt int, s string) {
+	tt.mu.Lock()
+	defer tt.mu.Unlock()
+	tt.saidAt[fmt.Sprintf("%s#%d", id, attempt)] = s
 }
 
 func (tt *tagTranscriber) setText(id, s string) {
@@ -177,7 +192,7 @@ func (tt *tagTranscriber) Transcribe(ctx context.Context, pcm []byte, _ stt.Hint
 	if err := ctx.Err(); err != nil {
 		return stt.Transcript{}, err
 	}
-	id, _, ok := rtfake.PCMTag(pcm)
+	id, n, ok := rtfake.PCMTag(pcm)
 	if !ok {
 		return stt.Transcript{}, errors.New("untagged take")
 	}
@@ -186,6 +201,9 @@ func (tt *tagTranscriber) Transcribe(ctx context.Context, pcm []byte, _ stt.Hint
 	tt.calls++
 	text := tt.texts[id]
 	if s, ok := tt.said[id]; ok {
+		text = s
+	}
+	if s, ok := tt.saidAt[fmt.Sprintf("%s#%d", id, n)]; ok {
 		text = s
 	}
 	return stt.Transcript{Text: text, Languages: []stt.DetectedLanguage{}}, nil

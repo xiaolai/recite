@@ -97,6 +97,10 @@ type SayRequest struct {
 	CacheDir      string // the take cache root (cache_dir); "" means no cache
 	NoCache       bool   // --no-cache: no cache reads or writes
 	Refresh       bool   // --refresh: no cache reads
+
+	Manifest     string // --manifest PATH; "" means <output>.json
+	NoManifest   bool   // --no-manifest
+	KeepRejected string // --keep-rejected DIR; "" keeps none
 }
 
 // hiddenFlags are registered but left out of help (design §12.2).
@@ -299,6 +303,11 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.StringVar(&output, "o", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
 	fs.StringVar(&output, "output", "", "write audio to `PATH` (.wav or .pcm; default <file stem>.wav or speech-<timestamp>.wav)")
 	fs.BoolVar(&force, "force", false, "overwrite the output")
+	var manifestPath, keepRejected string
+	var noManifest bool
+	fs.StringVar(&manifestPath, "manifest", "", "write the manifest to `PATH` (default <output>.json)")
+	fs.BoolVar(&noManifest, "no-manifest", false, "write no manifest")
+	fs.StringVar(&keepRejected, "keep-rejected", "", "save every rejected take and its report in `DIR`")
 	all.register(fs)
 	return func(args []string) int {
 		g, so, st, err := c.textSettings(fs, tf)
@@ -317,6 +326,11 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
+		if noManifest && manifestPath != "" {
+			c.errorf("recite say: --manifest and --no-manifest exclude each other")
+			return ExitUsage
+		}
+		req.Manifest, req.NoManifest, req.KeepRejected = manifestPath, noManifest, keepRejected
 		return c.Say(req)
 	}
 }

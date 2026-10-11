@@ -226,7 +226,12 @@ type Assembler struct {
 	pending map[int]PCM
 	next    int
 	written int64
+	spans   []Span
 }
+
+// Span is where one chunk's audio lies in the assembly, in samples from the start: [Start, End).
+// The gap after the chunk begins at End.
+type Span struct{ Start, End int64 }
 
 // NewAssembler assembles len(gaps) chunks; gaps[i] is the silence after chunk i in samples.
 func NewAssembler(w io.Writer, gaps []int) *Assembler {
@@ -251,9 +256,11 @@ func (a *Assembler) Add(i int, p PCM) error {
 			return nil
 		}
 		delete(a.pending, a.next)
+		start := a.written / BytesPerSample
 		if err := a.write(Fade(q)); err != nil {
 			return err
 		}
+		a.spans = append(a.spans, Span{Start: start, End: a.written / BytesPerSample})
 		if err := a.write(make(PCM, a.gaps[a.next]*BytesPerSample)); err != nil {
 			return err
 		}
@@ -272,6 +279,10 @@ func (a *Assembler) write(p PCM) error {
 
 // Written is the number of bytes written so far.
 func (a *Assembler) Written() int64 { return a.written }
+
+// Spans returns the place of every chunk written so far, in index order: the timeline the
+// manifest records (OUT-02).
+func (a *Assembler) Spans() []Span { return append([]Span(nil), a.spans...) }
 
 // Close reports an error unless every chunk was delivered.
 func (a *Assembler) Close() error {

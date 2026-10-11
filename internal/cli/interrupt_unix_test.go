@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
+	"github.com/xiaolai/recite/internal/manifest"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	rtfake "github.com/xiaolai/recite/internal/realtime/fake"
@@ -128,9 +129,13 @@ func TestSIGINTExits130(t *testing.T) {
 	if !errors.As(err, &ee) || ee.ExitCode() != 130 {
 		t.Fatalf("exit: %v, want 130\n%s", err, stderr.String())
 	}
+	// No audio and no temp file; only the manifest with the partial state (design §10).
 	entries, err := os.ReadDir(outDir)
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("output directory holds %v (%v), want nothing, not even a temp file", entries, err)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "h.wav.json" {
+		t.Fatalf("output directory holds %v (%v), want only the partial manifest", entries, err)
+	}
+	if m := readManifest(t, filepath.Join(outDir, "h.wav.json")); m.Status != manifest.StatusInterrupted || m.Output != nil {
+		t.Fatalf("manifest status %q output %+v, want interrupted with no output", m.Status, m.Output)
 	}
 	b, err := os.ReadFile(pidfile)
 	if err != nil {

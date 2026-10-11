@@ -405,6 +405,11 @@ var (
 )
 
 // accept: VER-08#1
+// accept: VER-08#2
+// accept: VER-08#3
+// accept: VER-08#4
+// accept: VER-08#5
+// accept: VER-08#6
 func TestAdjudicationPaths(t *testing.T) {
 	c := chunk(pathRef)
 	answer := rtfake.Say("Sure! Here is a story about a box.", c.Estimate)

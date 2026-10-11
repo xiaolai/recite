@@ -54,8 +54,15 @@ func expectedTakes(t *testing.T, sc fake.Scenario) []expected {
 				Status   string            `json:"status"`
 				Metadata map[string]string `json:"metadata"`
 				Usage    struct {
-					InputTokens  int `json:"input_tokens"`
-					OutputTokens int `json:"output_tokens"`
+					InputTokens       int `json:"input_tokens"`
+					OutputTokens      int `json:"output_tokens"`
+					InputTokenDetails *struct {
+						TextTokens int `json:"text_tokens"`
+					} `json:"input_token_details"`
+					OutputTokenDetails *struct {
+						TextTokens  int `json:"text_tokens"`
+						AudioTokens int `json:"audio_tokens"`
+					} `json:"output_token_details"`
 				} `json:"usage"`
 			} `json:"response"`
 		}
@@ -74,7 +81,14 @@ func expectedTakes(t *testing.T, sc fake.Scenario) []expected {
 		case realtime.TypeResponseDone:
 			cur.chunk = ev.Response.Metadata["chunk"]
 			cur.status = realtime.ResponseStatus(ev.Response.Status)
-			cur.usage = realtime.TokenUsage{InputTokens: ev.Response.Usage.InputTokens, OutputTokens: ev.Response.Usage.OutputTokens}
+			u := ev.Response.Usage
+			cur.usage = realtime.TokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+			if u.InputTokenDetails != nil {
+				cur.usage.InputTextTokens = u.InputTokenDetails.TextTokens
+			}
+			if d := u.OutputTokenDetails; d != nil {
+				cur.usage.OutputTextTokens, cur.usage.OutputAudioTokens, cur.usage.Detailed = d.TextTokens, d.AudioTokens, true
+			}
 			out = append(out, cur)
 			cur = expected{}
 		}
