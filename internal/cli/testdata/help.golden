@@ -9,7 +9,7 @@ Commands:
   render    Render a batch or project into many outputs
   check     Text guard, spoken form and chunk plan, no network
   prepare   Write the editable spoken-form script
-  voices    List voices
+  voices    List voices; --preview DIR renders a sample of each
   doctor    Check the environment and the route
   auth      Login state, or sign in through codex
   usage     Local ledger summary and Codex plan status

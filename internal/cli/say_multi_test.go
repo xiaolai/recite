@@ -58,6 +58,12 @@ func (m *multiEnv) path(name string) string { return filepath.Join(m.dir, name) 
 
 func (m *multiEnv) run(args ...string) result {
 	m.t.Helper()
+	return m.runCmd("say", args...)
+}
+
+// runCmd runs command (say, voices) with args against the scripted fakes.
+func (m *multiEnv) runCmd(command string, args ...string) result {
+	m.t.Helper()
 	m.t.Setenv("FAKECODEX_MODE", "chatgpt")
 	m.t.Setenv("FAKECODEX_TOKEN_EXP", fmt.Sprint(cliNow.Add(time.Hour).Unix()))
 	var out, errb bytes.Buffer
@@ -94,7 +100,7 @@ func (m *multiEnv) run(args ...string) result {
 		}
 		return pipeline.Run(ctx, cfg, tasks)
 	}
-	full := append([]string{"--codex-bin", fakeCodex, "--codex-home", m.t.TempDir(), "--auth-source", "codex", "say"}, args...)
+	full := append([]string{"--codex-bin", fakeCodex, "--codex-home", m.t.TempDir(), "--auth-source", "codex", command}, args...)
 	code := c.Run(full)
 	return result{code: code, stdout: out.String(), stderr: errb.String()}
 }

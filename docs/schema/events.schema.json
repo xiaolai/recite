@@ -7,7 +7,8 @@
   "oneOf": [
     { "$ref": "#/$defs/auth_error" },
     { "$ref": "#/$defs/auth_status" },
-    { "$ref": "#/$defs/doctor_check" }
+    { "$ref": "#/$defs/doctor_check" },
+    { "$ref": "#/$defs/voice" }
   ],
   "$defs": {
     "state": {
@@ -56,6 +57,18 @@
         "detail": { "type": "string" },
         "fix": { "type": "string", "minLength": 1 },
         "exit": { "enum": [0, 1, 2, 3, 4, 5, 6, 7, 130] }
+      }
+    },
+    "voice": {
+      "description": "One voice of `recite voices --json` (CLI-04).",
+      "type": "object",
+      "required": ["event", "name", "default", "recommended"],
+      "additionalProperties": false,
+      "properties": {
+        "event": { "const": "voice" },
+        "name": { "type": "string", "minLength": 1 },
+        "default": { "type": "boolean" },
+        "recommended": { "type": "boolean" }
       }
     }
   }

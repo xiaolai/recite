@@ -45,7 +45,7 @@ func (c *CLI) commands() []command {
 		{"render", "PROJECT.toml", "Render a batch or project into many outputs", stub("render")},
 		{"check", "FILE", "Text guard, spoken form and chunk plan, no network", setupCheck},
 		{"prepare", "FILE", "Write the editable spoken-form script", setupPrepare},
-		{"voices", "", "List voices", stub("voices")},
+		{"voices", "", "List voices; --preview DIR renders a sample of each", setupVoices},
 		{"doctor", "", "Check the environment and the route", setupDoctor},
 		{"auth", "status|login", "Login state, or sign in through codex", setupAuth},
 		{"usage", "", "Local ledger summary and Codex plan status", stub("usage")},
@@ -107,6 +107,16 @@ type SayRequest struct {
 	Manifest     string // --manifest PATH; "" means <output>.json
 	NoManifest   bool   // --no-manifest
 	KeepRejected string // --keep-rejected DIR; "" keeps none
+
+	Command string // the command named in error messages; "" means say
+}
+
+// prefix starts an error message from the command that ran the request.
+func (r SayRequest) prefix() string {
+	if r.Command == "" {
+		return "recite say"
+	}
+	return "recite " + r.Command
 }
 
 // hiddenFlags are registered but left out of help (design §12.2).
@@ -308,7 +318,6 @@ func (c *CLI) textSettings(fs *flag.FlagSet, tf *textFlags) (guard.Options, spok
 func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	var file string
 	var all settingFlags
-	sf, tf, rf := &all.sf, &all.tf, &all.rf
 	fs.StringVar(&file, "f", "", "read text from `PATH`")
 	fs.StringVar(&file, "file", "", "read text from `PATH`")
 	var output string
@@ -327,28 +336,12 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.StringVar(&keepRejected, "keep-rejected", "", "save every rejected take and its report in `DIR`")
 	all.register(fs)
 	return func(args []string) int {
-		g, so, st, err := c.textSettings(fs, tf)
+		req, err := c.sayRequest(fs, &all)
 		if err != nil {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
-		settings, err := sf.settings()
-		if err != nil {
-			c.errorf("recite say: %v", err)
-			return ExitUsage
-		}
-		inFormat, marks, err := tf.inputMode()
-		if err != nil {
-			c.errorf("recite say: %v", err)
-			return ExitUsage
-		}
-		g.Marks = marks
-		req := SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: tf.maxInput,
-			Settings: settings, Guard: g, Spoken: so, InputFormat: inFormat, Marks: marks, ChunkSeconds: tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
-		if err := rf.apply(&req); err != nil {
-			c.errorf("recite say: %v", err)
-			return ExitUsage
-		}
+		req.File, req.Text, req.Output, req.Force = file, args, output, force
 		if noManifest && manifestPath != "" {
 			c.errorf("recite say: --manifest and --no-manifest exclude each other")
 			return ExitUsage
@@ -366,6 +359,30 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 		}
 		return c.Say(req)
 	}
+}
+
+// sayRequest resolves every setting of fs (flags, environment, config) into a request with no
+// source or output; every error is a usage error. `say` and `voices --preview` share it.
+func (c *CLI) sayRequest(fs *flag.FlagSet, all *settingFlags) (SayRequest, error) {
+	g, so, st, err := c.textSettings(fs, &all.tf)
+	if err != nil {
+		return SayRequest{}, err
+	}
+	settings, err := all.sf.settings()
+	if err != nil {
+		return SayRequest{}, err
+	}
+	inFormat, marks, err := all.tf.inputMode()
+	if err != nil {
+		return SayRequest{}, err
+	}
+	g.Marks = marks
+	req := SayRequest{Globals: c.globals, MaxInput: all.tf.maxInput, Settings: settings, Guard: g, Spoken: so,
+		InputFormat: inFormat, Marks: marks, ChunkSeconds: all.tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
+	if err := all.rf.apply(&req); err != nil {
+		return SayRequest{}, err
+	}
+	return req, nil
 }
 
 // spokenOptions resolves --normalize, --date-style and --normalize-disable (TXT-10).

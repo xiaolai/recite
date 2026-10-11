@@ -91,45 +91,58 @@ func stdinIsTTY() bool {
 // output target — runs before the login probe, and the probe before any request. The chunks
 // are rendered and verified by the scheduler and assembled in order (design §10).
 func (c *CLI) runSay(req SayRequest) int {
-	target, enc, code := c.outputEncoding(req)
+	job, code := c.prepareSay(req)
 	if code != ExitOK {
 		return code
+	}
+	c.Logger.Info("plan", "chunks", len(job.tasks), "jobs", req.Jobs)
+	return c.withCredentials(func(ctx context.Context, creds *auth.Credentials) error {
+		return c.renderAll(ctx, creds, req, job)
+	})
+}
+
+// prepareSay runs every local stage of `say` before the network: output, input, plan, cache
+// and ledger. A non-zero code has been reported.
+func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
+	target, enc, code := c.outputEncoding(req)
+	if code != ExitOK {
+		return sayJob{}, code
 	}
 	stream := target == stdoutTarget
 	input, err := text.Read(text.Source{Args: req.Text, File: req.File, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, req.MaxInput)
 	if err != nil {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		if text.IsInputError(err) {
-			return ExitUsage
+			return sayJob{}, ExitUsage
 		}
-		return ExitInternal
+		return sayJob{}, ExitInternal
 	}
 	plan, seg, code := c.planText(req, input)
 	if code != ExitOK {
-		return code
+		return sayJob{}, code
 	}
 	for _, w := range seg.Warnings {
 		c.Logger.Warn("segmentation", "code", w.Code, "chunk", plan.Chunks[w.Chunk].ID, "detail", w.Msg)
 	}
 	gaps, err := audio.GapSamples(req.Gaps, plan.Joins())
 	if err != nil {
-		c.errorf("recite say: %v", err)
-		return ExitUsage
+		c.errorf("%s: %v", req.prefix(), err)
+		return sayJob{}, ExitUsage
 	}
 	spec, err := req.Settings.SessionSpec()
 	if err != nil {
-		c.errorf("recite say: %v", err)
-		return ExitUsage
+		c.errorf("%s: %v", req.prefix(), err)
+		return sayJob{}, ExitUsage
 	}
 	tasks := tasksFor(plan, spec)
 	if !stream {
 		if err := preflight(target, req.Force); err != nil {
-			return c.reportFailure(err)
+			return sayJob{}, c.reportFailure(err)
 		}
 	}
 	mpath, mreplace, err := manifestTarget(req, target)
 	if err != nil {
-		return c.reportFailure(err)
+		return sayJob{}, c.reportFailure(err)
 	}
 	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc,
 		manifest: mpath, replaceManifest: mreplace}
@@ -139,16 +152,13 @@ func (c *CLI) runSay(req SayRequest) int {
 		}
 	}
 	if err != nil {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		if errors.Is(err, fsx.ErrUnsafePath) {
-			return ExitUsage
+			return sayJob{}, ExitUsage
 		}
-		return ExitInternal
+		return sayJob{}, ExitInternal
 	}
-	c.Logger.Info("plan", "chunks", len(tasks), "jobs", req.Jobs)
-	return c.withCredentials(func(ctx context.Context, creds *auth.Credentials) error {
-		return c.renderAll(ctx, creds, req, job)
-	})
+	return job, ExitOK
 }
 
 // stdoutTarget is the -o value that streams the audio to stdout (AUD-07).
@@ -165,7 +175,7 @@ func (c *CLI) outputEncoding(req SayRequest) (string, audio.Encoding, int) {
 			flag string
 		}{{c.globals.JSON, "--json"}, {req.Policy.StrictOutput, "--strict-output"}} {
 			if bad.on {
-				c.errorf("recite say: -o - and %s exclude each other: a stream cannot take bytes back, and stdout carries audio only", bad.flag)
+				c.errorf("%s: -o - and %s exclude each other: a stream cannot take bytes back, and stdout carries audio only", req.prefix(), bad.flag)
 				return "", audio.Encoding{}, ExitUsage
 			}
 		}
@@ -177,7 +187,7 @@ func (c *CLI) outputEncoding(req SayRequest) (string, audio.Encoding, int) {
 		default:
 			f, err := audio.FormatFor(target)
 			if err != nil {
-				c.errorf("recite say: %v", err)
+				c.errorf("%s: %v", req.prefix(), err)
 				return "", audio.Encoding{}, ExitUsage
 			}
 			format = f
@@ -188,7 +198,7 @@ func (c *CLI) outputEncoding(req SayRequest) (string, audio.Encoding, int) {
 	}
 	enc, err := audio.ChooseEncoding(format, req.SampleRate, target == stdoutTarget, runtime.GOOS, c.LookPath)
 	if err != nil {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		return "", audio.Encoding{}, ExitUsage
 	}
 	return target, enc, ExitOK
@@ -428,7 +438,7 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 	if req.InputFormat == formatSpoken {
 		plan, doc, err := spokenScriptPlan(input, req.Marks, req.Spoken, planSettings(req.Settings), req.Settings.Speed)
 		if err != nil {
-			c.errorf("recite say: %v", err)
+			c.errorf("%s: %v", req.prefix(), err)
 			return plan, doc.Seg, textErrorCode(err)
 		}
 		return plan, doc.Seg, ExitOK
@@ -438,7 +448,7 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 		return pipeline.Plan{}, text.Segmentation{}, code
 	}
 	if err := checkPauses(g); err != nil {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		return pipeline.Plan{}, text.Segmentation{}, ExitUsage
 	}
 	// The spoken form is what the model is asked to say; form.Display keeps
@@ -449,7 +459,7 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 	}
 	plan, seg, err := planChunks(input, g, form, req.ChunkSeconds, req.Settings)
 	if err != nil {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		return plan, seg, ExitInternal
 	}
 	return plan, seg, ExitOK
@@ -474,7 +484,7 @@ func (c *CLI) guardText(req SayRequest, input string) (guard.Result, int) {
 	var ge *guard.Error
 	failed := errors.As(err, &ge)
 	if err != nil && !failed {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		return res, ExitInternal
 	}
 	if failed || !c.globals.Quiet {
@@ -483,7 +493,7 @@ func (c *CLI) guardText(req SayRequest, input string) (guard.Result, int) {
 		}
 	}
 	if failed {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		return res, ExitUsage
 	}
 	return res, ExitOK
@@ -499,7 +509,7 @@ func (c *CLI) spokenForm(req SayRequest, g guard.Result) (spoken.Result, int) {
 	so := markOptions(g, req.Spoken, markReader(lang.Code, req.Spoken.DateStyle))
 	res, err := spoken.Normalize(display, lang.Code, so)
 	if err != nil {
-		c.errorf("recite say: %v", err)
+		c.errorf("%s: %v", req.prefix(), err)
 		return res, ExitInternal
 	}
 	for _, rw := range res.Rewrites() {
@@ -512,7 +522,7 @@ func (c *CLI) spokenForm(req SayRequest, g guard.Result) (spoken.Result, int) {
 		}
 	}
 	if strict {
-		c.errorf("recite say: --guard strict: %d ambiguous span(s) (%s); resolve them or use --guard fix", len(res.Findings), spoken.AmbiguousCode)
+		c.errorf("%s: --guard strict: %d ambiguous span(s) (%s); resolve them or use --guard fix", req.prefix(), len(res.Findings), spoken.AmbiguousCode)
 		return res, ExitUsage
 	}
 	return res, ExitOK
