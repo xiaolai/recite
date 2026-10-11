@@ -559,3 +559,30 @@ func TestWatchSignalsTwoStages(t *testing.T) {
 	timer2 <- time.Time{} // the drain timeout cancels
 	<-ctx2.Done()
 }
+
+// Task.Render is what the synthesizer receives; Chunk.Spoken stays the reference.
+func TestRunRendersOverrideVerifiesReference(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ts := tasks(2)
+	ts[1].Render = "Something else entirely was rendered here."
+	synth := rtfake.NewScriptedSynthesizer()
+	r := newRun(synth, newEcho(ts), 1)
+	r.cfg.Verify.MaxAttempts = 1
+	r.cfg.Verify.BypassSaid = true
+	res, _, err := r.start(t, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent []string
+	for _, c := range synth.Calls() {
+		sent = append(sent, c.Request.Text)
+	}
+	if !slices.Equal(sent, []string{ts[0].Chunk.Spoken, ts[1].Render}) {
+		t.Fatalf("sent %q", sent)
+	}
+	// The echo transcriber hears the reference, so both verify; the second take's own
+	// transcript differed from its reference, which only the bypassed said guard saw.
+	if a := res.Chunks[1].Attempts[0]; !a.SaidMismatch || len(a.Transcriptions) == 0 {
+		t.Fatalf("override take: said mismatch %v, %d transcriptions", a.SaidMismatch, len(a.Transcriptions))
+	}
+}

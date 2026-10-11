@@ -617,3 +617,27 @@ func TestDigitReferenceMatchesWordTranscript(t *testing.T) {
 		t.Fatalf("%s, score %.3f %v", r.State, r.Score, reasons(r))
 	}
 }
+
+// The calibration option skips only the said guard: the take is transcribed and the would-be
+// rejection is recorded; the default path still rejects before STT.
+func TestBypassSaidReachesSTT(t *testing.T) {
+	sent, said := e22Take(t)
+	c := chunk(sent)
+	take := realtime.Take{PCM: rtfake.TaggedPCM(id, 1, c.Estimate), Said: said, Status: realtime.StatusCompleted}
+	ctx := context.Background()
+
+	a, calls, err := verify.Check(ctx, c, verify.DefaultOptions(), 1, take, noSTT{t})
+	if err != nil || calls != 0 || a.Rejection == nil || a.Rejection.Reason != verify.ReasonSaid || a.SaidMismatch {
+		t.Fatalf("default: %+v, %d calls, %v; want a said rejection without STT", a.Rejection, calls, err)
+	}
+
+	o := verify.DefaultOptions()
+	o.BypassSaid = true
+	a, calls, err = verify.Check(ctx, c, o, 1, take, sttWith(sttfake.Text(said)))
+	if err != nil || calls == 0 || !a.Eligible || !a.SaidMismatch || len(a.Transcriptions) == 0 {
+		t.Fatalf("bypass: eligible %v, said mismatch %v, %d calls, %v; want transcribed", a.Eligible, a.SaidMismatch, calls, err)
+	}
+	if a.Rejection == nil {
+		t.Fatalf("bypass: the transcript %q of an answer to %q was accepted", said, sent)
+	}
+}

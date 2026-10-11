@@ -68,6 +68,10 @@ type Options struct {
 	MaxAttempts          int // renders per chunk, ≥ 1
 	RequestExtraAttempts int // extra renders for a request-like chunk, ≥ 0
 	NoTrim               bool
+	// BypassSaid skips the said guard so every take reaches STT. Only the calibration harness
+	// sets it (VER-07): a corrupted take would otherwise be caught by its own transcript and
+	// the post-render verifier would never be measured. The CLI never sets it.
+	BypassSaid bool
 }
 
 // DefaultOptions are the CLI defaults.
@@ -101,6 +105,7 @@ type Attempt struct {
 	N              int
 	Status         realtime.ResponseStatus
 	Eligible       bool       // passed every pre-STT guard
+	SaidMismatch   bool       // the said guard would have rejected, but Options.BypassSaid skipped it
 	Rejection      *Rejection // nil when accepted
 	Transcriptions []Transcription
 	Score          float64 // the best transcription's score; 0 when not transcribed
@@ -159,8 +164,9 @@ func (o Options) Validate(c Chunk) error { return o.validate(c) }
 func Check(ctx context.Context, c Chunk, o Options, n int, take realtime.Take, tr stt.Transcriber) (Attempt, int, error) {
 	calls := 0
 	a := Attempt{N: n, Status: take.Status}
-	pcm, rej := PreSTT(c, take, o.NoTrim)
+	pcm, rej := preSTT(c, take, o.NoTrim, o.BypassSaid)
 	a.PCM, a.Rejection, a.Eligible = pcm, rej, rej == nil
+	a.SaidMismatch = o.BypassSaid && !Equivalent(take.Said, c.Spoken)
 	if a.Eligible && o.Mode != ModeOff {
 		hint := stt.Hint{Languages: text.STTHint(c.Language), Keywords: Keywords(c.Spoken, c.Lexicon)}
 		if err := verifyTake(ctx, c, o.Mode.Thresholds(), hint, tr, &a, &calls); err != nil {

@@ -1,0 +1,28 @@
+# Calibration corpus, English (VER-07). Written for this project and quoted from nowhere, so the
+# model cannot read a passage from memory: in the first mini run it read famous public-domain
+# texts as it knew them, turning "a Jefferson of the United States" back into "a Congress", and
+# the corruptions never reached the audio. Each passage has a name, a number and a clause, so
+# every corruption type applies. One passage per line; the first 20 are the good candidates.
+# Do not reorder: sample IDs, the split and the corruptions all derive from this file and the seed.
+On the third morning of the thaw, Marguerite Ollander walked the eleven miles to Pellbridge with a basket of eggs and a letter she had never meant to send.
+The ferry from Castlemore left at seven, but the captain, a quiet man named Ruddick, always waited for the baker's boy before he cast off.
+In the spring of that year the council voted to rebuild the old granary, though only four of the nine members had ever seen it full.
+Tobias Wren kept two ledgers, one for the shop and one for the debts nobody would admit to, and he trusted neither of them completely.
+The orchard behind the Hallorans' house produced more pears than apples, which surprised everyone except the woman who had planted it.
+When the bell at Saint Aldric's cracked in the frost, the village raised forty pounds in a week and argued about the new one for a year.
+Edwina Marsh wrote to her brother every Sunday, and in thirty years of letters she never once mentioned the farm they had both left behind.
+The road to Kettering Cross was long and badly drained, and in wet weather the carrier charged double for anything heavier than a sack of flour.
+Six lamps were lit along the quay each evening, and the harbour master counted them twice because the first count was always wrong.
+Professor Hale believed that every map was a kind of argument, and he made his students redraw the county from memory before they saw a real one.
+The mill at Dunmere ran day and night through the autumn, and the miller's daughter learned to sleep through a noise that kept visitors awake.
+After the flood, the families on Wexley Lane shared one kitchen for twelve days, and several of them later said it was the best month of their lives.
+Arthur Bellamy sold the same clock three times, and each buyer returned it with the same complaint: it kept perfect time, but only in the dark.
+The school at Fenwick had one teacher, twenty-two pupils and a stove that worked only when the wind came from the east.
+By the time the telegram reached Lowenstead, the ship it described had already docked safely and its passengers had gone home for supper.
+Constance Albery planted a hedge of holly along the northern wall, and for fifty winters it was the only green thing visible from the road.
+The bridge at Carrow was built in nine months by a crew of thirty, and it is still standing, which is more than can be said for the crew's reputation.
+Every new tenant of the corner house complained about the draught, and every one of them stayed longer than they had planned.
+The market at Brindle opened at dawn on Thursdays, and by eight o'clock the best cheese had gone and the gossip had only just begun.
+Henrietta Vale learned to sail at sixty, and she said the hardest part was not the knots but admitting she had been afraid of the water all along.
+The library at Ashcombe lent books for two weeks, but the librarian, Mr Pryce, rarely asked for them back before the end of the season.
+Three generations of the Tanner family fished the same stretch of river, and none of them ever agreed on the best hour to cast a line.

@@ -59,6 +59,10 @@ type Task struct {
 	Spec   realtime.SessionSpec // its session key is the pool key
 	Style  string
 	Effort realtime.Effort // the chunk's effective effort; "" means the session's
+	// Render, when set, is sent to the synthesizer instead of Chunk.Spoken, which stays the
+	// reference the take is verified against. Only the calibration harness sets it (VER-07):
+	// it renders an edited passage and verifies it against the original.
+	Render string
 }
 
 // Config configures Run. Synth, Transcriber (unless verification is off) and Deliver are
@@ -434,8 +438,12 @@ func (s *sched) render(ctx context.Context, j renderJob) (realtime.Take, error) 
 			return err
 		}
 		defer lease.Release()
+		say := t.Chunk.Spoken
+		if t.Render != "" {
+			say = t.Render
+		}
 		tk, err := lease.Render(ctx, realtime.RenderRequest{
-			ChunkID: t.Chunk.ID, Text: t.Chunk.Spoken, Style: t.Style, Effort: t.Effort,
+			ChunkID: t.Chunk.ID, Text: say, Style: t.Style, Effort: t.Effort,
 			Attempt: j.n, Estimate: t.Chunk.Estimate,
 		})
 		if err != nil {

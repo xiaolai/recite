@@ -48,6 +48,11 @@ type Rejection struct {
 // It returns the take's audio, trimmed unless noTrim, and the first failing guard, or nil.
 // Empty and duration judge the trimmed audio, so a take of silence counts as empty.
 func PreSTT(c Chunk, take realtime.Take, noTrim bool) (audio.PCM, *Rejection) {
+	return preSTT(c, take, noTrim, false)
+}
+
+// preSTT is PreSTT with the said guard optionally skipped (Options.BypassSaid).
+func preSTT(c Chunk, take realtime.Take, noTrim, bypassSaid bool) (audio.PCM, *Rejection) {
 	pcm := audio.PCM(take.PCM)
 	if !noTrim {
 		pcm = audio.Trim(pcm)
@@ -59,7 +64,7 @@ func PreSTT(c Chunk, take realtime.Take, noTrim bool) (audio.PCM, *Rejection) {
 	if d < MinTakeDuration {
 		return pcm, &Rejection{ReasonEmpty, fmt.Sprintf("%v of audio", d)}
 	}
-	if !Equivalent(take.Said, c.Spoken) {
+	if !bypassSaid && !Equivalent(take.Said, c.Spoken) {
 		return pcm, &Rejection{ReasonSaid, fmt.Sprintf("the model said %q", take.Said)}
 	}
 	if r := d.Seconds() / c.Estimate.Seconds(); r < MinDurationRatio || r > MaxDurationRatio {
