@@ -106,7 +106,8 @@ func TestAmbiguityIsReportedNotGuessed(t *testing.T) {
 		{"Meet me at St. and wait.", "St.", "en.abbrev", 1, 12},
 		{"St.", "St.", "en.abbrev", 1, 1},
 		{"Then\nIV happened.", "IV", "en.roman", 2, 1},
-		{"Grade XII", "", "", 0, 0}, // a numbering context decides it
+		{"Model 4-5-6 rule.", "4-5-6", "en.digitgroups", 1, 7}, // a code, a list or a score
+		{"Grade XII", "", "", 0, 0},                            // a numbering context decides it
 		{"Due 10/11/2026.", "", "", 0, 0},
 	}
 	for _, c := range cases {

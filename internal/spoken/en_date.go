@@ -235,7 +235,8 @@ func enTime(s string, i int, _ *Options) (Match, bool) {
 	if e+2 < len(s) && s[e] == ':' && digits(s, e+1) == e+3 {
 		mm, _ := atoi(s[e+1 : e+3])
 		j := e + 3
-		if h > 23 || mm > 59 || nextRune(s, j) == ':' {
+		// A fraction after the minutes makes it a stopwatch time (en.elapsed), not a clock.
+		if h > 23 || mm > 59 || nextRune(s, j) == ':' || byteAt(s, j) == '.' && isDigit(byteAt(s, j+1)) {
 			return Match{}, false
 		}
 		ap, j2 := ampmAt(s, j)

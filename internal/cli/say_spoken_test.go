@@ -39,7 +39,7 @@ func TestSaySendsSpokenForm(t *testing.T) {
 		{nil, "Paid three point five million dollars on October eleventh, twenty twenty-six."},
 		{[]string{"--normalize", "off"}, in},
 		{[]string{"--normalize-disable", "en.currency.scale"}, "Paid $3.5M on October eleventh, twenty twenty-six."},
-		{[]string{"--normalize-disable", "en.date.iso,en.currency.scale"}, "Paid $3.5M on two thousand twenty-six-ten-eleven."},
+		{[]string{"--normalize-disable", "en.date.iso,en.currency.scale"}, "Paid $3.5M on two oh two six, one oh, one one."},
 		{[]string{"--date-style", "uk"}, "Paid three point five million dollars on the eleventh of October, twenty twenty-six."},
 	}
 	for _, c := range cases {
