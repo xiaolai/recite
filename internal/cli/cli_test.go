@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/text"
 )
@@ -36,7 +37,13 @@ func run(args ...string) result {
 
 func golden(t *testing.T, name, got string) {
 	t.Helper()
-	path := filepath.Join("testdata", name+".golden")
+	goldenAt(t, filepath.Join("testdata", name+".golden"), got)
+}
+
+// goldenAt compares got with the golden file at path; tests that change
+// directory pass an absolute path.
+func goldenAt(t *testing.T, path, got string) {
+	t.Helper()
 	if *update {
 		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 			t.Fatal(err)
@@ -109,6 +116,7 @@ func TestDefaultCommandResolution(t *testing.T) {
 			tc.want.Globals = defaultGlobals()
 			tc.want.Settings = realtime.DefaultSettings()
 			tc.want.MaxInput = text.DefaultMaxInput
+			tc.want.Guard = guard.Options{Policy: guard.PolicyFix}
 			if got := r.says[0]; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %+v, want %+v", got, tc.want)
 			}
@@ -156,6 +164,7 @@ func TestInterspersedFlags(t *testing.T) {
 	want.Globals = defaultGlobals()
 	want.Settings = realtime.DefaultSettings()
 	want.MaxInput = text.DefaultMaxInput
+	want.Guard = guard.Options{Policy: guard.PolicyFix}
 	want.Globals.JSON, want.Globals.Verbose, want.Globals.AuthSource = true, 2, "codex"
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)

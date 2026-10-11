@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
@@ -51,7 +50,8 @@ type Source struct {
 }
 
 // Read selects exactly one source, reads at most max bytes from it, decodes and
-// normalises it, and applies the M1 control-character rule (TXT-01, TXT-02).
+// normalises it (TXT-01, TXT-02). Control characters pass through: the text
+// guard reports and removes them (G-CONTROL).
 func Read(src Source, max int64) (string, error) {
 	if max <= 0 {
 		max = DefaultMaxInput
@@ -62,11 +62,6 @@ func Read(src Source, max int64) (string, error) {
 	}
 	s, err := Decode(raw)
 	if err != nil {
-		return "", err
-	}
-	// Offsets refer to the input as given, so the control check runs before
-	// normalisation; normalisation never introduces a control character.
-	if err := CheckControl(s, int64(len(raw)-len(s))); err != nil {
 		return "", err
 	}
 	s = Normalize(s)
@@ -155,21 +150,6 @@ func Decode(b []byte) (string, error) {
 		i += size
 	}
 	return string(b[off:]), nil
-}
-
-// CheckControl is the M1 stand-in for the text guard: any control character
-// other than \n, \t and the \r of a \r\n pair is rejected with its byte offset
-// (base is added to offsets in s). WP-2.2 replaces it with G-CONTROL findings.
-func CheckControl(s string, base int64) error {
-	for i, r := range s {
-		if r == '\n' || r == '\t' || (r == '\r' && strings.HasPrefix(s[i+1:], "\n")) {
-			continue
-		}
-		if unicode.IsControl(r) {
-			return inputErr(fmt.Sprintf("input contains control character U+%04X (supported from M2)", r), base+int64(i))
-		}
-	}
-	return nil
 }
 
 // Normalize applies TXT-02: \r\n → \n, then NFC. Nothing else is removed.

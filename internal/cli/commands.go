@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/xiaolai/recite/internal/exitcode"
+	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/text"
 )
@@ -73,6 +74,7 @@ type SayRequest struct {
 	Force    bool
 	MaxInput int64
 	Settings realtime.Settings
+	Guard    guard.Options
 }
 
 // hiddenFlags are registered but left out of help (design §12.2).
@@ -130,6 +132,13 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.BoolVar(&force, "force", false, "overwrite the output")
 	fs.Int64Var(&maxInput, "max-input", text.DefaultMaxInput, "input size limit in `BYTES`")
 	sf.register(fs)
+	policy := string(guard.PolicyFix)
+	var actionSpecs []string
+	fs.StringVar(&policy, "guard", policy, "text guard `POLICY`: fix, strict, warn or off")
+	fs.Func("guard-action", "set a guard rule's action, `CODE=ACTION` (repeatable)", func(s string) error {
+		actionSpecs = append(actionSpecs, s)
+		return nil
+	})
 	return func(args []string) int {
 		if maxInput <= 0 {
 			c.errorf("recite say: --max-input must be a positive number of bytes")
@@ -140,15 +149,33 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite say: %v", err)
 			return ExitUsage
 		}
-		// M1 precondition: marker escaping (TXT-09) arrives in M2 (WP-2.2 removes this).
-		for _, a := range args {
-			if strings.Contains(a, "<<<") || strings.Contains(a, ">>>") {
-				c.errorf("recite say: the text contains <<< or >>>; this is supported from M2")
-				return ExitUsage
-			}
+		g, err := guardOptions(policy, actionSpecs)
+		if err != nil {
+			c.errorf("recite say: %v", err)
+			return ExitUsage
 		}
-		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: maxInput, Settings: settings})
+		return c.Say(SayRequest{Globals: c.globals, File: file, Text: args, Output: output, Force: force, MaxInput: maxInput, Settings: settings, Guard: g})
 	}
+}
+
+// guardOptions resolves --guard and the --guard-action values (TXT-09).
+func guardOptions(policy string, specs []string) (guard.Options, error) {
+	p, err := guard.ParsePolicy(policy)
+	if err != nil {
+		return guard.Options{}, err
+	}
+	o := guard.Options{Policy: p}
+	for _, spec := range specs {
+		code, act, err := guard.ParseActionSpec(spec)
+		if err != nil {
+			return guard.Options{}, err
+		}
+		if o.Actions == nil {
+			o.Actions = map[guard.Code]guard.Action{}
+		}
+		o.Actions[code] = act
+	}
+	return o, nil
 }
 
 func setupHelp(_ *flag.FlagSet, c *CLI) func([]string) int {

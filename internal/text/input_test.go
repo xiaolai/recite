@@ -90,18 +90,14 @@ func TestMaxInput(t *testing.T) {
 	}
 }
 
-// M1 rejects control characters other than \n and \t until the guard lands (TXT-02).
-// accept: TXT-02#1
-func TestControlCharactersRejected(t *testing.T) {
-	for _, tc := range []struct {
-		in     string
-		offset int64
-	}{{"a\x07b", 1}, {"ab\rc", 2}, {"x\u0085y", 1}, {"\uFEFFa\x1b", 4}, {"a\r\r\nb", 1}} {
-		_, err := Read(Source{Stdin: strings.NewReader(tc.in)}, 0)
-		wantInputErr(t, err, "control character", tc.offset)
-	}
-	if s, err := Read(Source{Stdin: strings.NewReader("a\tb\r\nc\n")}, 0); err != nil || s != "a\tb\nc\n" {
-		t.Fatalf("allowed controls: %q %v", s, err)
+// Control characters pass through decoding untouched: the text guard reports
+// and removes each one (G-CONTROL), so no removal goes unreported (TXT-02).
+func TestControlCharactersPassThrough(t *testing.T) {
+	for _, in := range []string{"a\x07b", "ab\rc", "x\u0085y", "a\uFEFF\x1b", "a\u200bb\u202e"} {
+		s, err := Read(Source{Stdin: strings.NewReader(in)}, 0)
+		if err != nil || s != Normalize(in) {
+			t.Errorf("%q: %q %v", in, s, err)
+		}
 	}
 }
 

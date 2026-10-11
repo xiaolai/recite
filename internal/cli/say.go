@@ -2,14 +2,15 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/auth"
+	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/text"
@@ -68,10 +69,9 @@ func (c *CLI) runSay(req SayRequest) int {
 		}
 		return ExitInternal
 	}
-	// M1 precondition: marker escaping (TXT-09) arrives in M2 (WP-2.2 removes this).
-	if strings.Contains(input, "<<<") || strings.Contains(input, ">>>") {
-		c.errorf("recite say: the text contains <<< or >>>; this is supported from M2")
-		return ExitUsage
+	input, code := c.guardText(req, input)
+	if code != ExitOK {
+		return code
 	}
 	if est := realtime.EstimateDuration(input, req.Settings.Speed); est > m1ChunkBudget {
 		c.errorf("recite say: the text is about %.0f s of speech, over one %v chunk; multi-chunk input arrives in M2", est.Seconds(), m1ChunkBudget)
@@ -125,4 +125,28 @@ func (c *CLI) render(ctx context.Context, creds *auth.Credentials, spec realtime
 		return nil, &openai.Error{Class: openai.ClassProtocol, Message: "the speech audio holds a partial sample", Err: err}
 	}
 	return pcm, nil
+}
+
+// guardText runs the text guard (TXT-09) before anything touches the network.
+// Findings go to stderr, one per line, unless -q; a guard failure (a fail
+// action, strict with warn-level findings, nothing speakable) is exit 2 and
+// always prints its findings.
+func (c *CLI) guardText(req SayRequest, input string) (string, int) {
+	res, err := guard.Run(input, req.Guard)
+	var ge *guard.Error
+	failed := errors.As(err, &ge)
+	if err != nil && !failed {
+		c.errorf("recite say: %v", err)
+		return "", ExitInternal
+	}
+	if failed || !c.globals.Quiet {
+		for _, f := range res.Findings {
+			c.errorf("%s", f)
+		}
+	}
+	if failed {
+		c.errorf("recite say: %v", err)
+		return "", ExitUsage
+	}
+	return res.Text, ExitOK
 }

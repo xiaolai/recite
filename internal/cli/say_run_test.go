@@ -234,8 +234,7 @@ func TestSayInputErrorsExit2(t *testing.T) {
 		{[]string{"-f", "bad.txt"}, "not valid UTF-8 at byte offset 2"},
 		{[]string{"hello\x00world"}, "NUL byte at byte offset 5"},
 		{[]string{" \n "}, "nothing to speak"},
-		{[]string{"bell\x07"}, "control character U+0007"},
-		{[]string{"a <<< b"}, "the text contains <<< or >>>"},
+		{[]string{"\u200b 🎉"}, "nothing speakable"},
 		{[]string{strings.Repeat("A long sentence of speech. ", 20)}, "multi-chunk input arrives in M2"},
 		{nil, "no input"}, // stdin is a terminal
 	} {
@@ -243,13 +242,6 @@ func TestSayInputErrorsExit2(t *testing.T) {
 		if r.code != exitcode.Usage || !strings.Contains(r.stderr, tc.want) {
 			t.Errorf("%q: code %d stderr %q, want %q", tc.args, r.code, r.stderr, tc.want)
 		}
-	}
-	// The marker check covers file content too, not only arguments.
-	if err := os.WriteFile(e.path("m.txt"), []byte("x >>> y"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if r := e.run("-f", "m.txt"); r.code != 2 || !strings.Contains(r.stderr, "<<< or >>>") {
-		t.Errorf("marker in file: %+v", r)
 	}
 	if n := len(e.srv.MintRequests()); n != 0 {
 		t.Fatalf("%d mints for rejected input", n)

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/realtime"
 )
 
@@ -68,11 +69,17 @@ func TestSayInstructionsVersionHidden(t *testing.T) {
 	}
 }
 
-func TestSayMarkerPrecondition(t *testing.T) {
-	for _, text := range []string{"a <<< b", "b >>> a"} {
-		r := run("say", text)
-		if r.code != ExitUsage || len(r.says) != 0 || !strings.Contains(r.stderr, "the text contains <<< or >>>; this is supported from M2") {
-			t.Errorf("%q: %+v", text, r)
-		}
+// The M1 marker precondition is gone: markers reach the guard, which escapes them.
+func TestSayGuardFlags(t *testing.T) {
+	r := run("say", "a <<< b", "--guard", "strict", "--guard-action", "url=full", "--guard-action", "G-EMOJI=keep")
+	if r.code != ExitOK || len(r.says) != 1 {
+		t.Fatalf("%+v", r)
 	}
+	g := r.says[0].Guard
+	if g.Policy != guard.PolicyStrict || g.Actions[guard.URL] != guard.ActFull || g.Actions[guard.Emoji] != guard.ActKeep {
+		t.Fatalf("guard options %+v", g)
+	}
+	rejected(t, "--guard must be fix, strict, warn or off", "--guard", "loud")
+	rejected(t, "G-URL takes host, full, drop, fail", "--guard-action", "G-URL=keep")
+	rejected(t, "CODE=ACTION", "--guard-action", "G-URL")
 }
