@@ -62,6 +62,9 @@ func toRoman(v int) string {
 	return b.String()
 }
 
+// singleCapital reports a word that is one capital letter, as in a spelled-out code.
+func singleCapital(w string) bool { return len(w) == 1 && w[0] >= 'A' && w[0] <= 'Z' }
+
 func enRoman(s string, i int, _ *Options) (Match, bool) {
 	if _, ok := romanValues[s[i]]; !ok || !wordStart(s, i) {
 		return Match{}, false
@@ -78,6 +81,9 @@ func enRoman(s string, i int, _ *Options) (Match, bool) {
 		return Match{}, false
 	}
 	prev := prevWord(s, i)
+	if j-i == 1 && (singleCapital(prev) || singleCapital(nextWord(s, j))) {
+		return Match{}, false // a letter spelled out among others ("X J 4471"), not a numeral
+	}
 	switch {
 	case regnalNames[prev]:
 		w := ordinalWords(uint64(v))
