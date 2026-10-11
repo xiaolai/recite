@@ -1,11 +1,15 @@
 package cli
 
-import "flag"
+import (
+	"flag"
 
-// Exit codes used by the router (design §12.3).
+	"github.com/xiaolai/recite/internal/exitcode"
+)
+
+// Exit codes used by the router; the values live in internal/exitcode (design §12.3).
 const (
-	ExitOK    = 0
-	ExitUsage = 2
+	ExitOK    = exitcode.OK
+	ExitUsage = exitcode.Usage
 )
 
 // command is one entry of the registry. setup registers the command's own
