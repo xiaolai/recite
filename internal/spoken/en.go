@@ -313,6 +313,13 @@ func enYear(s string, i int, _ *Options) (Match, bool) {
 	if !wordEnd(s, e) || e < len(s) && (s[e] == '-' || s[e] == '%') || strings.HasPrefix(s[e:], "–") {
 		return Match{}, false
 	}
+	// "from 1013.25 to", "from 1013 km": a decimal or a measure is not a year.
+	if c := byteAt(s, e); (c == '.' || c == ',' || c == ':') && isDigit(byteAt(s, e+1)) {
+		return Match{}, false
+	}
+	if _, ok := enUnit(s, i, nil); ok {
+		return Match{}, false
+	}
 	w := prevWord(s, i)
 	if !yearCues[strings.ToLower(w)] && !isMonthName(w) {
 		return Match{}, false
