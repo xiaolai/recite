@@ -26,9 +26,9 @@ type DetectedLanguage struct {
 	Code string `json:"code"`
 }
 
-// TokenLogprob is one token log-probability. Design §4 names the type without fields; these are
-// the minimal fields, and the HTTP transcription WP may extend them.
+// TokenLogprob is one token log-probability, as include[]=logprobs returns it.
 type TokenLogprob struct {
 	Token   string  `json:"token"`
 	Logprob float64 `json:"logprob"`
+	Bytes   []int   `json:"bytes"`
 }

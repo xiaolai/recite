@@ -140,6 +140,16 @@ type config struct {
 	mintCode     string // overrides the code of the injected mint error
 	mintParam    string // the param of the injected mint error; "" = null
 	rejectBearer string // answer 401 invalid_token to mints carrying this bearer
+	transcripts  []string
+}
+
+// WithTranscripts serves a transcription session interactively instead of replaying the
+// scenario's client steps: the scenario's server events before its first client event are
+// sent, then every input_audio_buffer.commit is answered with input_audio_buffer.committed
+// for a new item and conversation.item.input_audio_transcription.completed carrying the next
+// transcript. A commit beyond the last transcript is answered with an error event.
+func WithTranscripts(texts ...string) Option {
+	return func(c *config) { c.transcripts = append([]string{}, texts...) }
 }
 
 // WithCloseAfter closes the WebSocket abruptly after n server events (close mid-response).
@@ -349,6 +359,12 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	defer context.AfterFunc(s.stopCtx, cancel)()
+	if s.cfg.transcripts != nil {
+		if err := s.transcribe(ctx, c); err != nil && ctx.Err() == nil {
+			s.fail(err)
+		}
+		return
+	}
 	if err := s.replay(ctx, c); err != nil {
 		if !errors.Is(err, errAborted) {
 			s.fail(err)
@@ -441,6 +457,67 @@ func (s *Server) replay(ctx context.Context, c *websocket.Conn) error {
 		}
 	}
 	return nil
+}
+
+// transcribe serves WithTranscripts until the client goes away.
+func (s *Server) transcribe(ctx context.Context, c *websocket.Conn) error {
+	write := func(typ string, ev []byte) error {
+		if err := c.Write(ctx, websocket.MessageText, ev); err != nil {
+			return fmt.Errorf("write %s: %w", typ, err)
+		}
+		s.mu.Lock()
+		s.sent = append(s.sent, typ)
+		s.mu.Unlock()
+		return nil
+	}
+	for _, st := range s.sc.Steps {
+		if st.Dir == "client" {
+			break
+		}
+		if err := write(st.Type, st.Event); err != nil {
+			return err
+		}
+	}
+	commits := 0
+	for {
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			return nil // the client closed the session
+		}
+		s.record(data)
+		typ, err := eventType(data)
+		if err != nil {
+			return err
+		}
+		switch typ {
+		case "input_audio_buffer.append":
+			continue
+		case "input_audio_buffer.commit":
+		default:
+			s.fail(fmt.Errorf("transcription session: unexpected client event %q", typ))
+			continue
+		}
+		commits++
+		if commits > len(s.cfg.transcripts) {
+			ev, _ := json.Marshal(map[string]any{"type": "error", "event_id": fmt.Sprintf("event_%04d", 9000+commits), "error": map[string]any{
+				"type": "invalid_request_error", "code": "fake_no_transcript", "message": "no scripted transcript left", "param": nil, "event_id": nil,
+			}})
+			if err := write("error", ev); err != nil {
+				return err
+			}
+			continue
+		}
+		item := fmt.Sprintf("item_%04d", commits)
+		committed, _ := json.Marshal(map[string]any{"type": "input_audio_buffer.committed", "event_id": fmt.Sprintf("event_%04d", 2*commits), "previous_item_id": nil, "item_id": item})
+		completed, _ := json.Marshal(map[string]any{"type": "conversation.item.input_audio_transcription.completed", "event_id": fmt.Sprintf("event_%04d", 2*commits+1),
+			"item_id": item, "content_index": 0, "transcript": s.cfg.transcripts[commits-1]})
+		if err := write("input_audio_buffer.committed", committed); err != nil {
+			return err
+		}
+		if err := write("conversation.item.input_audio_transcription.completed", completed); err != nil {
+			return err
+		}
+	}
 }
 
 func realSleep(ctx context.Context, d time.Duration) {
