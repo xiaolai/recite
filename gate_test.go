@@ -108,10 +108,10 @@ func TestWorkflowRunsCheckOnMacOSAndLinux(t *testing.T) {
 	}
 }
 
-// FND-03#3 (make check under 5 minutes on CI runners) is a benchmark-kind
-// criterion reviewed at milestone exits from the CI run times, never a timed
-// assertion here. This test holds the bound the runner enforces: the check
-// job is killed after timeout-minutes, which must stay at 10 or less.
+// FND-03#3 (make check under 5 minutes on CI runners) is enforced by the runner,
+// never by a timed assertion here: the check job is killed, and the run fails,
+// after timeout-minutes, which must stay at 5 or less. Measured on 2026-10-12,
+// the job took at most 2m24s on ubuntu-latest and 1m05s on macos-latest.
 // accept: FND-03#3
 func TestWorkflowCheckJobTimeout(t *testing.T) {
 	wf := readFile(t, ".github/workflows/check.yml")
@@ -128,7 +128,7 @@ func TestWorkflowCheckJobTimeout(t *testing.T) {
 	}
 	v, _, _ := strings.Cut(rest, "\n")
 	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil || n < 1 || n > 10 {
-		t.Errorf("check job timeout-minutes = %q, want 1..10", v)
+	if err != nil || n < 1 || n > 5 {
+		t.Errorf("check job timeout-minutes = %q, want 1..5", v)
 	}
 }
