@@ -1,11 +1,13 @@
 package recite_test
 
 import (
+	"bytes"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/xiaolai/recite/internal/cli"
 	"github.com/xiaolai/recite/internal/exitcode"
 )
 
@@ -46,5 +48,81 @@ func TestREADMEExitCodeTable(t *testing.T) {
 	}
 	if !strings.Contains(section, "130 > 3 > 4 > 1 > 7 > 6 > 5 > 2") {
 		t.Error("README lacks the severity order")
+	}
+}
+
+// helpOf runs `recite <args>` in process and returns its stdout.
+func helpOf(t *testing.T, args ...string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	if code := cli.New(&stdout, &stderr).Run(args); code != exitcode.OK {
+		t.Fatalf("recite %s: exit %d\n%s", strings.Join(args, " "), code, stderr.String())
+	}
+	return stdout.String()
+}
+
+// helpFlag matches a flag line of Go's flag.PrintDefaults output: "  -name" then a
+// space, a tab or the end of the line.
+var helpFlag = regexp.MustCompile(`(?m)^  -([A-Za-z0-9][A-Za-z0-9-]*)(?:[ \t]|$)`)
+
+// Every flag that `--help` and `help <command>` print is documented in the README, as
+// -name or --name.
+// accept: REL-04#1
+func TestREADMEDocumentsEveryHelpFlag(t *testing.T) {
+	readme := readFile(t, "README.md")
+	top := helpOf(t, "--help")
+	_, cmds, ok := strings.Cut(top, "\nCommands:\n")
+	if !ok {
+		t.Fatal("--help has no Commands section")
+	}
+	cmds, _, _ = strings.Cut(cmds, "\n\n")
+	var names []string
+	for _, line := range strings.Split(cmds, "\n") {
+		if f := strings.Fields(line); len(f) > 0 {
+			names = append(names, f[0])
+		}
+	}
+	if len(names) < 10 {
+		t.Fatalf("parsed only %d commands from --help: %q", len(names), names)
+	}
+	where := []string{"--help"}
+	helps := []string{top}
+	for _, name := range names {
+		where = append(where, "help "+name)
+		helps = append(helps, helpOf(t, "help", name))
+	}
+	seen := 0
+	for i, help := range helps {
+		for _, m := range helpFlag.FindAllStringSubmatch(help, -1) {
+			seen++
+			mention := regexp.MustCompile(`(^|[^A-Za-z0-9-])--?` + regexp.QuoteMeta(m[1]) + `($|[^A-Za-z0-9-])`)
+			if !mention.MatchString(readme) {
+				t.Errorf("README does not mention -%s (from recite %s)", m[1], where[i])
+			}
+		}
+	}
+	// A parser that matched nothing would pass vacuously.
+	if seen < 50 {
+		t.Fatalf("parsed only %d flags from the help output", seen)
+	}
+}
+
+// The disclosure sits on the first screen of the README: its first 25 lines.
+// accept: REL-04#1
+func TestREADMENoticeOnFirstScreen(t *testing.T) {
+	lines := strings.Split(readFile(t, "README.md"), "\n")
+	if len(lines) > 25 {
+		lines = lines[:25]
+	}
+	first := strings.ToLower(strings.Join(lines, " "))
+	first = strings.Join(strings.Fields(strings.NewReplacer(">", " ", "*", "").Replace(first)), " ")
+	for _, want := range []string{
+		"undocumented use of the chatgpt sign-in",
+		"stop working",
+		"your usage is your responsibility under openai's terms",
+	} {
+		if !strings.Contains(first, want) {
+			t.Errorf("README first screen lacks %q", want)
+		}
 	}
 }
