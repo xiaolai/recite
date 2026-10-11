@@ -13,7 +13,7 @@ import (
 
 // CanonVersion identifies the canonicaliser's behaviour. Bump it on any change
 // to Canon's output: cache keys and verification provenance record it.
-const CanonVersion = 4
+const CanonVersion = 5
 
 // Canon canonicalises s into comparison tokens (design §8.3): NFKC and width
 // folding, abbreviation expansion, lower case, numbers to English words (one
@@ -73,7 +73,9 @@ func canon(s string, joinHyphens bool) []string {
 			b.WriteByte(' ')
 		}
 	}
-	return expandTokens(dropNumberAnd(strings.Fields(b.String())))
+	// Dropping an apostrophe can bring a letter and a combining mark together ("A'̆"), which a
+	// second pass would compose; compose them now.
+	return expandTokens(dropNumberAnd(strings.Fields(norm.NFKC.String(b.String()))))
 }
 
 // expandTokens expands abbreviations that only became whole tokens after
