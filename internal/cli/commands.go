@@ -46,7 +46,7 @@ func (c *CLI) commands() []command {
 		{"check", "FILE", "Text guard, spoken form and chunk plan, no network", setupCheck},
 		{"prepare", "FILE", "Write the editable spoken-form script", setupPrepare},
 		{"voices", "", "List voices", stub("voices")},
-		{"doctor", "", "Check the environment and the route", stub("doctor")},
+		{"doctor", "", "Check the environment and the route", setupDoctor},
 		{"auth", "status|login", "Login state, or sign in through codex", setupAuth},
 		{"usage", "", "Local ledger summary and Codex plan status", stub("usage")},
 		{"cache", "ls|prune|clear", "Manage the take cache", stub("cache")},

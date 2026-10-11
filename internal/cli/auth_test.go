@@ -25,6 +25,10 @@ import (
 
 var fakeCodex string
 
+// realEnv is the environment before isolateConfig: only live tests, which check the user's real
+// setup, hand it to a child.
+var realEnv []string
+
 func TestMain(m *testing.M) {
 	if target := os.Getenv(publishHelperEnv); target != "" {
 		os.Exit(publishHelper(target)) // a subprocess of TestPublicationSurvivesSIGKILL
@@ -37,6 +41,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	realEnv = os.Environ()
 	isolateConfig(dir)
 	code := 1
 	fakeCodex, err = codexfake.BuildTo(dir)

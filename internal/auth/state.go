@@ -270,3 +270,12 @@ func (s *Status) ExitCode() int {
 	}
 	return exitcode.Auth
 }
+
+// PlanStatus reads the Codex plan status (design §12.4 check 3) over the probe's source, as
+// the package-level PlanStatus does. Call it only before Close.
+func (s *Status) PlanStatus(ctx context.Context) (rl codexapp.RateLimits, ok bool, err error) {
+	if s.src == nil {
+		return codexapp.RateLimits{}, false, nil
+	}
+	return PlanStatus(ctx, s.src, nil)
+}

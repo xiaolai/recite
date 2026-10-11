@@ -6,7 +6,8 @@
   "version": 1,
   "oneOf": [
     { "$ref": "#/$defs/auth_error" },
-    { "$ref": "#/$defs/auth_status" }
+    { "$ref": "#/$defs/auth_status" },
+    { "$ref": "#/$defs/doctor_check" }
   ],
   "$defs": {
     "state": {
@@ -41,6 +42,20 @@
         "auth_method": { "const": "chatgpt" },
         "plan_type": { "type": "string" },
         "token_expires_in_s": { "type": "integer" }
+      }
+    },
+    "doctor_check": {
+      "description": "One check of `recite doctor --json` (design §12.4, CLI-05). exit is the code a failure contributes; 0 for ok and warn.",
+      "type": "object",
+      "required": ["event", "check", "status", "detail", "exit"],
+      "additionalProperties": false,
+      "properties": {
+        "event": { "const": "doctor_check" },
+        "check": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["ok", "warn", "fail"] },
+        "detail": { "type": "string" },
+        "fix": { "type": "string", "minLength": 1 },
+        "exit": { "enum": [0, 1, 2, 3, 4, 5, 6, 7, 130] }
       }
     }
   }
