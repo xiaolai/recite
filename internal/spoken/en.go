@@ -13,6 +13,7 @@ import (
 // before a bare cardinal).
 var English = Table{
 	{"en.tech", enTech},
+	{"en.address", enAddress},
 	{"en.phone", enPhone},
 	{"en.date.iso", enDateISO},
 	{"en.date.numeric", enDateNumeric},
