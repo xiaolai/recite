@@ -320,3 +320,7 @@ trusted.
 - `recite cache ls` shows its size and age; `recite cache prune --older-than 30d` or
   `--max-size 2GB` trims it; `recite cache clear --yes` empties it.
 - `--no-cache` bypasses it for one run; `--refresh` renders anew but still stores the takes.
+
+## License
+
+ISC. See [LICENSE](LICENSE).
