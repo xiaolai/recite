@@ -186,9 +186,19 @@ func inputOf(req SayRequest, input string) manifest.Input {
 // settingsOf records the render and verification settings.
 func settingsOf(req SayRequest) manifest.Settings {
 	th := req.Verify.Mode.Thresholds()
+	var style *string
+	if req.Settings.Style != "" {
+		s := req.Settings.Style
+		style = &s
+	}
+	emotion := req.Settings.Emotion
+	if emotion == "" {
+		emotion = realtime.DefaultEmotion
+	}
 	return manifest.Settings{
 		Model: req.Settings.Model, Voice: req.Settings.Voice, Speed: req.Settings.Speed,
 		Effort: string(req.Settings.Effort), InstructionsVersion: req.Settings.InstructionsVersion,
+		Emotion: manifest.Emotion{Preset: emotion, Version: realtime.EmotionVersion}, Style: style,
 		Verify: manifest.VerifySettings{Mode: string(req.Verify.Mode), Accept: th.Accept, Gray: th.Reject,
 			MaxAttempts: req.Verify.MaxAttempts, RequestExtraAttempts: req.Verify.RequestExtraAttempts},
 	}

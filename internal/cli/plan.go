@@ -56,6 +56,7 @@ func planDoc(doc textDoc, g guard.Result, form spoken.Result, budget float64, s 
 func planSettings(s realtime.Settings) pipeline.Settings {
 	return pipeline.Settings{
 		Model: s.Model, Voice: s.Voice, Speed: s.Speed, Effort: string(s.Effort), InstructionsVersion: s.InstructionsVersion,
+		Emotion: realtime.EmotionCacheID(s.Emotion), Style: s.Style,
 	}
 }
 
@@ -109,7 +110,7 @@ func displayOffset(edits []guard.Edit, orig int) int {
 
 // tasksFor turns the plan into scheduler tasks. A chunk holding a G-REQUEST finding gets the
 // extra attempt of TXT-14.
-func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, ladder []realtime.Effort) []pipeline.Task {
+func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, delivery string, ladder []realtime.Effort) []pipeline.Task {
 	tasks := make([]pipeline.Task, len(p.Chunks))
 	for i, c := range p.Chunks {
 		requestLike := false
@@ -130,8 +131,9 @@ func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, ladder []realtime.Effo
 			},
 			Spec:   spec,
 			Ladder: ladder,
-			// Speech-mark instructions ride after the rules (realtime.ResponseInstructions).
-			Style:    strings.Join(c.Instructions, "\n"),
+			// The delivery paragraph, then the speech-mark instructions, ride after the rules
+			// (realtime.ResponseInstructions).
+			Style:    chunkStyle(delivery, c.Instructions),
 			CacheKey: c.CacheKey,
 		}
 	}
@@ -145,4 +147,17 @@ func langSpans(ls []pipeline.LangSpan) []verify.LangSpan {
 		out = append(out, verify.LangSpan{Spoken: l.Spoken, Lang: l.Lang})
 	}
 	return out
+}
+
+// chunkStyle is the per-response text after the rules: the "Delivery:" paragraph (SPK-07),
+// then the chunk's speech-mark instructions (SPK-12, design §7.8), each block a paragraph.
+func chunkStyle(delivery string, instructions []string) string {
+	marks := strings.Join(instructions, "\n")
+	switch {
+	case delivery == "":
+		return marks
+	case marks == "":
+		return delivery
+	}
+	return delivery + "\n\n" + marks
 }

@@ -36,11 +36,16 @@ type Settings struct {
 	Speed               float64
 	Effort              Effort
 	InstructionsVersion int
+	Emotion             string // a delivery preset of Emotions (design §7.9)
+	Style               string // free-text delivery style, one line
 }
+
+// Delivery is the "Delivery:" paragraph of s, or "" (DeliveryParagraph).
+func (s Settings) Delivery() string { return DeliveryParagraph(s.Emotion, s.Style) }
 
 // DefaultSettings returns the settings with every default applied.
 func DefaultSettings() Settings {
-	return Settings{Model: DefaultModel, Voice: DefaultVoice, Speed: DefaultSpeed, Effort: DefaultEffort, InstructionsVersion: InstructionsVersion}
+	return Settings{Model: DefaultModel, Voice: DefaultVoice, Speed: DefaultSpeed, Effort: DefaultEffort, InstructionsVersion: InstructionsVersion, Emotion: DefaultEmotion}
 }
 
 // SessionSpec is the session configuration for s, with its versioned rules as

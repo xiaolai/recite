@@ -56,7 +56,7 @@ func TestPlanFindingsAtDisplayByteOffsets(t *testing.T) {
 	if fs := p.Chunks[0].Findings; len(fs) != 6 || fs[4].At != "2:27" || fs[5].At != "2:18" {
 		t.Fatalf("plan findings %+v", fs)
 	}
-	if tasks := tasksFor(p, realtime.SessionSpec{}, nil); !tasks[0].Chunk.RequestLike {
+	if tasks := tasksFor(p, realtime.SessionSpec{}, "", nil); !tasks[0].Chunk.RequestLike {
 		t.Fatal("a chunk with G-REQUEST is not request-like")
 	}
 }

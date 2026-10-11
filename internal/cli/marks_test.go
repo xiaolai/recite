@@ -55,7 +55,7 @@ func TestSayMarksNeverReachTheModelAsBraces(t *testing.T) {
 		t.Errorf("chunk 2 sent %q", got)
 	}
 	style := calls[0].Request.Style
-	for _, s := range []string{"Stress the word(s) 'stop'.", "Say 'bonjour' in French.", "Pronounce Okafor as oh-KAH-for."} {
+	for _, s := range []string{`Stress the word(s) "stop".`, "Say 'bonjour' in French.", "Pronounce Okafor as oh-KAH-for."} {
 		if !strings.Contains(style, s) {
 			t.Errorf("instructions %q lack %q", style, s)
 		}
@@ -91,7 +91,7 @@ func TestSayMarksOnTheWire(t *testing.T) {
 		t.Fatalf("sent %q", got)
 	}
 	raw := sentText(t, e.srv)
-	if !strings.Contains(raw, `Stress the word(s) 'now'.`) || strings.Contains(raw, "{{") {
+	if !strings.Contains(raw, `Stress the word(s) \"now\".`) || strings.Contains(raw, "{{") {
 		t.Fatalf("request %s", raw)
 	}
 	// Marks are off by default for text input: the braces are text, and the guard does not

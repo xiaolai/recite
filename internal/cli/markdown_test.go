@@ -26,6 +26,7 @@ voice = "marin"
 speed = 1.2
 effort = "low"
 lang = "fr"
+style = "Unhurried, warm."
 +++
 # Field notes
 
@@ -56,6 +57,7 @@ func TestConfigShowFrontMatter(t *testing.T) {
 		{Key: "voice", Value: "marin", Layer: "front matter", Origin: doc + ":3"},
 		{Key: "speed", Value: "1.2", Layer: "front matter", Origin: doc + ":4"},
 		{Key: "lang", Value: "fr", Layer: "front matter", Origin: doc + ":6"},
+		{Key: "style", Value: "Unhurried, warm.", Layer: "front matter", Origin: doc + ":7"},
 		{Key: "effort", Value: "medium", Layer: "env", Origin: "RECITE_EFFORT"},
 	} {
 		if got[want.Key] != want {
@@ -78,7 +80,8 @@ func TestFrontMatterReachesSay(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	got := r.says[0]
-	if got.Settings.Voice != "marin" || got.Settings.Speed != 1.2 || got.Settings.Effort != "low" || got.Lang != "fr" || got.InputFormat != formatMarkdown {
+	if got.Settings.Voice != "marin" || got.Settings.Speed != 1.2 || got.Settings.Effort != "low" || got.Lang != "fr" || got.InputFormat != formatMarkdown ||
+		got.Settings.Style != "Unhurried, warm." {
 		t.Fatalf("%+v", got)
 	}
 	// A flag still wins.
@@ -94,8 +97,9 @@ func TestFrontMatterReachesSay(t *testing.T) {
 
 func TestFrontMatterErrorsExit2(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
-		{"+++\njobs = 4\n+++\nHi.\n", `notes.md:2: key "jobs" cannot be set in front matter (allowed: title, voice, effort, speed, lang)`},
-		{"+++\nstyle = \"warm\"\n+++\nHi.\n", `notes.md:2: key "style" is not supported by this version`},
+		{"+++\njobs = 4\n+++\nHi.\n", `notes.md:2: key "jobs" cannot be set in front matter (allowed: title, voice, effort, speed, style, lang)`},
+		{"+++\nstyle = \"warm\\nsad\"\n+++\nHi.\n", `notes.md:2: style:`},
+		{"+++\nemotion = \"warm\"\n+++\nHi.\n", `key "emotion" cannot be set in front matter`},
 		{"+++\nlexicon = {}\n+++\nHi.\n", `key "lexicon" is not supported by this version`},
 		{"+++\nvoices = {}\n+++\nHi.\n", `key "voices" is not supported by this version`},
 		{"+++\n\nvoice = \"nobody\"\n+++\nHi.\n", `notes.md:3: voice:`},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/xiaolai/recite/internal/guard"
 	"github.com/xiaolai/recite/internal/pipeline"
+	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/text"
 )
@@ -126,7 +127,7 @@ func markSpans(ms []text.SpokenMark) []pipeline.MarkSpan {
 		case text.MarkHint:
 			span.Instruction = fmt.Sprintf("Pronounce %s as %s.", strings.TrimSpace(m.Text), strings.TrimSpace(m.Value))
 		case text.MarkEmph:
-			span.Instruction = fmt.Sprintf("Stress the word(s) '%s'.", strings.TrimSpace(m.Text))
+			span.Instruction = realtime.EmphasisInstruction(m.Text)
 		case text.MarkLang:
 			span.Instruction = fmt.Sprintf("Say '%s' in %s.", strings.TrimSpace(m.Text), languageName(m.Value))
 			span.Lang = strings.TrimSpace(m.Value)

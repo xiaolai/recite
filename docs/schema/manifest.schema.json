@@ -36,7 +36,7 @@
     },
     "settings": {
       "type": "object",
-      "required": ["model", "voice", "speed", "effort", "instructions_version", "style", "verify"],
+      "required": ["model", "voice", "speed", "effort", "instructions_version", "emotion", "style", "verify"],
       "additionalProperties": false,
       "properties": {
         "model": { "type": "string", "minLength": 1 },
@@ -44,7 +44,16 @@
         "speed": { "type": "number", "exclusiveMinimum": 0 },
         "effort": { "enum": ["minimal", "low", "medium", "high", "xhigh"] },
         "instructions_version": { "type": "integer", "minimum": 1 },
-        "style": { "type": ["string", "null"] },
+        "emotion": {
+          "type": "object",
+          "required": ["preset", "version"],
+          "additionalProperties": false,
+          "properties": {
+            "preset": { "enum": ["neutral", "warm", "calm", "excited", "serious", "sad", "whisper", "newsreader", "storyteller"] },
+            "version": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "style": { "type": ["string", "null"], "minLength": 1 },
         "verify": {
           "type": "object",
           "required": ["mode", "accept", "gray", "max_attempts", "request_extra_attempts"],

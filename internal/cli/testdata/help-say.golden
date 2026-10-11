@@ -17,6 +17,8 @@ Flags:
     	print the chunk plan and estimates (cache hits, audio, wall time, list price); no network, no login
   -effort EFFORT
     	reasoning EFFORT: minimal, low, medium, high, xhigh (default "minimal")
+  -emotion PRESET
+    	delivery PRESET: neutral, warm, calm, excited, serious, sad, whisper, newsreader, storyteller (default "neutral")
   -f PATH
     	read text from PATH
   -file PATH
@@ -93,6 +95,8 @@ Flags:
     	write one file per heading, NN-<slug>.<format>, into the -o directory
   -strict-output
     	write no output when a chunk stays unverified
+  -style TEXT
+    	free-text delivery TEXT, sent after the rules as "Delivery:"
   -subtitles FMT
     	write subtitles FMT (srt or vtt) next to the output
   -verify MODE

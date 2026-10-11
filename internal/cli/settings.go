@@ -23,8 +23,6 @@ import (
 var reservedKeys = map[string]string{
 	"output_dir": "no feature implements an output directory yet",
 	"lexicon":    "pronunciation lexicon, SPK-08, M4",
-	"emotion":    "delivery presets, SPK-07, M4",
-	"style":      "delivery style, SPK-07, M4",
 	"voices":     "dialogue speaker map, TXT-06, M5",
 }
 
@@ -58,6 +56,8 @@ func settingSchema(getenv func(string) string, modelUnchecked bool) *config.Sche
 			Check: func(s string) error { _, err := realtime.ParseModel(s, modelUnchecked); return err }},
 		{Name: "effort", Default: string(realtime.DefaultEffort), Flag: "effort", Env: "RECITE_EFFORT", FrontMatter: true, Check: check(realtime.ParseEffort)},
 		{Name: "speed", Default: "1.0", Flag: "speed", Env: "RECITE_SPEED", FrontMatter: true, Check: check(realtime.ParseSpeed)},
+		{Name: "emotion", Default: realtime.DefaultEmotion, Flag: "emotion", Check: check(realtime.ParseEmotion)},
+		{Name: "style", Flag: "style", FrontMatter: true, Check: check(realtime.ParseStyle)},
 		{Name: langKey, NoFile: true, FrontMatter: true, Check: checkLang},
 		{Name: "jobs", Default: strconv.Itoa(pipeline.DefaultJobs), Flag: "jobs", Env: "RECITE_JOBS", Check: intIn(1, pipeline.MaxJobs)},
 		{Name: "verify.mode", Default: string(verify.ModeNormal), Flag: "verify", Check: check(verify.ParseMode)},

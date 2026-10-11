@@ -5,6 +5,8 @@ voice                 marin              profile narrator ($DIR/recite/config.to
 model                 gpt-realtime-2.1   default
 effort                low                env (RECITE_EFFORT)
 speed                 0.9                profile narrator ($DIR/recite/config.toml:9)
+emotion               neutral            default
+style                 ""                 default
 lang                  ""                 default
 jobs                  2                  user ($DIR/recite/config.toml:2)
 verify.mode           normal             default

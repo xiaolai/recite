@@ -78,7 +78,7 @@ func TestSayRetryEffortFlag(t *testing.T) {
 func TestTasksForCarriesLadder(t *testing.T) {
 	p := pipeline.Plan{Chunks: []pipeline.Chunk{{ID: "c0001", Spoken: "Hi."}, {ID: "c0002", Spoken: "Bye."}}}
 	ladder := []realtime.Effort{"minimal", "low"}
-	for _, task := range tasksFor(p, realtime.SessionSpec{Effort: "high"}, ladder) {
+	for _, task := range tasksFor(p, realtime.SessionSpec{Effort: "high"}, "", ladder) {
 		if !slices.Equal(task.Ladder, ladder) || task.Spec.Effort != "high" {
 			t.Errorf("%s: ladder %v effort %s", task.Chunk.ID, task.Ladder, task.Spec.Effort)
 		}

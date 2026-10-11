@@ -143,6 +143,7 @@ type sayFlags struct {
 	retryEffort                 string
 	modelUnchecked              bool
 	instructionsVersion         int
+	emotion, style              string
 }
 
 func (f *sayFlags) register(fs *flag.FlagSet) {
@@ -153,6 +154,8 @@ func (f *sayFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.effort, "effort", string(realtime.DefaultEffort), "reasoning `EFFORT`: minimal, low, medium, high, xhigh")
 	fs.StringVar(&f.retryEffort, "retry-effort", "", "`LIST` of efforts for attempts 1, 2, 3…, the last repeating, e.g. minimal,low,medium (default off)")
 	fs.IntVar(&f.instructionsVersion, "instructions-version", realtime.InstructionsVersion, "instruction `VERSION` (regression comparison only)")
+	fs.StringVar(&f.emotion, "emotion", realtime.DefaultEmotion, "delivery `PRESET`: "+strings.Join(realtime.Emotions(), ", "))
+	fs.StringVar(&f.style, "style", "", "free-text delivery `TEXT`, sent after the rules as \"Delivery:\"")
 }
 
 func (f *sayFlags) settings() (realtime.Settings, error) {
@@ -174,6 +177,12 @@ func (f *sayFlags) settings() (realtime.Settings, error) {
 		return s, err
 	}
 	s.InstructionsVersion = f.instructionsVersion
+	if s.Emotion, err = realtime.ParseEmotion(f.emotion); err != nil {
+		return s, err
+	}
+	if s.Style, err = realtime.ParseStyle(f.style); err != nil {
+		return s, err
+	}
 	return s, nil
 }
 

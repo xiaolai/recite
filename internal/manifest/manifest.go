@@ -90,8 +90,15 @@ type Settings struct {
 	Speed               float64        `json:"speed"`
 	Effort              string         `json:"effort"`
 	InstructionsVersion int            `json:"instructions_version"`
-	Style               *string        `json:"style"`
+	Emotion             Emotion        `json:"emotion"`
+	Style               *string        `json:"style"` // null without a delivery style
 	Verify              VerifySettings `json:"verify"`
+}
+
+// Emotion is the delivery preset and the version of its sentences (SPK-07).
+type Emotion struct {
+	Preset  string `json:"preset"`
+	Version int    `json:"version"`
 }
 
 // VerifySettings are the verification thresholds and limits.
