@@ -15,6 +15,7 @@ import (
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/spoken"
+	"github.com/xiaolai/recite/internal/subtitle"
 	"github.com/xiaolai/recite/internal/text"
 	"github.com/xiaolai/recite/internal/verify"
 )
@@ -116,6 +117,10 @@ type SayRequest struct {
 	KeepRejected string // --keep-rejected DIR; "" keeps none
 
 	DryRun bool // --dry-run: plan and estimate only, no network (RUN-06)
+
+	Subtitles     subtitle.Format // --subtitles; "" writes none (OUT-03)
+	Chapters      chaptersFlag    // --chapters (OUT-04)
+	SplitSections bool            // --split-sections: one file per section in the -o directory (OUT-05)
 
 	Command string // the command named in error messages; "" means say
 }
@@ -359,6 +364,12 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.StringVar(&manifestPath, "manifest", "", "write the manifest to `PATH` (default <output>.json)")
 	fs.BoolVar(&noManifest, "no-manifest", false, "write no manifest")
 	fs.StringVar(&keepRejected, "keep-rejected", "", "save every rejected take and its report in `DIR`")
+	var subtitles string
+	var chapters chaptersFlag
+	var split bool
+	fs.StringVar(&subtitles, "subtitles", "", "write subtitles `FMT` (srt or vtt) next to the output")
+	fs.Var(&chapters, "chapters", "write chapter markers from the headings (default on for m4a and m4b with headings)")
+	fs.BoolVar(&split, "split-sections", false, "write one file per heading, NN-<slug>.<format>, into the -o directory")
 	var dryRun bool
 	fs.BoolVar(&dryRun, "dry-run", false, "print the chunk plan and estimates (cache hits, audio, wall time, list price); no network, no login")
 	all.register(fs)
@@ -380,6 +391,13 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 		}
 		req.Manifest, req.NoManifest, req.KeepRejected = manifestPath, noManifest, keepRejected
 		req.DryRun = dryRun
+		req.Chapters, req.SplitSections = chapters, split
+		if subtitles != "" {
+			if req.Subtitles, err = subtitle.ParseFormat(subtitles); err != nil {
+				c.errorf("recite say: %v", err)
+				return ExitUsage
+			}
+		}
 		if format != "" {
 			if req.Format, err = audio.ParseFormat(format); err != nil {
 				c.errorf("recite say: --format: %v", err)

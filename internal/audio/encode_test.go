@@ -250,3 +250,37 @@ func TestStreamWriterFFmpegPipe(t *testing.T) {
 		t.Fatalf("%d bytes, args %q", b.Len(), loggedArgs(t, log))
 	}
 }
+
+// Chapters reach ffmpeg as a second, ffmetadata input mapped into the output, after the PCM
+// input's own options and before every output option; the file holds the metadata text.
+func TestEncodeFileWithChapters(t *testing.T) {
+	want := "-hide_banner -loglevel error -nostdin -f s16le -ar 24000 -ac 1 -i pipe:0 " +
+		"-f ffmetadata -i m -map 0:a -map_metadata 1 -map_chapters 1 -ar 48000 -c:a aac -b:a 160k -f ipod -y o"
+	if got := strings.Join(FFmpegChapterArgs(Encoding{Format: FormatM4B, Rate: 48000, Tool: ToolFFmpeg}, "m", "o"), " "); got != want {
+		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "ffmpeg")
+	// Copies the ffmetadata input (the argument after the second -i) next to the output.
+	script := "#!/bin/sh\nseen=0\nfor a in \"$@\"; do if [ \"$prev\" = -i ]; then seen=$((seen+1)); [ $seen = 2 ] && meta=$a; fi; prev=$a; done\n" +
+		"for last in \"$@\"; do :; done\ncat \"$meta\" > \"$last.meta\"\nexec cat > \"$last\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o.m4a")
+	e := Encoding{Format: FormatM4A, Rate: SampleRate, Tool: ToolFFmpeg, Bin: bin, Chapters: ";FFMETADATA1\n"}
+	if err := EncodeFile(context.Background(), e, samples(10), out); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(out + ".meta"); err != nil || string(b) != e.Chapters {
+		t.Fatalf("metadata %q, %v", b, err)
+	}
+	for _, bad := range []Encoding{
+		{Format: FormatMP3, Rate: SampleRate, Tool: ToolFFmpeg, Bin: bin, Chapters: "x"},
+		{Format: FormatM4A, Rate: SampleRate, Tool: ToolAfconvert, Bin: bin, Chapters: "x"},
+	} {
+		if err := EncodeFile(context.Background(), bad, samples(10), out); err == nil {
+			t.Fatalf("%s through %s with chapters accepted", bad.Format, bad.Tool)
+		}
+	}
+}

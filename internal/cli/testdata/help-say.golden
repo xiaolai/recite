@@ -5,6 +5,8 @@ Text to verified audio file (default command)
 Flags:
   -allow-unverified
     	exit 0 when a chunk stays unverified
+  -chapters
+    	write chapter markers from the headings (default on for m4a and m4b with headings)
   -chunk-seconds SECONDS
     	segmentation budget in SECONDS per chunk (default 25)
   -code MODE
@@ -87,8 +89,12 @@ Flags:
     	renders per speech session before it is replaced, N (default 50)
   -speed SPEED
     	SPEED from 0.25 to 1.5 in steps of 0.01 (default "1.0")
+  -split-sections
+    	write one file per heading, NN-<slug>.<format>, into the -o directory
   -strict-output
     	write no output when a chunk stays unverified
+  -subtitles FMT
+    	write subtitles FMT (srt or vtt) next to the output
   -verify MODE
     	verification MODE: strict, normal or off (default "normal")
   -verify-jobs N

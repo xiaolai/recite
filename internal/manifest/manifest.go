@@ -33,19 +33,40 @@ const (
 // Manifest is the durable record of one run. It holds no secret and no account identifier:
 // only settings, hashes, verdicts and counts, and the scrubbed cause of a verifier fallback.
 type Manifest struct {
-	Schema    string   `json:"schema"`
-	Tool      Tool     `json:"tool"`
-	CreatedAt string   `json:"created_at"`
-	Status    Status   `json:"status"`
-	Input     Input    `json:"input"`
-	Settings  Settings `json:"settings"`
-	Verifier  Verifier `json:"verifier"`
-	Output    *Output  `json:"output"`
-	Summary   Summary  `json:"summary"`
-	Chunks    []Chunk  `json:"chunks"`
+	Schema    string    `json:"schema"`
+	Tool      Tool      `json:"tool"`
+	CreatedAt string    `json:"created_at"`
+	Status    Status    `json:"status"`
+	Input     Input     `json:"input"`
+	Settings  Settings  `json:"settings"`
+	Verifier  Verifier  `json:"verifier"`
+	Output    *Output   `json:"output"`
+	Summary   Summary   `json:"summary"`
+	Chunks    []Chunk   `json:"chunks"`
+	Chapters  []Chapter `json:"chapters"`
 
 	UsageEstimate float64 `json:"usage_estimate_usd_list_price"`
 	UsageNote     string  `json:"usage_estimate_note"`
+}
+
+// Chapter is one section of the input (a Markdown heading) on the assembly timeline (OUT-04):
+// it runs from its first chunk's start to the next chapter's start, the last one to the end
+// of the audio. The times are null when the run did not assemble that far. Path is the
+// section's file under --split-sections, else null.
+type Chapter struct {
+	Title      string   `json:"title"`
+	FirstChunk string   `json:"first_chunk"`
+	StartS     *float64 `json:"start_s"`
+	EndS       *float64 `json:"end_s"`
+	Path       *string  `json:"path"`
+}
+
+// Section is a section as Build reads it: its title, the index of its first chunk, and its
+// file ("" when the run wrote none of its own).
+type Section struct {
+	Title string
+	First int
+	Path  string
 }
 
 // Tool is the build that wrote the manifest.
@@ -192,6 +213,8 @@ type Run struct {
 	Results []verify.ChunkResult // the delivered prefix, in plan order
 	Spans   []audio.Span         // the assembly's place of each delivered chunk
 	Gaps    []int                // the silence after each chunk, in samples
+	// Sections are the input's sections in order, each starting at a later chunk.
+	Sections []Section
 
 	EstimateUSD float64 // the list-price estimate of every render and STT call of the run
 	PriceNote   string
@@ -225,6 +248,7 @@ func Build(r Run) (Manifest, error) {
 		Input: r.Input, Settings: r.Settings, Verifier: r.Verifier, Output: r.Output,
 		Summary:       Summary{Chunks: len(r.Plan.Chunks), Findings: map[string]int{}},
 		Chunks:        make([]Chunk, len(r.Plan.Chunks)),
+		Chapters:      make([]Chapter, len(r.Sections)),
 		UsageEstimate: r.EstimateUSD, UsageNote: r.PriceNote,
 	}
 	if f := m.Verifier.Fallback; f != nil {
@@ -254,7 +278,41 @@ func Build(r Run) (Manifest, error) {
 		count(&m.Summary, c)
 		m.Chunks[i] = c
 	}
+	if err := chapters(&m, r); err != nil {
+		return Manifest{}, err
+	}
 	return m, nil
+}
+
+// chapters fills m.Chapters from r.Sections and labels each chunk with its section.
+func chapters(m *Manifest, r Run) error {
+	for k, s := range r.Sections {
+		if s.First < 0 || s.First >= len(r.Plan.Chunks) || k > 0 && s.First <= r.Sections[k-1].First {
+			return fmt.Errorf("manifest: section %d starts at chunk %d", k+1, s.First)
+		}
+		ch := Chapter{Title: s.Title, FirstChunk: r.Plan.Chunks[s.First].ID}
+		if s.Path != "" {
+			ch.Path = &s.Path
+		}
+		next := len(r.Plan.Chunks)
+		if k+1 < len(r.Sections) {
+			next = r.Sections[k+1].First
+		}
+		if s.First < len(r.Spans) {
+			ch.StartS = seconds(r.Spans[s.First].Start)
+		}
+		switch {
+		case next < len(r.Spans):
+			ch.EndS = seconds(r.Spans[next].Start)
+		case next == len(r.Plan.Chunks) && len(r.Spans) == next:
+			ch.EndS = seconds(r.Spans[next-1].End)
+		}
+		m.Chapters[k] = ch
+		for i := s.First; i < next; i++ {
+			m.Chunks[i].Section = &r.Sections[k].Title
+		}
+	}
+	return nil
 }
 
 func fill(c *Chunk, res verify.ChunkResult) {

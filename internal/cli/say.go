@@ -126,12 +126,16 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 	if code != ExitOK {
 		return sayJob{}, code
 	}
-	plan, seg, code := c.planText(req, input)
+	plan, seg, doc, code := c.planText(req, input)
 	if code != ExitOK {
 		return sayJob{}, code
 	}
 	for _, w := range seg.Warnings {
 		c.Logger.Warn("segmentation", "code", w.Code, "chunk", plan.Chunks[w.Chunk].ID, "detail", w.Msg)
+	}
+	x, code := c.planExtras(req, target, enc, plan, doc)
+	if code != ExitOK {
+		return sayJob{}, code
 	}
 	gaps, err := audio.GapSamples(req.Gaps, plan.Joins())
 	if err != nil {
@@ -146,7 +150,7 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 	tasks := tasksFor(plan, spec, req.RetryEffort)
 	if req.DryRun {
 		// A dry run writes nothing and needs no output target; it reads the cache if one exists.
-		job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc}
+		job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc, extras: x}
 		if req.CacheDir != "" && !req.NoCache {
 			if _, err := os.Stat(req.CacheDir); err == nil {
 				if job.cache, err = c.takeCache(req); err != nil {
@@ -157,7 +161,14 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 		return job, ExitOK
 	}
 	if !stream {
-		if err := preflight(target, req.Force); err != nil {
+		pf := preflight
+		if x.split {
+			pf = func(string, bool) error { return nil } // a directory: extras.preflight checks it
+		}
+		if err := pf(target, req.Force); err != nil {
+			return sayJob{}, c.reportFailure(err)
+		}
+		if err := x.preflight(target, req.Force); err != nil {
 			return sayJob{}, c.reportFailure(err)
 		}
 	}
@@ -165,7 +176,7 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 	if err != nil {
 		return sayJob{}, c.reportFailure(err)
 	}
-	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc,
+	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc, extras: x,
 		manifest: mpath, replaceManifest: mreplace}
 	if job.cache, err = c.takeCache(req); err == nil {
 		if err = keepRejectedDir(req.KeepRejected); err == nil {
@@ -190,6 +201,19 @@ const stdoutTarget = "-"
 // --json (stdout carries audio only) and --strict-output (AUD-07).
 func (c *CLI) outputEncoding(req SayRequest) (string, audio.Encoding, int) {
 	target, format := req.Output, req.Format
+	if req.SplitSections {
+		// -o names the directory of section files; the format is --format, else wav.
+		if format == "" {
+			format = audio.FormatWAV
+		}
+		switch target {
+		case stdoutTarget:
+		case "":
+			target = defaultOutput(req.File, c.Now(), "")
+		default:
+			target = filepath.Clean(target)
+		}
+	}
 	if target == stdoutTarget {
 		for _, bad := range []struct {
 			on   bool
@@ -261,6 +285,7 @@ type sayJob struct {
 	enc             audio.Encoding
 	manifest        string // "" under --no-manifest
 	replaceManifest bool
+	extras          extras // subtitles, chapters, split output
 }
 
 // takeCache opens the take cache (RUN-04): nil under --no-cache or without a cache directory.
@@ -356,6 +381,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		status = manifest.StatusFailed
 	}
 	var out *manifest.Output
+	var sections []manifest.Section
 	if stream != nil {
 		// A stream cannot take bytes back: whatever prefix was assembled has been sent, and
 		// the exit code reports a failure after it (AUD-07).
@@ -375,12 +401,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		} else {
 			audioOut := audio.PCM(pcm.Bytes())
 			seconds = audioOut.Duration().Seconds()
-			if err := publishOutput(job.target, req.Force, func(f *os.File) error {
-				if job.enc.Native() {
-					return audio.Write(f, job.enc.Format, audioOut)
-				}
-				return audio.EncodeFile(ctx, job.enc, audioOut, f.Name())
-			}); err != nil {
+			if sections, err = c.publishAudio(ctx, req, job, audioOut, asm.Spans()); err != nil {
 				return err
 			}
 			c.Logger.Info("wrote output", "path", job.target, "seconds", seconds)
@@ -396,7 +417,10 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 	if req.Play {
 		defer c.play(ctx, job.target, out)
 	}
-	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out); merr != nil {
+	if sections == nil {
+		sections = manifestSections(job.extras.sections)
+	}
+	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out, sections); merr != nil {
 		if err == nil {
 			return merr
 		}
@@ -419,7 +443,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 
 // writeRunManifest builds and publishes the run's manifest, unless --no-manifest.
 func (c *CLI) writeRunManifest(req SayRequest, job sayJob, rec *recorder, tr stt.Transcriber, res pipeline.Result,
-	spans []audio.Span, status manifest.Status, out *manifest.Output) error {
+	spans []audio.Span, status manifest.Status, out *manifest.Output, sections []manifest.Section) error {
 	if job.manifest == "" {
 		return nil
 	}
@@ -427,7 +451,7 @@ func (c *CLI) writeRunManifest(req SayRequest, job sayJob, rec *recorder, tr stt
 	m, err := manifest.Build(manifest.Run{
 		CreatedAt: c.Now(), Status: status, Input: inputOf(req, job.input), Settings: settingsOf(req),
 		Verifier: verifierOf(req.Verify.Mode, tr, fb), Output: out,
-		Plan: job.plan, Tasks: job.tasks, Results: res.Chunks, Spans: spans, Gaps: job.gaps,
+		Plan: job.plan, Tasks: job.tasks, Results: res.Chunks, Spans: spans, Gaps: job.gaps, Sections: sections,
 		EstimateUSD: estimate, PriceNote: usage.ListPrices.Label(),
 	})
 	if err != nil {
@@ -498,41 +522,43 @@ func verdictError(res pipeline.Result, code int, written bool) error {
 
 // planText runs the text stages of `say` and plans the chunks. A spoken script (TXT-15)
 // skips the guard and the spoken-form rules: its text is the spoken form.
-func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmentation, int) {
+// The textDoc is the Markdown or plain-text document the plan came from (empty for a spoken
+// script).
+func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmentation, textDoc, int) {
 	if req.InputFormat == formatSpoken {
 		plan, doc, err := spokenScriptPlan(input, req.Marks, req.Spoken, planSettings(req.Settings), req.Settings.Speed)
 		if err != nil {
 			c.errorf("%s: %v", req.prefix(), err)
-			return plan, doc.Seg, textErrorCode(err)
+			return plan, doc.Seg, textDoc{}, textErrorCode(err)
 		}
-		return plan, doc.Seg, ExitOK
+		return plan, doc.Seg, textDoc{}, ExitOK
 	}
 	doc, err := speechDoc(input, textInput{format: req.InputFormat, markdown: req.Markdown, lang: req.Lang})
 	c.skippedWarning(req.prefix(), doc.skipped)
 	if err != nil {
 		c.errorf("%s: %v", req.prefix(), err)
-		return pipeline.Plan{}, text.Segmentation{}, textErrorCode(err)
+		return pipeline.Plan{}, text.Segmentation{}, doc, textErrorCode(err)
 	}
 	g, code := c.guardText(req, doc.text)
 	if code != ExitOK {
-		return pipeline.Plan{}, text.Segmentation{}, code
+		return pipeline.Plan{}, text.Segmentation{}, doc, code
 	}
 	if err := checkPauses(g); err != nil {
 		c.errorf("%s: %v", req.prefix(), err)
-		return pipeline.Plan{}, text.Segmentation{}, ExitUsage
+		return pipeline.Plan{}, text.Segmentation{}, doc, ExitUsage
 	}
 	// The spoken form is what the model is asked to say; form.Display keeps
 	// the cleaned text for the plan, the manifest and subtitles.
 	form, code := c.spokenForm(req, g)
 	if code != ExitOK {
-		return pipeline.Plan{}, text.Segmentation{}, code
+		return pipeline.Plan{}, text.Segmentation{}, doc, code
 	}
 	plan, seg, err := planDoc(doc, g, form, req.ChunkSeconds, req.Settings)
 	if err != nil {
 		c.errorf("%s: %v", req.prefix(), err)
-		return plan, seg, ExitInternal
+		return plan, seg, doc, ExitInternal
 	}
-	return plan, seg, ExitOK
+	return plan, seg, doc, ExitOK
 }
 
 // textErrorCode is the exit code of a text-stage error: 2 for the user's input.

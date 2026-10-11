@@ -121,7 +121,13 @@ type Encoding struct {
 	// Loudness is the normalisation preset (AUD-06); "" and none leave the level alone. Any
 	// other preset needs Tool to be ffmpeg (see [WithLoudness]).
 	Loudness Loudness
+	// Chapters is ffmetadata text that ffmpeg puts into an m4a or m4b as chapter markers
+	// (OUT-04); "" writes none.
+	Chapters string
 }
+
+// ChapterFormat reports whether f carries chapter markers.
+func ChapterFormat(f Format) bool { return f == FormatM4A || f == FormatM4B }
 
 // Native reports whether recite writes the output itself.
 func (e Encoding) Native() bool { return e.Tool == "" }
@@ -160,17 +166,26 @@ func ChooseEncoding(f Format, rate int, stream bool, goos string, look func(stri
 
 // FFmpegArgs is the ffmpeg argument vector that reads internal PCM on stdin and writes the
 // output to out: a file path, or "pipe:1" for stdout. It is passed to exec, never to a shell.
-func FFmpegArgs(e Encoding, out string) []string { return ffmpegArgs(e, out, "") }
+func FFmpegArgs(e Encoding, out string) []string { return ffmpegArgs(e, "", out, "") }
+
+// FFmpegChapterArgs is FFmpegArgs with the ffmetadata file at meta ("" for none) as a second
+// input whose chapters are mapped into the output.
+func FFmpegChapterArgs(e Encoding, meta, out string) []string { return ffmpegArgs(e, meta, out, "") }
 
 // NormalizeArgs is [FFmpegArgs] with the second loudness pass applied, from the first pass's
 // measurement m (AUD-06).
 func NormalizeArgs(e Encoding, out string, m Measurement) []string {
-	return ffmpegArgs(e, out, normalizeFilter(e.Loudness, m))
+	return ffmpegArgs(e, "", out, normalizeFilter(e.Loudness, m))
 }
 
-func ffmpegArgs(e Encoding, out, filter string) []string {
+// ffmpegArgs builds every encoding command: meta adds a chapter input, filter the loudness pass.
+func ffmpegArgs(e Encoding, meta, out, filter string) []string {
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-f", "s16le", "-ar", strconv.Itoa(SampleRate), "-ac", strconv.Itoa(Channels), "-i", "pipe:0"}
+	if meta != "" {
+		// Input options precede their -i; every output option follows the last input.
+		args = append(args, "-f", "ffmetadata", "-i", meta, "-map", "0:a", "-map_metadata", "1", "-map_chapters", "1")
+	}
 	if filter != "" {
 		// loudnorm resamples to 192 kHz internally, so the output rate is always set.
 		args = append(args, "-af", filter, "-ar", strconv.Itoa(e.Rate))
@@ -237,20 +252,28 @@ func EncodeFile(ctx context.Context, e Encoding, p PCM, path string) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
+	if e.Chapters != "" && (e.Tool != ToolFFmpeg || !ChapterFormat(e.Format)) {
+		return fmt.Errorf("audio: chapters need ffmpeg and m4a or m4b, not %s through %q", e.Format, e.Tool)
+	}
 	switch e.Tool {
 	case ToolFFmpeg:
-		args := FFmpegArgs(e, path)
+		meta, cleanup, err := chapterFile(e.Chapters)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		filter := ""
 		if _, ok := e.Loudness.Target(); ok {
 			m, err := measure(ctx, e, p)
 			if err != nil {
 				return err
 			}
 			if !m.Silent() {
-				args = NormalizeArgs(e, path, m)
+				filter = normalizeFilter(e.Loudness, m)
 			}
 		}
 		var stderr boundedBuffer
-		cmd := exec.CommandContext(ctx, e.Bin, args...)
+		cmd := exec.CommandContext(ctx, e.Bin, ffmpegArgs(e, meta, path, filter)...)
 		cmd.Stdin, cmd.Stderr = bytes.NewReader(p), &stderr
 		if err := cmd.Run(); err != nil {
 			return toolError(ToolFFmpeg, err, &stderr)
@@ -263,6 +286,25 @@ func EncodeFile(ctx context.Context, e Encoding, p PCM, path string) error {
 		return afconvert(ctx, e, p, path)
 	}
 	return fmt.Errorf("audio: unknown encoder %q", e.Tool)
+}
+
+// chapterFile writes ffmetadata text to a private temp directory: its path, or "" for no
+// chapters, and the cleanup to run after the encoder.
+func chapterFile(text string) (string, func(), error) {
+	if text == "" {
+		return "", func() {}, nil
+	}
+	dir, err := os.MkdirTemp("", "recite-chapters-")
+	if err != nil {
+		return "", nil, fmt.Errorf("audio: chapters temp dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) } // best effort: a private temp directory
+	path := filepath.Join(dir, "chapters.txt")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("audio: chapters file: %w", err)
+	}
+	return path, cleanup, nil
 }
 
 func afconvert(ctx context.Context, e Encoding, p PCM, path string) error {

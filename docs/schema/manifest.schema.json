@@ -5,7 +5,7 @@
   "description": "The record written next to the output as <output>.json, or at --manifest PATH (design §11.2, OUT-02). Version 1. It never holds a token, an email or an account ID.",
   "version": 1,
   "type": "object",
-  "required": ["schema", "tool", "created_at", "status", "input", "settings", "verifier", "output", "summary", "chunks", "usage_estimate_usd_list_price", "usage_estimate_note"],
+  "required": ["schema", "tool", "created_at", "status", "input", "settings", "verifier", "output", "summary", "chunks", "chapters", "usage_estimate_usd_list_price", "usage_estimate_note"],
   "additionalProperties": false,
   "properties": {
     "schema": { "const": "recite/manifest@1" },
@@ -119,6 +119,22 @@
       }
     },
     "chunks": { "type": "array", "items": { "$ref": "#/$defs/chunk" } },
+    "chapters": {
+      "description": "The input's sections (Markdown headings) on the assembly timeline (OUT-04): each runs from its first chunk's start to the next one's, the last to the end of the audio. Times are null where the run did not assemble; path is the section's file under --split-sections (OUT-05).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "first_chunk", "start_s", "end_s", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "first_chunk": { "type": "string", "pattern": "^c[0-9]{4,}$" },
+          "start_s": { "$ref": "#/$defs/seconds" },
+          "end_s": { "$ref": "#/$defs/seconds" },
+          "path": { "type": ["string", "null"], "minLength": 1 }
+        }
+      }
+    },
     "usage_estimate_usd_list_price": { "type": "number", "minimum": 0 },
     "usage_estimate_note": { "type": "string" }
   },

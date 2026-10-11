@@ -130,6 +130,9 @@ type textDoc struct {
 	breaks  []text.Break // nil means the paragraph breaks of plain text
 	lang    string       // front-matter language; "" means detect
 	skipped text.Skipped
+	// headingFirst says the speech text opens with a heading, so its first chunk starts a
+	// section (OUT-04); every later section follows a section break.
+	headingFirst bool
 }
 
 func plainDoc(input string) textDoc { return textDoc{text: input} }
@@ -164,7 +167,8 @@ func speechDoc(input string, in textInput) (textDoc, error) {
 	if breaks == nil {
 		breaks = []text.Break{}
 	}
-	return textDoc{text: md.Text, breaks: breaks, lang: in.lang, skipped: md.Skipped}, nil
+	return textDoc{text: md.Text, breaks: breaks, lang: in.lang, skipped: md.Skipped,
+		headingFirst: len(md.Headings) > 0 && md.Headings[0].At == 0}, nil
 }
 
 // skippedWarning reports the Markdown content not read aloud, unless -q.
