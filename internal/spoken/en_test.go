@@ -113,6 +113,8 @@ func TestAmbiguityIsReportedNotGuessed(t *testing.T) {
 		{"Due February 29, 2026.", "February 29, 2026", "en.date.text", 1, 5},
 		{"Due 29 February 2026.", "29 February 2026", "en.date.text", 1, 5},
 		{"Due 2028-02-29.", "", "", 0, 0},
+		{"See Genesis 1:3 first.", "1:3", "en.ratio", 1, 13}, // a ratio or a chapter and verse
+		{"The ratio was 3:2.", "", "", 0, 0},
 	}
 	for _, c := range cases {
 		r, err := spoken.Normalize(c.in, "en", spoken.Options{})

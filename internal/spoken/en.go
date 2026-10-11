@@ -20,6 +20,7 @@ var English = Table{
 	{"en.digitgroups", enDigitGroups},
 	{"en.elapsed", enElapsed},
 	{"en.time", enTime},
+	{"en.ratio", enRatio},
 	{"en.duration", enDuration},
 	{"en.currency.scale", enCurrencyScale},
 	{"en.currency", enCurrency},
@@ -554,6 +555,28 @@ func adjectival(s string, i, j int) bool {
 	}
 	w := nextWord(s, j)
 	return w != "" && !isDigit(w[0]) && !notNouns[strings.ToLower(w)]
+}
+
+// enRatio reads "3:2" and "1:100" as "three to two" and "one to one hundred". Two digits
+// after the colon are a clock time (en.time); a capitalised word before it may name a
+// book and make it a reference ("Genesis 1:3"), which is not guessed.
+func enRatio(s string, i int, _ *Options) (Match, bool) {
+	if !isDigit(s[i]) || !wordStart(s, i) || prevRune(s, i) == ':' || prevRune(s, i) == '.' {
+		return Match{}, false
+	}
+	a := digits(s, i)
+	if a-i > 6 || byteAt(s, a) != ':' {
+		return Match{}, false
+	}
+	b := digits(s, a+1)
+	if r := b - a - 1; r == 0 || r == 2 || r > 6 || !wordEnd(s, b) ||
+		(byteAt(s, b) == ':' || byteAt(s, b) == '.') && isDigit(byteAt(s, b+1)) {
+		return Match{}, false
+	}
+	if p := prevWord(s, i); p != "" && capitalised(p) && !sentenceInitial(s, i) {
+		return Match{End: b, Ambiguous: "a ratio or a reference"}, true
+	}
+	return Match{End: b, Spoken: spellInt(s[i:a]) + " to " + spellInt(s[a+1:b])}, true
 }
 
 // ordinalSuffixLen is the length of st/nd/rd/th at j when no letter follows.
