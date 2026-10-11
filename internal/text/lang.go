@@ -135,19 +135,49 @@ func Resolve(text string, opts ResolveOptions) Language {
 		}
 	}
 	info := DetectScript(text)
+	dom := languageScript(text, info)
 	switch {
 	case info.Counts[ScriptHiragana]+info.Counts[ScriptKatakana] > 0:
 		return Language{Code: "ja", Source: SourceScript, Certain: true}
 	case info.Counts[ScriptHangul] > 0:
 		return Language{Code: "ko", Source: SourceScript, Certain: true}
-	case info.Script == ScriptHan:
+	case dom == ScriptHan:
 		// Not certain: kanji-only Japanese exists.
 		return Language{Code: orDefault(opts.DefaultHanLang, DefaultHanLang), Source: SourceDefaultHan}
-	case info.Script == ScriptLatin:
+	case dom == ScriptLatin:
 		// Not certain: script cannot tell English from French.
 		return Language{Code: orDefault(opts.DefaultLatinLang, DefaultLatinLang), Source: SourceDefaultLat}
 	}
 	return Language{Source: SourceUnknown}
+}
+
+// languageScript decides between Han and Latin for text that mixes them by
+// spoken weight, not rune count: a Han rune is about one syllable, while a
+// Latin rune is a fraction of a word. "iPhone 17 Pro的价格是" has nine Latin
+// runes but two Latin words against four Han runes, and is Chinese. Han wins a
+// tie. Text without both scripts keeps its dominant script.
+func languageScript(text string, info ScriptInfo) Script {
+	han, latin := info.Counts[ScriptHan], info.Counts[ScriptLatin]
+	if han == 0 || latin == 0 || info.Script != ScriptHan && info.Script != ScriptLatin {
+		return info.Script
+	}
+	if han >= latinWords(text) {
+		return ScriptHan
+	}
+	return ScriptLatin
+}
+
+// latinWords counts maximal runs of Latin letters.
+func latinWords(text string) int {
+	n, in := 0, false
+	for _, r := range text {
+		l := unicode.IsLetter(r) && unicode.Is(unicode.Latin, r)
+		if l && !in {
+			n++
+		}
+		in = l
+	}
+	return n
 }
 
 func orDefault(v, d string) string {

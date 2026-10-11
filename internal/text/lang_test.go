@@ -28,6 +28,12 @@ func TestResolveTable(t *testing.T) {
 		{"korean", "안녕하세요, 반갑습니다.", ScriptHangul, "ko", SourceScript, true, []string{"ko"}, MetricCER},
 		{"russian", "Привет, как дела?", ScriptCyrillic, "", SourceUnknown, false, nil, MetricWER},
 		{"mixed latin+han", "The word 東京 means eastern capital", ScriptLatin, "en", SourceDefaultLat, false, nil, MetricWER},
+		// Script is by rune count (design §7.3), language by spoken weight: Latin
+		// words against Han runes, so a Latin brand name does not make Chinese English.
+		{"latin brand in chinese", "iPhone 17 Pro的价格是¥8,999", ScriptLatin, "zh", SourceDefaultHan, false, nil, MetricWER},
+		{"latin product in chinese", "我用MacBook Pro写代码", ScriptLatin, "zh", SourceDefaultHan, false, nil, MetricWER},
+		{"han term in english", "Use 微信 to pay the bill", ScriptLatin, "en", SourceDefaultLat, false, nil, MetricWER},
+		{"one word each", "iPhone好", ScriptLatin, "zh", SourceDefaultHan, false, nil, MetricWER},
 		{"mixed latin+kana", "Say こんにちは to everyone here", ScriptLatin, "ja", SourceScript, true, []string{"ja"}, MetricWER},
 		{"digits only", "123 456", ScriptUnknown, "", SourceUnknown, false, nil, MetricWER},
 	}
