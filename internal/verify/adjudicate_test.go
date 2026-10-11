@@ -348,6 +348,7 @@ func TestProtectedLexiconAndMarkSpans(t *testing.T) {
 // accept: VER-06#4
 // accept: VER-06#5
 // accept: VER-06#6
+// accept: VER-06#7
 func TestContentWordGuard(t *testing.T) {
 	approved := chunk(sixty("approved"))
 	rejected := sixty("rejected")
