@@ -89,24 +89,7 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, minFirst i
 	opts := verify.DefaultOptions()
 	tasks := make([]pipeline.Task, 0, len(corpus))
 	for i, c := range corpus {
-		g, err := guard.Run(c, guard.Options{})
-		if err != nil {
-			t.Fatalf("%q: guard: %v", c, err)
-		}
-		lang := text.Resolve(g.Text, text.ResolveOptions{})
-		form, err := spoken.Normalize(g.Text, lang.Code, spoken.Options{})
-		if err != nil {
-			t.Fatalf("%q: %v", c, err)
-		}
-		requestLike := false
-		for _, f := range g.Findings {
-			requestLike = requestLike || f.Code == guard.Request
-		}
-		d := realtime.EstimateDuration(form.Spoken, set.Speed)
-		tasks = append(tasks, pipeline.Task{
-			Chunk: verify.Chunk{ID: fmt.Sprintf("c%04d", i+1), Spoken: form.Spoken, Language: lang, Estimate: d, RequestLike: requestLike},
-			Spec:  spec,
-		})
+		tasks = append(tasks, corpusTask(t, fmt.Sprintf("c%04d", i+1), c, spec))
 	}
 	if os.Getenv("RECITE_LIVE") == "" {
 		t.Skip("set RECITE_LIVE=1 to render and verify the corpus against the real service")
@@ -230,6 +213,30 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, minFirst i
 	if first < minFirst || verified != total {
 		t.Fatalf("%s fails: %d/%d first-attempt (want ≥ %d), %d/%d verified (want %d)",
 			bullet, first, total, minFirst, verified, total, total)
+	}
+}
+
+// corpusTask is item c as one chunk, through the text stages `say` runs: guard, language
+// resolution and spoken form.
+func corpusTask(t *testing.T, id, c string, spec realtime.SessionSpec) pipeline.Task {
+	t.Helper()
+	g, err := guard.Run(c, guard.Options{})
+	if err != nil {
+		t.Fatalf("%q: guard: %v", c, err)
+	}
+	lang := text.Resolve(g.Text, text.ResolveOptions{})
+	form, err := spoken.Normalize(g.Text, lang.Code, spoken.Options{})
+	if err != nil {
+		t.Fatalf("%q: %v", c, err)
+	}
+	requestLike := false
+	for _, f := range g.Findings {
+		requestLike = requestLike || f.Code == guard.Request
+	}
+	d := realtime.EstimateDuration(form.Spoken, spec.Speed)
+	return pipeline.Task{
+		Chunk: verify.Chunk{ID: id, Spoken: form.Spoken, Language: lang, Estimate: d, RequestLike: requestLike},
+		Spec:  spec,
 	}
 }
 
