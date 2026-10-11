@@ -31,6 +31,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "fakecodex: unknown FAKECODEX_MODE %q\n", mode)
 		os.Exit(64)
 	}
+	if err := recordPID(); err != nil {
+		fmt.Fprintln(os.Stderr, "fakecodex: pid file:", err)
+		os.Exit(70)
+	}
 	if err := record(); err != nil {
 		fmt.Fprintln(os.Stderr, "fakecodex: record:", err)
 		os.Exit(70)
@@ -55,6 +59,24 @@ func canary() string {
 		return c
 	}
 	return "eyJcanary.canary.canary"
+}
+
+// recordPID appends this process's PID, one per line, to $FAKECODEX_PIDFILE when set, so a
+// test can check that no fake child outlives recite.
+func recordPID() error {
+	path := os.Getenv("FAKECODEX_PIDFILE")
+	if path == "" {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := fmt.Fprintf(f, "%d\n", os.Getpid())
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
 }
 
 // record writes argv and the environment, one per line, to $FAKECODEX_RECORD when set.

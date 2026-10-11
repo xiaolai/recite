@@ -134,6 +134,7 @@ type config struct {
 	errorCode    string
 	unknownAfter int // inject an unknown event after this many server events; <0 = never
 	dropDone     bool
+	dropAudio    bool
 	deltaDelay   time.Duration
 	sleep        func(context.Context, time.Duration)
 	mintStatus   int
@@ -162,6 +163,10 @@ func WithErrorEvent(n int, code string) Option {
 
 // WithoutResponseDone drops every response.done event.
 func WithoutResponseDone() Option { return func(c *config) { c.dropDone = true } }
+
+// WithoutAudio drops every audio delta, so a response completes without audio (a protocol
+// fault).
+func WithoutAudio() Option { return func(c *config) { c.dropAudio = true } }
 
 // WithDeltaDelay waits d before each *.delta event, through sleep (nil = a real timer).
 func WithDeltaDelay(d time.Duration, sleep func(context.Context, time.Duration)) Option {
@@ -439,6 +444,9 @@ func (s *Server) replay(ctx context.Context, c *websocket.Conn) error {
 			continue
 		}
 		if s.cfg.dropDone && st.Type == "response.done" {
+			continue
+		}
+		if s.cfg.dropAudio && st.Type == "response.output_audio.delta" {
 			continue
 		}
 		if s.cfg.deltaDelay > 0 && strings.HasSuffix(st.Type, ".delta") {

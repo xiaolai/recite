@@ -31,6 +31,8 @@ type Synth struct {
 	// OnRateLimits receives every rate_limits.updated event (consumed by WP-2.8). It is
 	// called on the rendering goroutine and must not block.
 	OnRateLimits func(RateLimitsUpdated)
+	// Dumps, if set, writes event dumps (OBS-02).
+	Dumps *Dumps
 }
 
 var _ Synthesizer = (*Synth)(nil)
@@ -44,13 +46,19 @@ func (s *Synth) Open(ctx context.Context, spec SessionSpec) (SpeechSession, erro
 	if err != nil {
 		return nil, err
 	}
-	conn, err := Dial(ctx, DialConfig{
+	cfg := DialConfig{
 		Client: s.Client,
 		URL:    WebSocketURL(s.BaseURL, spec.Model),
 		Secret: secret,
 		Route:  openai.RouteSpeechMint,
 		Logger: s.Logger,
-	})
+	}
+	var events *eventLog
+	if s.Dumps != nil {
+		events = &eventLog{}
+		cfg.Trace = events.record
+	}
+	conn, err := Dial(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +77,7 @@ func (s *Synth) Open(ctx context.Context, spec SessionSpec) (SpeechSession, erro
 	return &liveSession{
 		conn: conn, spec: spec, now: now, opened: now(),
 		idle: idle, hardCap: hardCap, onRateLimits: s.OnRateLimits,
+		dumps: s.Dumps, events: events,
 	}, nil
 }
 
@@ -81,6 +90,8 @@ type liveSession struct {
 	idle         time.Duration
 	hardCap      func(time.Duration) time.Duration
 	onRateLimits func(RateLimitsUpdated)
+	dumps        *Dumps
+	events       *eventLog
 
 	mu     sync.Mutex // one response in flight
 	broken error      // set when a response was abandoned mid-flight; the session is unusable
@@ -96,7 +107,8 @@ func (ss *liveSession) Age() time.Duration { return ss.now().Sub(ss.opened) }
 func (ss *liveSession) Close() error { return ss.conn.Close() }
 
 // Render sends one out-of-band response.create and collects its audio and
-// transcript until response.done (design §6.2).
+// transcript until response.done (design §6.2). With Dumps, the response's events are
+// written as OBS-02 says.
 func (ss *liveSession) Render(ctx context.Context, req RenderRequest) (Take, error) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -107,6 +119,14 @@ func (ss *liveSession) Render(ctx context.Context, req RenderRequest) (Take, err
 	if attempt == 0 {
 		attempt = 1
 	}
+	if ss.events != nil {
+		ss.events.reset()
+	}
+	take, err := ss.render(ctx, req, attempt)
+	return take, dumpRender(ss.dumps, ss.events, req.ChunkID, attempt, err)
+}
+
+func (ss *liveSession) render(ctx context.Context, req RenderRequest, attempt int) (Take, error) {
 	effort := req.Effort
 	if effort == "" {
 		effort = ss.spec.Effort

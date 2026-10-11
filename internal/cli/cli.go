@@ -12,6 +12,7 @@ import (
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/logx"
+	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 )
 
@@ -31,13 +32,19 @@ type CLI struct {
 	StdinIsTTY func() bool
 	// NewSynth builds the speech synthesizer over the probed credentials.
 	NewSynth func(*auth.Credentials) (realtime.Synthesizer, error)
+	// Signals subscribes to SIGINT and SIGTERM and returns the unsubscribe function.
+	Signals func() (<-chan os.Signal, func())
+	// DrainTimeout bounds the graceful drain after the first interrupt; 0 means
+	// pipeline.DrainTimeout (RUN-03).
+	DrainTimeout time.Duration
 
 	globals Globals
+	intr    *pipeline.Interrupt // set while a command with credentials runs
 }
 
 // New returns a CLI writing to stdout and stderr.
 func New(stdout, stderr io.Writer) *CLI {
-	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now, Stdin: os.Stdin, StdinIsTTY: stdinIsTTY}
+	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now, Stdin: os.Stdin, StdinIsTTY: stdinIsTTY, Signals: notifySignals}
 	c.Say = c.runSay
 	c.NewSynth = productionSynth(c)
 	return c

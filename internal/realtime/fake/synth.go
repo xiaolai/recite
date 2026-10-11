@@ -48,8 +48,9 @@ func Fail(err error) Outcome { return Outcome{Err: err} }
 // RenderCall records one Render.
 type RenderCall struct {
 	Request realtime.RenderRequest
-	Attempt int // 1-based, per chunk ID across all sessions
-	Session int // 1-based session number
+	Attempt int                  // 1-based, per chunk ID across all sessions
+	Session int                  // 1-based session number
+	Spec    realtime.SessionSpec // the spec of the session that rendered it
 }
 
 // ScriptedSynthesizer is a realtime.Synthesizer scripted per chunk ID and attempt. Unscripted
@@ -61,9 +62,15 @@ type ScriptedSynthesizer struct {
 	calls    []RenderCall
 	specs    []realtime.SessionSpec
 	openErrs []error
+	open     int // sessions open now
+	maxOpen  int
 
 	// Default is used when no scripted outcome remains. Zero value: Pass(1s).
 	Default Outcome
+	// Hook, if set, runs at the start of every Render, outside the fake's lock, before the
+	// scripted outcome is chosen. A non-nil error is returned by Render instead (the attempt
+	// still counts). It may block, for latency or stalls, and should honour ctx.
+	Hook func(ctx context.Context, call RenderCall) error
 }
 
 // NewScriptedSynthesizer returns a synthesizer whose default is Pass(1s).
@@ -104,6 +111,20 @@ func (s *ScriptedSynthesizer) Attempts(chunkID string) int {
 	return s.attempts[chunkID]
 }
 
+// OpenNow returns how many sessions are open (opened and not yet closed).
+func (s *ScriptedSynthesizer) OpenNow() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.open
+}
+
+// MaxOpen returns the largest number of sessions that were open at once.
+func (s *ScriptedSynthesizer) MaxOpen() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxOpen
+}
+
 // Opens returns the spec of every Open call, including failed ones.
 func (s *ScriptedSynthesizer) Opens() []realtime.SessionSpec {
 	s.mu.Lock()
@@ -124,12 +145,15 @@ func (s *ScriptedSynthesizer) Open(ctx context.Context, spec realtime.SessionSpe
 		s.openErrs = s.openErrs[1:]
 		return nil, err
 	}
-	return &scriptedSession{s: s, n: len(s.specs)}, nil
+	s.open++
+	s.maxOpen = max(s.maxOpen, s.open)
+	return &scriptedSession{s: s, n: len(s.specs), spec: spec}, nil
 }
 
 type scriptedSession struct {
 	s       *ScriptedSynthesizer
 	n       int
+	spec    realtime.SessionSpec
 	mu      sync.Mutex
 	closed  bool
 	renders int
@@ -153,12 +177,19 @@ func (ss *scriptedSession) Render(ctx context.Context, req realtime.RenderReques
 	s.mu.Lock()
 	s.attempts[req.ChunkID]++
 	attempt := s.attempts[req.ChunkID]
-	s.calls = append(s.calls, RenderCall{Request: req, Attempt: attempt, Session: ss.n})
+	call := RenderCall{Request: req, Attempt: attempt, Session: ss.n, Spec: ss.spec}
+	s.calls = append(s.calls, call)
 	o := s.Default
 	if sc := s.scripts[req.ChunkID]; attempt <= len(sc) {
 		o = sc[attempt-1]
 	}
+	hook := s.Hook
 	s.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx, call); err != nil {
+			return realtime.Take{}, err
+		}
+	}
 	if o.Err != nil {
 		return realtime.Take{}, o.Err
 	}
@@ -188,8 +219,14 @@ func (ss *scriptedSession) Age() time.Duration {
 
 func (ss *scriptedSession) Close() error {
 	ss.mu.Lock()
-	defer ss.mu.Unlock()
+	already := ss.closed
 	ss.closed = true
+	ss.mu.Unlock()
+	if !already {
+		ss.s.mu.Lock()
+		ss.s.open--
+		ss.s.mu.Unlock()
+	}
 	return nil
 }
 

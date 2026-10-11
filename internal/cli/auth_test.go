@@ -29,6 +29,9 @@ func TestMain(m *testing.M) {
 	if target := os.Getenv(publishHelperEnv); target != "" {
 		os.Exit(publishHelper(target)) // a subprocess of TestPublicationSurvivesSIGKILL
 	}
+	if dir := os.Getenv(sigintHelperEnv); dir != "" {
+		os.Exit(sigintHelper(dir)) // a subprocess of TestSIGINTExits130
+	}
 	dir, err := os.MkdirTemp("", "cli-codex-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

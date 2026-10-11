@@ -16,6 +16,8 @@ const (
 	ExitOK       = exitcode.OK
 	ExitInternal = exitcode.Internal
 	ExitUsage    = exitcode.Usage
+
+	ExitInterrupted = exitcode.Interrupted
 )
 
 // command is one entry of the registry. setup registers the command's own

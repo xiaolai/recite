@@ -46,6 +46,9 @@ type DialConfig struct {
 	Secret auth.ClientSecret
 	Route  openai.Route // set on a route-denied handshake refusal
 	Logger *slog.Logger // nil discards
+	// Trace, if set, receives every message as sent or received ("client" or "server"),
+	// before decoding, for the event dumps of OBS-02. It must not keep raw.
+	Trace func(dir string, raw []byte)
 }
 
 // Session is one realtime WebSocket (NET-03): one reader goroutine feeds a
@@ -55,6 +58,7 @@ type Session struct {
 	conn   *websocket.Conn
 	raw    io.Closer // the upgraded connection under conn, nil if not captured
 	logger *slog.Logger
+	trace  func(dir string, raw []byte)
 
 	writeMu sync.Mutex
 
@@ -106,6 +110,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Session, error) {
 		conn:       conn,
 		raw:        capture.conn,
 		logger:     logger,
+		trace:      cfg.Trace,
 		events:     make(chan item),
 		closing:    make(chan struct{}),
 		readerDone: make(chan struct{}),
@@ -129,6 +134,9 @@ func (s *Session) readLoop() {
 				s.readErr = readError(err)
 			}
 			return
+		}
+		if s.trace != nil {
+			s.trace("server", data)
 		}
 		ev, err := DecodeEvent(data)
 		if err == nil {
@@ -194,6 +202,9 @@ func (s *Session) Send(ctx context.Context, event any) error {
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	if s.trace != nil {
+		s.trace("client", b)
+	}
 	if err := s.conn.Write(ctx, websocket.MessageText, b); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

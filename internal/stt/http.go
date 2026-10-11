@@ -30,9 +30,11 @@ const (
 	maxReply           = 16 << 20
 )
 
-// TokenSource yields the ChatGPT bearer; *auth.Credentials implements it.
+// TokenSource yields the ChatGPT bearer and refreshes it after a refusal; *auth.Credentials
+// implements it (AUTH-04).
 type TokenSource interface {
 	Token(ctx context.Context) (auth.Token, error)
+	RefreshAfter(ctx context.Context, stale auth.Token) (auth.Token, error)
 }
 
 // HTTP transcribes a take with one multipart POST /v1/audio/transcriptions (VER-01).
@@ -50,7 +52,8 @@ var _ Transcriber = (*HTTP)(nil)
 
 // Transcribe implements Transcriber. A dropped connection (E26: about one call in fifty) is
 // retried once; every other failure is returned classified, a 401 missing_scope as
-// route-denied on route http-stt.
+// route-denied on route http-stt. An auth-expired refusal refreshes the token once and retries
+// once (design §5.3), as the client-secret mint does.
 func (h *HTTP) Transcribe(ctx context.Context, pcm []byte, hint Hint) (Transcript, error) {
 	if h.Client == nil || h.BaseURL == "" || h.Creds == nil {
 		return Transcript{}, errors.New("stt: HTTP needs a Client, a BaseURL and Creds")
@@ -70,6 +73,17 @@ func (h *HTTP) Transcribe(ctx context.Context, pcm []byte, hint Hint) (Transcrip
 	if err != nil && dropped(err) && ctx.Err() == nil {
 		h.logger().Info("stt: connection dropped; retrying the transcription once", "err", err)
 		t, err = h.post(ctx, tok, body, contentType)
+	}
+	if openai.Classify(err) != openai.ClassAuthExpired {
+		return t, err
+	}
+	fresh, rerr := h.Creds.RefreshAfter(ctx, tok)
+	if rerr != nil {
+		return Transcript{}, rerr
+	}
+	t, err = h.post(ctx, fresh, body, contentType)
+	if openai.Classify(err) == openai.ClassAuthExpired {
+		return Transcript{}, &openai.Error{Class: openai.ClassAuthExpired, Message: "the refreshed ChatGPT sign-in was refused too; run `codex login`", Err: err}
 	}
 	return t, err
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/xiaolai/recite/internal/audio"
@@ -36,8 +38,26 @@ func productionSynth(c *CLI) func(*auth.Credentials) (realtime.Synthesizer, erro
 			Client:  hc,
 			BaseURL: openai.APIBase,
 			Logger:  c.Logger,
+			Dumps:   &realtime.Dumps{Dir: c.globals.DebugDir, StateDir: c.stateDir()},
 		}, nil
 	}
+}
+
+// stateDir is recite's state directory (design §11.3): $XDG_STATE_HOME/recite, else
+// ~/Library/Application Support/recite on macOS and ~/.local/state/recite elsewhere. "" when no
+// home directory is known; a protocol failure then writes no dump.
+func (c *CLI) stateDir() string {
+	if x := c.Getenv("XDG_STATE_HOME"); x != "" {
+		return filepath.Join(x, "recite")
+	}
+	home := c.Getenv("HOME")
+	if home == "" {
+		return ""
+	}
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(home, "Library", "Application Support", "recite")
+	}
+	return filepath.Join(home, ".local", "state", "recite")
 }
 
 // stdinIsTTY reports whether os.Stdin is a terminal (a character device).
@@ -97,6 +117,9 @@ func (c *CLI) runSay(req SayRequest) int {
 		pcm, err := c.render(ctx, creds, spec, input)
 		if err != nil {
 			return err
+		}
+		if c.interrupted() {
+			return nil // withCredentials reports 130; an interrupted run publishes nothing
 		}
 		if err := publishOutput(target, req.Force, func(w io.Writer) error { return audio.Write(w, format, pcm) }); err != nil {
 			return err

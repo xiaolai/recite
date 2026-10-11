@@ -129,44 +129,79 @@ func Adjudicate(ctx context.Context, c Chunk, o Options, render Render, tr stt.T
 	if err := o.validate(c); err != nil {
 		return res, err
 	}
-	limit := o.MaxAttempts
-	if c.RequestLike {
-		limit += o.RequestExtraAttempts
-	}
-	hint := stt.Hint{Languages: text.STTHint(c.Language), Keywords: Keywords(c.Spoken, c.Lexicon)}
-	for n := 1; n <= limit; n++ {
+	for n := 1; ; n++ {
 		take, err := render(ctx, n)
 		if err != nil {
 			return res, fmt.Errorf("chunk %s attempt %d: %w", c.ID, n, err)
 		}
-		a := Attempt{N: n, Status: take.Status}
-		pcm, rej := PreSTT(c, take, o.NoTrim)
-		a.PCM, a.Rejection, a.Eligible = pcm, rej, rej == nil
-		if a.Eligible && o.Mode != ModeOff {
-			if err := verifyTake(ctx, c, o.Mode.Thresholds(), hint, tr, &a, &res.STTCalls); err != nil {
-				return res, fmt.Errorf("chunk %s attempt %d: %w", c.ID, n, err)
-			}
+		a, calls, err := Check(ctx, c, o, n, take, tr)
+		res.STTCalls += calls
+		if err != nil {
+			return res, err
 		}
-		res.Attempts = append(res.Attempts, a)
-		if a.Eligible && o.Mode == ModeOff {
-			// Nothing can verify the take; the guards passed, so it is kept unverified.
-			return res.keep(StateUnverified, n), nil
-		}
-		if a.Eligible && a.Rejection == nil {
-			return res.keep(StateVerified, n), nil
+		if res.Fold(a, o, c) {
+			return res, nil
 		}
 	}
+}
+
+// Limit is the number of renders chunk c may have (TXT-14: one extra for a request-like chunk).
+func (o Options) Limit(c Chunk) int {
+	if c.RequestLike {
+		return o.MaxAttempts + o.RequestExtraAttempts
+	}
+	return o.MaxAttempts
+}
+
+// Validate checks the options against chunk c.
+func (o Options) Validate(c Chunk) error { return o.validate(c) }
+
+// Check judges take n of chunk c: the pre-STT guards, then transcription unless verification is
+// off. It returns the attempt and the number of STT calls made. It is one step of Adjudicate,
+// exposed so a scheduler can render and verify on separate workers (design §10).
+func Check(ctx context.Context, c Chunk, o Options, n int, take realtime.Take, tr stt.Transcriber) (Attempt, int, error) {
+	calls := 0
+	a := Attempt{N: n, Status: take.Status}
+	pcm, rej := PreSTT(c, take, o.NoTrim)
+	a.PCM, a.Rejection, a.Eligible = pcm, rej, rej == nil
+	if a.Eligible && o.Mode != ModeOff {
+		hint := stt.Hint{Languages: text.STTHint(c.Language), Keywords: Keywords(c.Spoken, c.Lexicon)}
+		if err := verifyTake(ctx, c, o.Mode.Thresholds(), hint, tr, &a, &calls); err != nil {
+			return a, calls, fmt.Errorf("chunk %s attempt %d: %w", c.ID, n, err)
+		}
+	}
+	return a, calls, nil
+}
+
+// Fold adds attempt a to r and reports whether adjudication of chunk c is over; when it is, r
+// holds the final verdict.
+func (r *ChunkResult) Fold(a Attempt, o Options, c Chunk) bool {
+	r.ChunkID = c.ID
+	r.Attempts = append(r.Attempts, a)
+	if a.Eligible && o.Mode == ModeOff {
+		// Nothing can verify the take; the guards passed, so it is kept unverified.
+		*r = r.keep(StateUnverified, a.N)
+		return true
+	}
+	if a.Eligible && a.Rejection == nil {
+		*r = r.keep(StateVerified, a.N)
+		return true
+	}
+	if len(r.Attempts) < o.Limit(c) {
+		return false
+	}
 	best := 0
-	for _, a := range res.Attempts {
-		if a.Eligible && (best == 0 || a.Score > res.Attempts[best-1].Score) {
+	for _, a := range r.Attempts {
+		if a.Eligible && (best == 0 || a.Score > r.Attempts[best-1].Score) {
 			best = a.N
 		}
 	}
 	if best == 0 {
-		res.State = StateNoEligible
-		return res, nil
+		r.State = StateNoEligible
+		return true
 	}
-	return res.keep(StateUnverified, best), nil
+	*r = r.keep(StateUnverified, best)
+	return true
 }
 
 func (o Options) validate(c Chunk) error {

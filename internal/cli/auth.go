@@ -7,13 +7,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/openai"
+	"github.com/xiaolai/recite/internal/pipeline"
 )
 
 func setupAuth(_ *flag.FlagSet, c *CLI) func([]string) int {
@@ -159,8 +163,17 @@ func relative(d time.Duration) string {
 // through (AUTH-07): the probe runs first, so no request reaches the API
 // before the login state is known. A non-ready state prints its guide and
 // exits 3; fn's failure is reported by class.
+//
+// SIGINT and SIGTERM are handled as RUN-03 says: the first stops new work and lets in-flight
+// work finish for the drain timeout, the second aborts; either way the run exits 130 and the
+// Codex child is reaped by the deferred Close.
 func (c *CLI) withCredentials(fn func(ctx context.Context, creds *auth.Credentials) error) int {
-	ctx := context.Background()
+	sigs, unsubscribe := c.Signals()
+	defer unsubscribe()
+	intr, ctx, release := pipeline.WatchSignals(context.Background(), sigs, c.DrainTimeout, nil)
+	defer release()
+	c.intr = intr
+	defer func() { c.intr = nil }()
 	st := c.probe(ctx)
 	defer func() { _ = st.Close() }()
 	if g, ok := st.Guide(); ok {
@@ -170,7 +183,26 @@ func (c *CLI) withCredentials(fn func(ctx context.Context, creds *auth.Credentia
 		_, _ = io.WriteString(c.Stderr, logx.Scrub(g.Text()))
 		return st.ExitCode()
 	}
-	return c.reportFailure(fn(ctx, st.Creds))
+	err := fn(ctx, st.Creds)
+	if intr.Interrupted() {
+		if err != nil && openai.Classify(err) != openai.ClassCancelled {
+			c.Logger.Debug("failure during the interrupt", "err", err)
+		}
+		c.errorf("recite: interrupted; no output was written")
+		return ExitInterrupted
+	}
+	return c.reportFailure(err)
+}
+
+// interrupted reports whether the first interrupt has arrived: no new work may start, and no
+// output may be published (RUN-03).
+func (c *CLI) interrupted() bool { return c.intr != nil && c.intr.Interrupted() }
+
+// notifySignals subscribes to SIGINT and SIGTERM.
+func notifySignals() (<-chan os.Signal, func()) {
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	return ch, func() { signal.Stop(ch) }
 }
 
 // reportFailure prints err for the user and returns its exit code. Messages
