@@ -11,6 +11,7 @@ import (
 
 // Report is everything the calibration report states.
 type Report struct {
+	Title      string // the run, after the date; "VER-07 mini calibration" when empty
 	Date       time.Time
 	Source     string // the corpus and where it comes from
 	Seed       uint64
@@ -22,6 +23,12 @@ type Report struct {
 
 // ReportName is the report's file name for date: calibration-YYYYMMDD.md.
 func ReportName(date time.Time) string { return "calibration-" + date.Format("20060102") + ".md" }
+
+// ScriptReportName is the report's file name for date and one script of the full calibration
+// (VER-11): calibration-YYYYMMDD-<script>.md, so each script's verdict stands in its own report.
+func ScriptReportName(date time.Time, sc Script) string {
+	return "calibration-" + date.Format("20060102") + "-" + string(sc) + ".md"
+}
 
 // WriteReport writes the markdown report: method, human labels, per-type results with Wilson
 // 95% intervals, the said guard's catch rate, construction-vs-human disagreements and the
@@ -38,7 +45,11 @@ func WriteReport(w io.Writer, r Report) error {
 		verdict = "FAIL: " + strings.TrimPrefix(err.Error(), ErrCriteria.Error()+": ")
 	}
 
-	p("# Verifier calibration, %s (VER-07 mini calibration)\n\n", r.Date.Format("2006-01-02"))
+	title := r.Title
+	if title == "" {
+		title = "VER-07 mini calibration"
+	}
+	p("# Verifier calibration, %s (%s)\n\n", r.Date.Format("2006-01-02"), title)
 	p("**Held-out verdict: %s**\n\n", verdict)
 	p("## Method\n\n")
 	p("- Corpus: %s.\n", r.Source)

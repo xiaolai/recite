@@ -46,18 +46,27 @@ func ReadPassages(r io.Reader) ([]string, error) {
 // applies to, no passage edited twice the same way). IDs are assigned in a seeded shuffle.
 // The same inputs always give the same samples.
 func Build(passages []string, good, corrupted int, seed uint64) ([]Sample, error) {
+	return BuildScript(Latin, passages, good, corrupted, seed)
+}
+
+// BuildScript is Build for a corpus of script sc. A sample's Original and Rendered are the
+// text as rendered: a Han passage without its word-segmenting spaces.
+func BuildScript(sc Script, passages []string, good, corrupted int, seed uint64) ([]Sample, error) {
+	if _, err := ParseScript(string(sc)); err != nil {
+		return nil, err
+	}
 	if good < 0 || corrupted < 0 || good > len(passages) {
 		return nil, fmt.Errorf("calibrate: %d good candidates from %d passages", good, len(passages))
 	}
 	rng := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
 	var out []Sample
 	for i := range good {
-		out = append(out, Sample{Passage: i, Kind: Good, Original: passages[i], Rendered: passages[i]})
+		out = append(out, Sample{Passage: i, Kind: Good, Original: sc.text(passages[i]), Rendered: sc.text(passages[i])})
 	}
 	used := map[[2]any]bool{}
 	for j := range corrupted {
 		k := Corruptions[j%len(Corruptions)]
-		s, err := corruptOne(passages, k, rng, used)
+		s, err := corruptOne(sc, passages, k, rng, used)
 		if err != nil {
 			return nil, fmt.Errorf("calibrate: candidate %d: %w", j+1, err)
 		}
@@ -71,12 +80,12 @@ func Build(passages []string, good, corrupted int, seed uint64) ([]Sample, error
 	return out, nil
 }
 
-func corruptOne(passages []string, k Kind, rng *rand.Rand, used map[[2]any]bool) (Sample, error) {
+func corruptOne(sc Script, passages []string, k Kind, rng *rand.Rand, used map[[2]any]bool) (Sample, error) {
 	for _, p := range rng.Perm(len(passages)) {
 		if used[[2]any{p, k}] {
 			continue
 		}
-		edited, err := Corrupt(passages[p], k, rng)
+		edited, err := CorruptScript(sc, passages[p], k, rng)
 		if errors.Is(err, ErrNotApplicable) {
 			continue
 		}
@@ -84,7 +93,7 @@ func corruptOne(passages []string, k Kind, rng *rand.Rand, used map[[2]any]bool)
 			return Sample{}, err
 		}
 		used[[2]any{p, k}] = true
-		return Sample{Passage: p, Kind: k, Original: passages[p], Rendered: edited}, nil
+		return Sample{Passage: p, Kind: k, Original: sc.text(passages[p]), Rendered: edited}, nil
 	}
 	return Sample{}, fmt.Errorf("%s: no passage left that it applies to", k)
 }
@@ -120,3 +129,10 @@ func Split(samples []Sample, seed uint64) (propose, heldOut []Sample) {
 }
 
 func byID(a, b Sample) int { return strings.Compare(a.ID, b.ID) }
+
+// The full calibration's size per script (VER-11): with the 60/40 split stratified by kind,
+// 24 good and 4 of each of the six corruptions are held out, 48 clips to label.
+const (
+	FullGood      = 60
+	FullCorrupted = 60
+)

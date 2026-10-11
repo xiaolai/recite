@@ -18,10 +18,13 @@ const (
 
 // WriteLabelsTemplate writes the file the listener fills: for each held-out clip, a comment
 // with the passage it should say, then its ID and a blank label. Nothing in it reveals how a
-// clip was constructed.
-func WriteLabelsTemplate(w io.Writer, heldOut []Sample, clipDir string) error {
+// clip was constructed. run names the calibration in the header; "" is VER-07's mini run.
+func WriteLabelsTemplate(w io.Writer, heldOut []Sample, clipDir, run string) error {
+	if run == "" {
+		run = "VER-07"
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# recite calibration labels (VER-07)\n")
+	fmt.Fprintf(&b, "# recite calibration labels (%s)\n", run)
 	fmt.Fprintf(&b, "# Play each clip <id>.wav in %s and compare it with the passage above its line.\n", clipDir)
 	fmt.Fprintf(&b, "# After the id write \"good\" if the audio says the passage exactly, \"bad\" otherwise.\n")
 	fmt.Fprintf(&b, "# Lines starting with # are ignored.\n")

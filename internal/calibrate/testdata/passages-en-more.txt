@@ -1,0 +1,43 @@
+# Calibration corpus, English, continued (VER-11, Latin script). The full Latin run reads
+# passages-en.txt and then this file, so its first 60 passages are the good candidates.
+# passages-en.txt stays as the VER-07 mini run used it: its bytes are that run's evidence identity.
+# Written for this project and quoted from nowhere; each passage has a name, a number and a clause.
+# One passage per line. Do not reorder.
+The lighthouse keeper at Gannet Point, a widower called Osric Penhale, painted the stairs a different colour every spring for twenty years.
+When the fair came to Mardle Green, the twins spent all eight of their pennies on the first stall and spent the rest of the day watching everyone else.
+Wilhelmina Strand kept bees on the roof of the post office, and the postmaster claimed the letters arrived sweeter in the summer months.
+The night train to Harrowgate stopped at four small stations, but the guard, a cheerful man named Fennick, announced each one as if it were a capital city.
+Old Mrs Tolley at Linden Row baked nine loaves every Friday, though she lived alone and never once explained who ate the other eight.
+The quarry above Stenbury closed in the long winter of that year, and the men who had cut stone for thirty years learned to cut hedges instead.
+Barnaby Quill wrote the parish newsletter for eleven years, and in all that time he printed only one correction, which was itself mistaken.
+The well in the square at Ormsby never froze, even in the hardest frost, and the children believed a warm river ran somewhere far beneath it.
+At the end of every term, the headmistress of Coldharbour School read out the names of all sixty pupils, and she never needed to look at a list.
+Jonas Merriwether bought the derelict cinema on Station Road for five hundred pounds, and for a decade he showed the same three films in rotation.
+The tide at Saltmarsh came in faster than strangers expected, and the coastguard rescued at least two picnics a summer from the rising water.
+Rosalind Thackeray grew roses for the county show, and she won second prize twelve years running, always behind the same quiet neighbour.
+The bakery on Fuller Street opened at five, but the queue began forming at half past four, because the first tray of buns was always the best.
+Every autumn the geese flew over Hollins Moor in their thousands, and the shepherd, a man named Corwen, stopped work to count them from the ridge.
+The postbox at Ditchley Corner was emptied twice a day, though nobody could remember the last time anyone had actually posted a letter in it.
+Mabel Fairweather taught the village choir for forty years, and she said the secret of good singing was to listen harder than you sang.
+The canal boat called the Patient Heron carried coal to Wexford Basin for half a century, and it was never once late, though it was never early.
+On the coldest night of the winter, the pub at Brackenford stayed open until dawn, and seven travellers slept beside its fire on the stone floor.
+Lucian Abernathy repaired violins in a workshop above the chemist, and he claimed that every instrument told him what was wrong with it.
+The clock on the town hall at Penmorrow ran ten minutes slow, and the council decided it was cheaper to change the train timetable than the clock.
+Ivy Coulthard walked her three dogs along the cliff path every morning, and the dogs knew the way so well that she sometimes simply followed them.
+The cricket ground at Ashby Parva flooded every spring, and the club played its first six matches of the season on the vicarage lawn instead.
+Ambrose Tull sold umbrellas from a cart on Market Hill, and in a dry year he sold sunshades from the same cart without changing the sign.
+The ferryman at Rookwater charged one penny to cross the river and two to come back, because, he said, the return journey was uphill.
+Clementine Ashdown learned Latin at seventy, and by eighty she was correcting the inscriptions on half the gravestones in the churchyard.
+The stationmaster at Little Hembury grew tomatoes along the platform, and passengers on the slow train were allowed to pick one each in August.
+Gideon Farrow kept a diary for fifty years, and when his grandson finally read it, he found that every single entry began with the weather.
+The village of Thornleigh had one telephone, kept in the shop, and when it rang the shopkeeper ran into the street to shout the caller's name.
+Agatha Moorcroft swam in the lake at Elderwater every morning of the year, and in January she broke the ice herself with a garden spade.
+The orchestra at Kingsbridge rehearsed in a barn, and the cows in the next field grew so calm that the farmer offered to pay the violinists.
+Percival Dunne ran the lending library at Woolcombe for thirty years, and he could tell you who had borrowed any book by the smell of its pages.
+The road over Ravenscar Pass closed every December, and the four farms beyond it laid in flour, candles and patience until the spring.
+Winifred Hale made jam from the brambles along the railway line, and she sold every jar to the driver of the nine o'clock goods train.
+The church at Upper Sedley had a weathervane shaped like a fish, and the old men swore it pointed toward rain more truly than any forecast.
+Cornelius Webb built model ships inside bottles, and after fifteen years he had filled every windowsill in the cottage and started on the stairs.
+The harbour at Polgarra froze only once in living memory, and the fishermen still argue about whether anybody really walked across it.
+Hester Lindqvist ran the telephone exchange at Grindley for twenty-six years, and she knew every secret in the valley and kept every one.
+The old mill race at Stowford still ran, though the mill had gone, and the children floated paper boats down it to a pool beneath the willows.

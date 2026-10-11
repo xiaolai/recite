@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Kind is how a candidate was constructed: the original passage or one corruption of it.
@@ -90,8 +91,9 @@ func split(w string) (lead, core, trail string) {
 	if i < 0 {
 		return w, "", ""
 	}
-	j := strings.LastIndexFunc(w, isWordRune) + 1
-	return w[:i], w[i:j], w[j:]
+	j := strings.LastIndexFunc(w, isWordRune)
+	_, n := utf8.DecodeRuneInString(w[j:])
+	return w[:i], w[i : j+n], w[j+n:]
 }
 
 func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' }
@@ -151,11 +153,13 @@ func wordSwap(w []string, rng *rand.Rand) ([]string, error) {
 	return out, nil
 }
 
-// clauseDrop removes one clause other than the first; clauses end at a comma or semicolon.
+// clauseDrop removes one clause other than the first; clauses end at a comma or semicolon
+// (Latin or Chinese).
 func clauseDrop(w []string, rng *rand.Rand) ([]string, error) {
 	var bounds []int // end index (exclusive) of each clause
 	for i, x := range w {
-		if strings.HasSuffix(x, ",") || strings.HasSuffix(x, ";") || i == len(w)-1 {
+		if strings.HasSuffix(x, ",") || strings.HasSuffix(x, ";") || strings.HasSuffix(x, "，") ||
+			strings.HasSuffix(x, "；") || i == len(w)-1 {
 			bounds = append(bounds, i+1)
 		}
 	}
@@ -169,7 +173,7 @@ func clauseDrop(w []string, rng *rand.Rand) ([]string, error) {
 		// The last clause went: its final punctuation replaces the previous clause's comma.
 		_, _, trail := split(w[end-1])
 		last := out[len(out)-1]
-		out[len(out)-1] = strings.TrimRight(last, ",;") + trail
+		out[len(out)-1] = strings.TrimRight(last, ",;，；") + trail
 	}
 	return out, nil
 }

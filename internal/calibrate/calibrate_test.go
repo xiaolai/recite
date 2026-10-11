@@ -316,10 +316,20 @@ func TestShardFitsBudget(t *testing.T) {
 func TestLabelsTemplateAndParse(t *testing.T) {
 	held := []calibrate.Sample{{ID: "s01", Kind: calibrate.Good, Original: "A passage."}, {ID: "s02", Kind: calibrate.WordSwap, Original: "Another passage."}}
 	var b bytes.Buffer
-	if err := calibrate.WriteLabelsTemplate(&b, held, "/clips"); err != nil {
+	if err := calibrate.WriteLabelsTemplate(&b, held, "/clips", ""); err != nil {
 		t.Fatal(err)
 	}
 	tpl := b.String()
+	if !strings.HasPrefix(tpl, "# recite calibration labels (VER-07)\n") {
+		t.Fatalf("mini-run header:\n%s", tpl)
+	}
+	var full bytes.Buffer
+	if err := calibrate.WriteLabelsTemplate(&full, held, "/clips", "VER-11 full calibration, han"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(full.String(), "# recite calibration labels (VER-11 full calibration, han)\n") {
+		t.Fatalf("full-run header:\n%s", full.String())
+	}
 	if strings.Contains(tpl, string(calibrate.WordSwap)) || !strings.Contains(tpl, "# s02: Another passage.") {
 		t.Fatalf("template:\n%s", tpl)
 	}

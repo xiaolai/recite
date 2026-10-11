@@ -3,6 +3,7 @@
 package calibrate_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -29,11 +30,57 @@ import (
 // liveBudget is the per-invocation audio cap of `make calibrate` (implementation plan §1.4).
 const liveBudget = 30 * time.Minute
 
-const source = "internal/calibrate/testdata/passages-en.txt: 22 passages written for this project, " +
-	"so the model cannot read any of them from memory"
+// run is one calibration run the live tests serve: VER-07's mini run by default, or one script
+// of VER-11's full calibration when RECITE_CALIBRATE_SCRIPT is latin or han.
+type run struct {
+	script          calibrate.Script
+	files           []string // the corpus, read in order
+	good, corrupted int
+	heldOut         int
+	title, source   string
+	dirPrefix       string
+	reportName      func(time.Time) string
+	acceptCriterion string
+}
 
-// mini is the VER-07 mini calibration: its samples, split, tasks and result directory.
+func selected(t *testing.T) run {
+	t.Helper()
+	name := os.Getenv("RECITE_CALIBRATE_SCRIPT")
+	if name == "" {
+		// The VER-07 mini run: its corpus, sizes and result directory are its evidence identity.
+		return run{
+			script: calibrate.Latin, files: []string{"testdata/passages-en.txt"}, good: 20, corrupted: 20, heldOut: 16,
+			source: "internal/calibrate/testdata/passages-en.txt: 22 passages written for this project, " +
+				"so the model cannot read any of them from memory",
+			dirPrefix: "ver07", reportName: calibrate.ReportName, acceptCriterion: "VER-07#3",
+		}
+	}
+	sc, err := calibrate.ParseScript(name)
+	if err != nil {
+		t.Fatalf("RECITE_CALIBRATE_SCRIPT: %v", err)
+	}
+	r := run{
+		script: sc, good: calibrate.FullGood, corrupted: calibrate.FullCorrupted, heldOut: 48,
+		title:     "VER-11 full calibration, " + string(sc),
+		dirPrefix: "ver11-" + string(sc), acceptCriterion: "VER-11#1",
+		reportName: func(d time.Time) string { return calibrate.ScriptReportName(d, sc) },
+	}
+	switch sc {
+	case calibrate.Latin:
+		r.files = []string{"testdata/passages-en.txt", "testdata/passages-en-more.txt"}
+		r.source = "internal/calibrate/testdata/passages-en.txt then passages-en-more.txt: 60 English passages " +
+			"written for this project, so the model cannot read any of them from memory"
+	case calibrate.Han:
+		r.files = []string{"testdata/passages-zh.txt"}
+		r.source = "internal/calibrate/testdata/passages-zh.txt: 62 Chinese passages written for this project, " +
+			"so the model cannot read any of them from memory"
+	}
+	return r
+}
+
+// mini is a calibration run's samples, split, tasks and result directory.
 type mini struct {
+	run
 	samples, propose, heldOut []calibrate.Sample
 	tasks                     []pipeline.Task
 	shards                    [][]pipeline.Task
@@ -43,23 +90,32 @@ type mini struct {
 
 func setup(t *testing.T) mini {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/passages-en.txt")
+	m := mini{run: selected(t)}
+	var raw, passages []byte
+	for _, name := range m.files {
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw = append(raw, b...)
+		passages = append(append(passages, b...), '\n')
+	}
+	corpus, err := calibrate.ReadPassages(bytes.NewReader(passages))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m mini
-	if m.samples, err = calibrate.Build(corpus(t), 20, 20, seed); err != nil {
+	if m.samples, err = calibrate.BuildScript(m.script, corpus, m.good, m.corrupted, seed); err != nil {
 		t.Fatal(err)
 	}
 	m.propose, m.heldOut = calibrate.Split(m.samples, seed)
-	if len(m.heldOut) != 16 {
-		t.Fatalf("%d held-out clips, want 16", len(m.heldOut))
+	if len(m.heldOut) != m.run.heldOut {
+		t.Fatalf("%d held-out clips, want %d", len(m.heldOut), m.run.heldOut)
 	}
 	if m.spec, err = realtime.DefaultSettings().SessionSpec(); err != nil {
 		t.Fatal(err)
 	}
 	spokenForm := func(s string) (string, error) {
-		r, err := spoken.Normalize(s, "en", spoken.Options{})
+		r, err := spoken.Normalize(s, m.script.Language(), spoken.Options{})
 		return r.Spoken, err
 	}
 	if m.tasks, err = calibrate.Tasks(m.samples, m.spec, spokenForm); err != nil {
@@ -71,8 +127,13 @@ func setup(t *testing.T) mini {
 		}
 	}
 	m.shards = calibrate.Shard(m.tasks, liveBudget)
-	sum := sha256.Sum256(append(raw, strconv.Itoa(seed)...))
-	m.dir = filepath.Join(os.TempDir(), "recite-live", fmt.Sprintf("ver07-%x", sum[:6]))
+	// VER-07's identity is its corpus bytes and the seed; a VER-11 script adds its name.
+	id := append(raw, strconv.Itoa(seed)...)
+	if m.dirPrefix != "ver07" {
+		id = append(id, m.script...)
+	}
+	sum := sha256.Sum256(id)
+	m.dir = filepath.Join(os.TempDir(), "recite-live", fmt.Sprintf("%s-%x", m.dirPrefix, sum[:6]))
 	return m
 }
 
@@ -87,10 +148,11 @@ func (m mini) labelsFile() string {
 	return filepath.Join(m.dir, "labels.txt")
 }
 
-// Step 1 renders the 40 candidates once each, with the said guard bypassed, and writes every
-// take's WAV under an anonymised ID (held-out clips in clips/, the rest in propose/), the
+// Step 1 renders the run's candidates (VER-07: 40; VER-11: 120 per script) once each, with
+// the said guard bypassed, and writes every take's WAV under an anonymised ID (held-out clips in clips/, the rest in propose/), the
 // records, and the labels template for the owner. A shard already recorded is not rendered
-// again. It spends real usage: make calibrate (RECITE_SHARD=k when there is more than one shard).
+// again. It spends real usage: make calibrate (RECITE_SHARD=k when there is more than one shard;
+// RECITE_CALIBRATE_SCRIPT=latin or han selects a script of the full calibration).
 func TestCalibrateRender(t *testing.T) {
 	m := setup(t)
 	if os.Getenv("RECITE_LIVE") == "" {
@@ -130,7 +192,7 @@ func TestCalibrateRender(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := calibrate.WriteLabelsTemplate(f, m.heldOut, filepath.Join(m.dir, "clips")); err != nil {
+		if err := calibrate.WriteLabelsTemplate(f, m.heldOut, filepath.Join(m.dir, "clips"), m.title); err != nil {
 			t.Fatal(err)
 		}
 		if err := f.Close(); err != nil {
@@ -218,11 +280,12 @@ func renderShard(t *testing.T, m mini, k int, held map[string]bool) {
 	}
 }
 
-// Step 2 reads the records and the owner's labels, writes dev-docs/calibration-YYYYMMDD.md and
-// applies the held-out criteria. It fails until every held-out clip is labelled.
+// Step 2 reads the records and the owner's labels, writes dev-docs/calibration-YYYYMMDD.md
+// (VER-11: calibration-YYYYMMDD-<script>.md, one per script) and applies the held-out criteria. It fails until every held-out clip is labelled.
 //
 // accept: VER-07#2
 // accept: VER-07#3
+// accept: VER-11#1
 func TestCalibrateReport(t *testing.T) {
 	m := setup(t)
 	var recs []calibrate.Record
@@ -269,14 +332,14 @@ func TestCalibrateReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	path := filepath.Join("..", "..", "dev-docs", calibrate.ReportName(now))
+	path := filepath.Join("..", "..", "dev-docs", m.reportName(now))
 	out, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	opts := calibrate.Options(verify.DefaultOptions())
 	err = calibrate.WriteReport(out, calibrate.Report{
-		Date: now, Source: source, Seed: seed, Mode: opts.Mode, Thresholds: opts.Mode.Thresholds(),
+		Title: m.title, Date: now, Source: m.source, Seed: seed, Mode: opts.Mode, Thresholds: opts.Mode.Thresholds(),
 		Propose: propose, HeldOut: ev,
 	})
 	if cerr := out.Close(); err == nil {
@@ -287,6 +350,6 @@ func TestCalibrateReport(t *testing.T) {
 	}
 	t.Logf("report written to %s; %d construction-vs-human disagreements", path, len(ev.Disagreements()))
 	if err := ev.Check(); err != nil {
-		t.Fatalf("VER-07#3: %v", err)
+		t.Fatalf("%s: %v", m.acceptCriterion, err)
 	}
 }
