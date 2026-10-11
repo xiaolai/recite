@@ -1,0 +1,2 @@
+go test fuzz v1
+string("İstanbul ﬁ ½ ² 1e10 9999999999999999999")

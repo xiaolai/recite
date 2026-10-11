@@ -1,0 +1,2 @@
+go test fuzz v1
+string("四十二 一千二百八十 两万 一九九九年")
