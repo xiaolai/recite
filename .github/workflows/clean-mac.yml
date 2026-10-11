@@ -1,0 +1,86 @@
+name: clean-mac
+
+# REL-02#3: a macOS runner that has never built recite and holds no Developer ID downloads a
+# published release, marks the binary as a browser download, and runs it. Gatekeeper must
+# accept it as notarised. scripts/publish-release.sh dispatches this after each release:
+#   gh workflow run clean-mac.yml --repo xiaolai/recite -f version=vX.Y.Z
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to check, e.g. v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gatekeeper:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ inputs.version }}
+      ARCHIVE: recite-darwin-${{ matrix.arch }}.tar.gz
+    steps:
+      - name: validate the version input
+        run: |
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must look like v1.2.3, got: $VERSION" >&2
+            exit 1
+          fi
+      - name: download the release archive and SHA256SUMS without a token
+        run: |
+          base="https://github.com/xiaolai/recite/releases/download/${VERSION}"
+          curl --fail --silent --show-error --location --retry 5 -o "$ARCHIVE" "${base}/${ARCHIVE}"
+          curl --fail --silent --show-error --location --retry 5 -o SHA256SUMS "${base}/SHA256SUMS"
+      - name: verify the checksum
+        run: |
+          line="$(awk -v f="$ARCHIVE" '$2 == f' SHA256SUMS)"
+          test -n "$line"
+          printf '%s\n' "$line" > archive.sum
+          shasum -a 256 -c archive.sum
+      - name: extract and mark the binary as a browser download
+        run: |
+          tar -xzf "$ARCHIVE" recite
+          xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;$(uuidgen)" recite
+          xattr -p com.apple.quarantine recite
+      - name: the quarantined binary runs and reports the release version
+        run: |
+          out="$(./recite version)"
+          printf '%s\n' "$out"
+          first="$(head -n 1 <<<"$out")"
+          if [ "$first" != "recite ${VERSION}" ]; then
+            echo "first line is '$first', want 'recite ${VERSION}'" >&2
+            exit 1
+          fi
+      - name: the signature is valid with the hardened runtime
+        run: |
+          codesign --verify --strict --verbose=2 recite
+          sig="$(codesign -dvvv recite 2>&1)"
+          printf '%s\n' "$sig"
+          if ! grep -Eq 'flags=0x[0-9a-f]+\(runtime\)' <<<"$sig"; then
+            echo "no hardened runtime flag" >&2
+            exit 1
+          fi
+      - name: Gatekeeper accepts it as notarised
+        run: |
+          assessment="$(spctl -a -vvv -t install recite 2>&1)"
+          printf '%s\n' "$assessment"
+          if ! grep -Fq 'source=Notarized Developer ID' <<<"$assessment"; then
+            echo "Gatekeeper does not report a notarised Developer ID" >&2
+            exit 1
+          fi

@@ -5,7 +5,8 @@
 #
 #   RECITE_LIVE=1 scripts/release-check.sh
 #
-#   RECITE_BIN  the binary to check (default: dist/recite-<GOOS>-<GOARCH> from make release)
+#   DIST        the build directory the report and logs go to (default: dist)
+#   RECITE_BIN  the binary to check (default: $DIST/recite-<GOOS>-<GOARCH> from make release)
 #
 # Steps: doctor --deep; English, Chinese and Markdown samples; three effort levels; one
 # compressed format (m4a); a transcription round-trip (the live tests that render with the
@@ -19,7 +20,8 @@ fi
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
-bin="${RECITE_BIN:-dist/recite-$(go env GOOS)-$(go env GOARCH)}"
+dist="${DIST:-dist}"
+bin="${RECITE_BIN:-${dist}/recite-$(go env GOOS)-$(go env GOARCH)}"
 if [ ! -x "$bin" ]; then
 	echo "release-check.sh: ${bin} is not an executable; run make release or set RECITE_BIN" >&2
 	exit 2
@@ -27,8 +29,8 @@ fi
 # The round-trip test runs in its package directory, so it gets the binary by absolute path.
 abs_bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-work="dist/release-check-${stamp}"
-report="dist/release-check-${stamp}.md"
+work="${dist}/release-check-${stamp}"
+report="${dist}/release-check-${stamp}.md"
 mkdir -p -- "$work"
 
 cat >"${work}/en.txt" <<'TEXT'
