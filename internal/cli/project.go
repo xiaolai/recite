@@ -241,6 +241,10 @@ func resolveExisting(p string) (string, error) {
 		if !errors.Is(err, fs.ErrNotExist) {
 			return "", err
 		}
+		// A link to nothing cannot be resolved, so it cannot be shown to stay inside.
+		if fi, lerr := os.Lstat(p); lerr == nil && fi.Mode()&fs.ModeSymlink != 0 {
+			return "", fmt.Errorf("%s is a dangling symbolic link", p)
+		}
 		parent := filepath.Dir(p)
 		if parent == p {
 			return "", err
