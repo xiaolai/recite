@@ -152,6 +152,8 @@ type Summary struct {
 type Chunk struct {
 	ID           string          `json:"id"`
 	Section      *string         `json:"section"`
+	Speaker      *string         `json:"speaker"` // the script speaker (TXT-06); null outside a script
+	Voice        string          `json:"voice"`   // the voice the chunk was rendered with (SPK-09)
 	TextSHA256   string          `json:"text_sha256"`
 	SpokenSHA256 string          `json:"spoken_sha256"`
 	Chars        int             `json:"chars"`
@@ -263,10 +265,13 @@ func Build(r Run) (Manifest, error) {
 	}
 	for i, pc := range r.Plan.Chunks {
 		c := Chunk{
-			ID: pc.ID, TextSHA256: sha(pc.Display), SpokenSHA256: sha(pc.Spoken),
+			ID: pc.ID, Voice: pc.Voice, TextSHA256: sha(pc.Display), SpokenSHA256: sha(pc.Spoken),
 			Chars: utf8.RuneCountInString(pc.Display), Lang: string(pc.Script),
 			Findings: make([]Finding, len(pc.Findings)), RequestLike: r.Tasks[i].Chunk.RequestLike,
 			GapType: string(pc.Gap), CacheKey: pc.CacheKey, State: "pending", AttemptLog: []AttemptRecord{},
+		}
+		if pc.Speaker != "" {
+			c.Speaker = &pc.Speaker
 		}
 		for k, f := range pc.Findings {
 			c.Findings[k] = Finding(f)

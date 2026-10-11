@@ -66,6 +66,8 @@ type CheckPlan struct {
 // CheckChunk is one planned chunk.
 type CheckChunk struct {
 	ID       string   `json:"id"`
+	Speaker  string   `json:"speaker,omitempty"` // a script line's speaker (TXT-06)
+	Voice    string   `json:"voice,omitempty"`   // set with Speaker
 	EstMS    int64    `json:"est_ms"`
 	Boundary string   `json:"boundary"`
 	Display  string   `json:"display"`
@@ -102,7 +104,7 @@ func setupCheck(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite check: takes exactly one FILE (- for stdin)")
 			return ExitUsage
 		}
-		pre, code := c.prereadMarkdown("recite check", &tf, text.Source{File: args[0], Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, args[0])
+		pre, code := c.prereadFrontMatter("recite check", &tf, text.Source{File: args[0], Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, args[0])
 		if code != ExitOK {
 			return code
 		}
@@ -128,7 +130,12 @@ func setupCheck(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite check: %v", err)
 			return ExitUsage
 		}
-		in := textInput{format: format, markdown: md, lang: st.Get(langKey).Raw, preread: pre}
+		voices, err := voicesOf(st)
+		if err != nil {
+			c.errorf("recite check: %v", err)
+			return ExitUsage
+		}
+		in := textInput{format: format, markdown: md, lang: st.Get(langKey).Raw, voices: voices, directives: tf.directives, preread: pre}
 		return c.runCheck(args[0], tf, in, g, so, sp)
 	}
 }
@@ -313,8 +320,12 @@ func fillPlan(rep *CheckReport, plan pipeline.Plan, seg text.Segmentation) {
 			rep.RequestLike = append(rep.RequestLike, ch.ID)
 		}
 		ms += ch.EstMillis
-		rep.Plan.Items = append(rep.Plan.Items, CheckChunk{ID: ch.ID, EstMS: ch.EstMillis, Boundary: string(ch.Boundary),
-			Display: ch.Display, Spoken: ch.Spoken, Findings: codes})
+		item := CheckChunk{ID: ch.ID, EstMS: ch.EstMillis, Boundary: string(ch.Boundary),
+			Display: ch.Display, Spoken: ch.Spoken, Findings: codes}
+		if ch.Speaker != "" {
+			item.Speaker, item.Voice = ch.Speaker, ch.Voice
+		}
+		rep.Plan.Items = append(rep.Plan.Items, item)
 	}
 	for _, w := range seg.Warnings {
 		rep.Plan.Warnings = append(rep.Plan.Warnings, CheckSegWarn{Code: w.Code, Chunk: plan.Chunks[w.Chunk].ID,

@@ -29,6 +29,9 @@ lang = "fr"
 style = "Unhurried, warm."
 [lexicon]
 "SQL" = { say = "sequel" }
+[voices]
+HOST = "cedar"
+GUEST = { voice = "marin", style = "warm, curious" }
 +++
 # Field notes
 
@@ -61,6 +64,7 @@ func TestConfigShowFrontMatter(t *testing.T) {
 		{Key: "lang", Value: "fr", Layer: "front matter", Origin: doc + ":6"},
 		{Key: "style", Value: "Unhurried, warm.", Layer: "front matter", Origin: doc + ":7"},
 		{Key: "lexicon", Value: `{"SQL":{"say":"sequel"}}`, Layer: "front matter", Origin: doc + ":8"},
+		{Key: "voices", Value: `{"GUEST":{"voice":"marin","style":"warm, curious"},"HOST":{"voice":"cedar"}}`, Layer: "front matter", Origin: doc + ":10"},
 		{Key: "effort", Value: "medium", Layer: "env", Origin: "RECITE_EFFORT"},
 	} {
 		if got[want.Key] != want {
@@ -100,12 +104,14 @@ func TestFrontMatterReachesSay(t *testing.T) {
 
 func TestFrontMatterErrorsExit2(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
-		{"+++\njobs = 4\n+++\nHi.\n", `notes.md:2: key "jobs" cannot be set in front matter (allowed: title, voice, effort, speed, style, lang, lexicon)`},
+		{"+++\njobs = 4\n+++\nHi.\n", `notes.md:2: key "jobs" cannot be set in front matter (allowed: title, voice, voices, effort, speed, style, lang, lexicon)`},
 		{"+++\nstyle = \"warm\\nsad\"\n+++\nHi.\n", `notes.md:2: style:`},
 		{"+++\nemotion = \"warm\"\n+++\nHi.\n", `key "emotion" cannot be set in front matter`},
 		{"+++\nlexicon = \"SQL\"\n+++\nHi.\n", `notes.md:2: lexicon: want a table, not a string`},
 		{"+++\n[lexicon]\nSQL = { say = \"sequel\", hint = \"x\" }\n+++\nHi.\n", `set exactly one of say and hint`},
-		{"+++\nvoices = {}\n+++\nHi.\n", `key "voices" is not supported by this version`},
+		{"+++\n[voices]\nHOST = \"nobody\"\n+++\nHi.\n", `notes.md:2: voices: speaker "HOST": unknown voice "nobody"`},
+		{"+++\n[voices]\n\"TWO WORDS\" = \"cedar\"\n+++\nHi.\n", `speaker "TWO WORDS": want 1 to 32 letters`},
+		{"+++\n[voices]\nHOST = { voice = \"cedar\", mood = \"x\" }\n+++\nHi.\n", `unknown field "mood"`},
 		{"+++\n\nvoice = \"nobody\"\n+++\nHi.\n", `notes.md:3: voice:`},
 		{"+++\nlang = \"???\"\n+++\nHi.\n", `want a BCP 47 language tag`},
 		{"+++\nvoice = \"marin\"\nHi.\n", "never closed"},

@@ -1,0 +1,155 @@
+{
+  "Lines": [
+    {
+      "Speaker": "NARRATOR",
+      "Direction": "quietly",
+      "Text": "It was a little after two in the morning when the lights on the third floor came back on."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "",
+      "Text": "Welcome back to the show."
+    },
+    {
+      "Speaker": "GUEST",
+      "Direction": "amused",
+      "Text": "Thanks for having me. It is late, though."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "",
+      "Text": "It is. Let's begin with the night itself."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "",
+      "Text": "You were the only one in the building that night."
+    },
+    {
+      "Speaker": "GUEST",
+      "Direction": "",
+      "Text": "I was. Or I thought I was, anyway."
+    },
+    {
+      "Speaker": "GUEST",
+      "Direction": "hesitant",
+      "Text": "Then the elevator started moving on its own."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "",
+      "Text": "What did you do?"
+    },
+    {
+      "Speaker": "GUEST",
+      "Direction": "",
+      "Text": "I waited.  And then I took the stairs."
+    },
+    {
+      "Speaker": "NARRATOR",
+      "Direction": "",
+      "Text": "The stairwell was cold, and the door at the top was already open."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "serious",
+      "Text": "Did you call anyone?"
+    },
+    {
+      "Speaker": "GUEST",
+      "Direction": "",
+      "Text": "Not right away. I wanted to see it for myself first."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "",
+      "Text": "And what did you see?"
+    },
+    {
+      "Speaker": "GUEST",
+      "Direction": "",
+      "Text": "Nothing at all. That was the strange part."
+    },
+    {
+      "Speaker": "NARRATOR",
+      "Direction": "slowly",
+      "Text": "By morning, the lights were off again, and the elevator stood still on the ground floor."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "",
+      "Text": "Thank you for telling us this."
+    },
+    {
+      "Speaker": "GUEST",
+      "Direction": "",
+      "Text": "Thank you for listening."
+    },
+    {
+      "Speaker": "HOST",
+      "Direction": "warmly",
+      "Text": "That's our show for tonight."
+    },
+    {
+      "Speaker": "NARRATOR",
+      "Direction": "",
+      "Text": "Good night."
+    }
+  ],
+  "Pauses": [
+    {
+      "After": "… floor came back on.",
+      "D": "800ms"
+    },
+    {
+      "After": "…ought I was, anyway.",
+      "D": "1.5s"
+    },
+    {
+      "After": "…d you do?\n\nI waited.",
+      "D": "600ms"
+    },
+    {
+      "After": "…it for myself first.",
+      "D": "1s"
+    },
+    {
+      "After": "…it for myself first.",
+      "D": "500ms"
+    }
+  ],
+  "Sections": [
+    {
+      "Title": "Cold open",
+      "First": "It was a little afte…"
+    },
+    {
+      "Title": "The interview",
+      "First": "You were the only on…"
+    },
+    {
+      "Title": "Afterwards",
+      "First": "By morning, the ligh…"
+    }
+  ],
+  "Breaks": [
+    "paragraph after … floor came back on.",
+    "paragraph after …me back to the show.",
+    "paragraph after … It is late, though.",
+    "section after …th the night itself.",
+    "paragraph after …building that night.",
+    "paragraph after …ought I was, anyway.",
+    "paragraph after …d moving on its own.",
+    "paragraph after …n.\n\nWhat did you do?",
+    "paragraph after …n I took the stairs.",
+    "paragraph after …op was already open.",
+    "paragraph after …Did you call anyone?",
+    "paragraph after …it for myself first.",
+    "paragraph after …nd what did you see?",
+    "section after …as the strange part.",
+    "paragraph after …on the ground floor.",
+    "paragraph after …for telling us this.",
+    "paragraph after …k you for listening.",
+    "paragraph after …ur show for tonight."
+  ]
+}

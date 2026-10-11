@@ -58,6 +58,28 @@ type Input struct {
 	Findings []Finding
 	Pauses   []time.Duration
 	Marks    []MarkSpan
+	// Voices are the display ranges a script speaker or a (direction) speaks (SPK-09, TXT-07).
+	// A chunk starting inside one takes its voice and style; the forced breaks of the
+	// directives keep every chunk inside one range.
+	Voices []VoiceSpan
+	// Sections are the [section] directives: the first chunk starting at or after At opens
+	// the chapter Title (TXT-07). Sections are in text order.
+	Sections []SectionStart
+}
+
+// VoiceSpan is a display range with its own voice and delivery style. Voice "" keeps the
+// run's voice; Style is the chunk's whole free-text style and replaces Settings.Style.
+type VoiceSpan struct {
+	Display spoken.Range
+	Speaker string
+	Voice   string
+	Style   string
+}
+
+// SectionStart is a chapter that starts at a display byte offset.
+type SectionStart struct {
+	At    int
+	Title string
 }
 
 // MarkSpan is a speech mark (design §7.8) at its range of the whole spoken form. A chunk
@@ -87,6 +109,9 @@ type Plan struct {
 // platform-dependent float formatting of computed values.
 type Chunk struct {
 	ID         string        `json:"id"`
+	Speaker    string        `json:"speaker,omitempty"` // the script speaker (TXT-06)
+	Voice      string        `json:"voice"`
+	Section    string        `json:"section,omitempty"` // a [section] title this chunk opens (TXT-07)
 	Display    string        `json:"display"`
 	Spoken     string        `json:"spoken"`
 	Script     text.Script   `json:"script"`
@@ -209,6 +234,7 @@ func Build(in Input, s Settings) (Plan, error) {
 	}
 	p := Plan{Schema: PlanSchema, Chunks: make([]Chunk, 0, len(in.Seg.Chunks))}
 	pauses := in.Pauses
+	titles := sectionTitles(in.Sections, in.Seg.Chunks)
 	for i, c := range in.Seg.Chunks {
 		gap, err := GapClassFor(c.Boundary)
 		if err != nil {
@@ -222,20 +248,24 @@ func Build(in Input, s Settings) (Plan, error) {
 			pause, pauses = pauses[0], pauses[1:]
 		}
 		instr, prot, langs, hints := chunkMarks(in.Marks, c)
+		cs, speaker := chunkSettings(s, in.Voices, c)
 		p.Chunks = append(p.Chunks, Chunk{
 			ID:           fmt.Sprintf("c%04d", i+1),
+			Speaker:      speaker,
+			Voice:        cs.Voice,
+			Section:      titles[i],
 			Display:      c.DisplayText,
 			Spoken:       c.Text,
 			Script:       c.Script,
 			Findings:     chunkFindings(in, c),
-			SessionKey:   SessionKey(s),
-			Effort:       s.Effort,
-			Delivery:     Delivery{Emotion: s.Emotion, Style: s.Style},
+			SessionKey:   SessionKey(cs),
+			Effort:       cs.Effort,
+			Delivery:     Delivery{Emotion: cs.Emotion, Style: cs.Style},
 			Hints:        hints,
 			Instructions: instr,
 			Protected:    prot,
 			LangSpans:    langs,
-			CacheKey:     CacheKeyWith(s, hints, instr, c.Text),
+			CacheKey:     CacheKeyWith(cs, hints, instr, c.Text),
 			EstMillis:    int64(math.Round(c.Seconds * 1000)),
 			Boundary:     c.Boundary,
 			Gap:          gap,
@@ -246,6 +276,36 @@ func Build(in Input, s Settings) (Plan, error) {
 		return Plan{}, fmt.Errorf("plan: %d pause duration(s) without a pause boundary", len(pauses))
 	}
 	return p, nil
+}
+
+// chunkSettings are the settings of a chunk: the run's, with the voice and style of the
+// voice span the chunk starts in, and that span's speaker.
+func chunkSettings(s Settings, vs []VoiceSpan, c text.Chunk) (Settings, string) {
+	for _, v := range vs {
+		if c.Display.Start >= v.Display.Start && c.Display.Start < v.Display.End {
+			if v.Voice != "" {
+				s.Voice = v.Voice
+			}
+			s.Style = v.Style
+			return s, v.Speaker
+		}
+	}
+	return s, ""
+}
+
+// sectionTitles gives each section to the first chunk starting at or after it; a later
+// section given to the same chunk wins.
+func sectionTitles(ss []SectionStart, chunks []text.Chunk) map[int]string {
+	out := map[int]string{}
+	for _, sc := range ss {
+		for i, c := range chunks {
+			if c.Display.Start >= sc.At {
+				out[i] = sc.Title
+				break
+			}
+		}
+	}
+	return out
 }
 
 // chunkMarks returns the instructions, protected ranges, language spans and distinct lexicon

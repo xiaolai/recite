@@ -147,7 +147,7 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 		c.errorf("%s: %v", req.prefix(), err)
 		return sayJob{}, ExitUsage
 	}
-	tasks := tasksFor(plan, spec, req.Settings.Delivery(), req.RetryEffort)
+	tasks := tasksFor(plan, spec, req.Settings.Emotion, req.RetryEffort)
 	if req.DryRun {
 		// A dry run writes nothing and needs no output target; it reads the cache if one exists.
 		job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc, extras: x}
@@ -536,7 +536,7 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 		}
 		return plan, doc.Seg, textDoc{}, ExitOK
 	}
-	doc, err := speechDoc(input, textInput{format: req.InputFormat, markdown: req.Markdown, lang: req.Lang})
+	doc, err := speechDoc(input, textInput{format: req.InputFormat, markdown: req.Markdown, lang: req.Lang, voices: req.Voices, directives: req.Directives})
 	c.skippedWarning(req.prefix(), doc.skipped)
 	if err != nil {
 		c.errorf("%s: %v", req.prefix(), err)
@@ -567,8 +567,9 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 // textErrorCode is the exit code of a text-stage error: 2 for the user's input.
 func textErrorCode(err error) int {
 	var se *text.ScriptError
+	var de *text.DirectiveError
 	var ue *usageError
-	if errors.As(err, &se) || errors.As(err, &ue) || text.IsInputError(err) {
+	if errors.As(err, &se) || errors.As(err, &de) || errors.As(err, &ue) || text.IsInputError(err) {
 		return ExitUsage
 	}
 	return ExitInternal

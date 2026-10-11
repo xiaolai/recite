@@ -31,7 +31,7 @@ func setupPrepare(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite prepare: takes exactly one FILE (- for stdin)")
 			return ExitUsage
 		}
-		pre, code := c.prereadMarkdown("recite prepare", &tf, text.Source{File: args[0], Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, args[0])
+		pre, code := c.prereadFrontMatter("recite prepare", &tf, text.Source{File: args[0], Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, args[0])
 		if code != ExitOK {
 			return code
 		}
@@ -49,6 +49,12 @@ func setupPrepare(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite prepare: the input is already a spoken script; render it with say --input-format spoken")
 			return ExitUsage
 		}
+		// A spoken script has one voice and no directives: preparing a dialogue or a directed
+		// text would silently drop its speakers, directions and sections.
+		if format == formatScript || tf.directives {
+			c.errorf("recite prepare: dialogue scripts and --directives cannot be prepared yet: a spoken script has no speakers, directions or sections; render with say")
+			return ExitUsage
+		}
 		g.Marks = marks
 		g.Markdown = format == formatMarkdown
 		md, err := tf.markdownOptions()
@@ -60,7 +66,12 @@ func setupPrepare(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite prepare: -o PATH is required (- writes to stdout)")
 			return ExitUsage
 		}
-		in := textInput{format: format, markdown: md, lang: st.Get(langKey).Raw, preread: pre}
+		voices, err := voicesOf(st)
+		if err != nil {
+			c.errorf("recite prepare: %v", err)
+			return ExitUsage
+		}
+		in := textInput{format: format, markdown: md, lang: st.Get(langKey).Raw, voices: voices, directives: tf.directives, preread: pre}
 		return c.runPrepare(args[0], output, force, withFindings, tf, in, g, so)
 	}
 }

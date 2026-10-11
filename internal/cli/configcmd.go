@@ -18,7 +18,7 @@ func setupConfig(fs *flag.FlagSet, c *CLI) func([]string) int {
 	var all settingFlags
 	all.register(fs)
 	var input string
-	fs.StringVar(&input, "input", "", "show the settings for the input `FILE`, with its Markdown front matter")
+	fs.StringVar(&input, "input", "", "show the settings for the input `FILE`, with its Markdown or script front matter")
 	return func(args []string) int {
 		if len(args) != 1 {
 			c.errorf("recite config: takes one subcommand: show or path")
@@ -46,12 +46,12 @@ type settingRow struct {
 func (c *CLI) configShow(fs *flag.FlagSet, tf *textFlags, input string) int {
 	var fm *frontMatterSource
 	if input != "" {
-		pre, code := c.prereadMarkdown("recite config show", tf, text.Source{File: input, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, input)
+		pre, code := c.prereadFrontMatter("recite config show", tf, text.Source{File: input, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, input)
 		if code != ExitOK {
 			return code
 		}
 		if pre == nil {
-			c.errorf("recite config show: --input %s is not Markdown, so it has no front matter (use --input-format markdown)", input)
+			c.errorf("recite config show: --input %s is not Markdown or a script, so it has no front matter (use --input-format markdown or script)", input)
 			return ExitUsage
 		}
 		fm = pre.frontMatter()

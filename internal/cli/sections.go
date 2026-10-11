@@ -28,6 +28,7 @@ type section struct {
 // sectionsOf finds the sections of a plan (OUT-04): a heading is always its own block, so it
 // starts a chunk, and every chunk after a section break starts one; the heading's title is
 // the display text of the chunks up to its first block break (a long heading may be cut).
+// A [section Title] directive (TXT-07) is not spoken: its chunk carries the title.
 func sectionsOf(chunks []pipeline.Chunk, headingFirst bool) []section {
 	var out []section
 	for i := range chunks {
@@ -35,11 +36,15 @@ func sectionsOf(chunks []pipeline.Chunk, headingFirst bool) []section {
 		if i > 0 {
 			starts = chunks[i-1].Boundary == text.BoundarySection
 		}
-		if !starts {
+		if !starts && chunks[i].Section == "" {
 			continue
 		}
 		if n := len(out); n > 0 {
 			out[n-1].last = i - 1
+		}
+		if t := chunks[i].Section; t != "" {
+			out = append(out, section{title: t, first: i, last: len(chunks) - 1})
+			continue
 		}
 		var title []string
 		for k := i; k < len(chunks); k++ {

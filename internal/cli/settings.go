@@ -25,7 +25,6 @@ import (
 // file setting one fails rather than being silently ignored.
 var reservedKeys = map[string]string{
 	"output_dir": "no feature implements an output directory yet",
-	"voices":     "dialogue speaker map, TXT-06, M5",
 }
 
 // guardKey is the [guard] key of a code's per-code action: the code without "G-", in lower
@@ -54,6 +53,8 @@ func settingSchema(getenv func(string) string, modelUnchecked bool) *config.Sche
 		{Name: config.ProfileKey, Flag: "profile", Env: "RECITE_PROFILE", NoFile: true},
 		{Name: titleKey, NoFile: true, FrontMatter: true},
 		{Name: "voice", Default: realtime.DefaultVoice, Flag: "voice", Env: "RECITE_VOICE", FrontMatter: true, Check: check(realtime.ParseVoice)},
+		// The speaker map of a dialogue script (TXT-06): front matter only.
+		{Name: voicesKey, NoFile: true, FrontMatter: true, Table: encodeVoices, Check: check(parseVoicesText)},
 		{Name: "model", Default: realtime.DefaultModel, Flag: "model", Env: "RECITE_MODEL",
 			Check: func(s string) error { _, err := realtime.ParseModel(s, modelUnchecked); return err }},
 		{Name: "effort", Default: string(realtime.DefaultEffort), Flag: "effort", Env: "RECITE_EFFORT", FrontMatter: true, Check: check(realtime.ParseEffort)},

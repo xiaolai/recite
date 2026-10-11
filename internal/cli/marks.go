@@ -16,28 +16,31 @@ import (
 	"github.com/xiaolai/recite/internal/text"
 )
 
-// Input formats of --input-format (design §12.2). script is later work.
+// Input formats of --input-format (design §12.2).
 const (
 	formatText     = "text"
 	formatMarkdown = "markdown"
+	formatScript   = "script"
 	formatSpoken   = "spoken"
 )
 
 // inputMode resolves --input-format (by default from file's extension), --marks and
-// --no-marks: marks are on by default for spoken input and off otherwise (design §7.8).
+// --no-marks: marks are on by default for script and spoken input and off otherwise (design
+// §7.8, §12.2). --directives applies to text and Markdown; a script always reads them.
 func (f *textFlags) inputMode(file string) (format string, marks bool, err error) {
 	format = f.format(file)
 	switch format {
-	case formatText, formatMarkdown, formatSpoken:
-	case "script":
-		return "", false, fmt.Errorf("--input-format %s is not available yet (valid: %s, %s, %s)", format, formatText, formatMarkdown, formatSpoken)
+	case formatText, formatMarkdown, formatScript, formatSpoken:
 	default:
-		return "", false, fmt.Errorf("--input-format must be %s, %s or %s, not %q", formatText, formatMarkdown, formatSpoken, format)
+		return "", false, fmt.Errorf("--input-format must be %s, %s, %s or %s, not %q", formatText, formatMarkdown, formatScript, formatSpoken, format)
 	}
 	if f.marks && f.noMarks {
 		return "", false, fmt.Errorf("--marks and --no-marks exclude each other")
 	}
-	marks = format == formatSpoken
+	if f.directives && (format == formatSpoken || format == formatScript) {
+		return "", false, fmt.Errorf("--directives applies to text and markdown input; %s input reads its own syntax", format)
+	}
+	marks = format == formatSpoken || format == formatScript
 	if f.marks {
 		marks = true
 	}

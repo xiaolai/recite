@@ -6,4 +6,3 @@ TXT-02#3 WP-2.2 G-CONTROL findings need TXT-09
 AUTH-05#2 WP-1.3 the fake codex child leaking the canary via stderr, RPC errors and malformed JSON needs the codexapp client (WP-1.3 lists it)
 SPK-10#3 WP-1.6 each effort level renders live; needs the render function of SPK-01
 SPK-05#3 WP-1.6 the 87-take INSTR v2 qualification renders live; needs the render function of SPK-01
-TXT-08#1 WP-5.1 the voices key needs TXT-06 (WP-5.1); title, voice, speed, effort, style, lang and lexicon are reported now

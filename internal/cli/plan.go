@@ -25,8 +25,21 @@ func planChunks(input string, g guard.Result, form spoken.Result, budget float64
 // lex is the lexicon form was normalised with, so its spans become hints and protected ranges.
 func planDoc(doc textDoc, g guard.Result, form spoken.Result, lex spoken.Lexicon, budget float64, s realtime.Settings) (pipeline.Plan, text.Segmentation, error) {
 	input := doc.text
-	breaks := docBreaks(doc, form.Display, func(off int) int { return displayOffset(g.Edits, off) })
+	toDisplay := func(off int) int { return min(displayOffset(g.Edits, off), len(form.Display)) }
+	breaks := docBreaks(doc, form.Display, toDisplay)
 	pauses := pausesOf(g)
+	if d := doc.directed; d != nil {
+		// Directives (TXT-07): a plain text's paragraph breaks come from the display text, so
+		// the directives' own breaks are added here; a document with block breaks has them.
+		if doc.breaks == nil {
+			for _, b := range d.Breaks {
+				breaks = append(breaks, text.Break{Display: toDisplay(b.Display), Kind: b.Kind})
+			}
+		}
+		for _, p := range d.Pauses {
+			pauses = append(pauses, placedPause{toDisplay(p.At), p.D})
+		}
+	}
 	for _, p := range pauses {
 		breaks = append(breaks, text.Break{Display: p.at, Kind: text.BoundaryPause})
 	}
@@ -46,6 +59,7 @@ func planDoc(doc textDoc, g guard.Result, form spoken.Result, lex spoken.Lexicon
 		Pauses:   durations,
 		Marks:    append(markSpans(spokenMarks(g, form)), lexiconSpans(form, lex)...),
 	}
+	in.Voices, in.Sections = directedInput(doc, doc.voices, s.Style, toDisplay)
 	p, err := pipeline.Build(in, planSettings(s))
 	if err != nil {
 		return pipeline.Plan{}, seg, err
@@ -110,10 +124,16 @@ func displayOffset(edits []guard.Edit, orig int) int {
 }
 
 // tasksFor turns the plan into scheduler tasks. A chunk holding a G-REQUEST finding gets the
-// extra attempt of TXT-14.
-func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, delivery string, ladder []realtime.Effort) []pipeline.Task {
+// extra attempt of TXT-14. Each chunk's session takes its planned voice, so a script speaker's
+// chunks go to that voice's session pool (SPK-09), and its delivery paragraph joins the run's
+// emotion preset to the chunk's style (a speaker's style and a (direction), TXT-07).
+func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, emotion string, ladder []realtime.Effort) []pipeline.Task {
 	tasks := make([]pipeline.Task, len(p.Chunks))
 	for i, c := range p.Chunks {
+		cspec := spec
+		if c.Voice != "" {
+			cspec.Voice = c.Voice
+		}
 		requestLike := false
 		for _, f := range c.Findings {
 			if f.Code == string(guard.Request) {
@@ -132,11 +152,11 @@ func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, delivery string, ladde
 				Lexicon:     lexiconWords(c.Hints),
 				Equivalents: equivalents(c.Hints),
 			},
-			Spec:   spec,
+			Spec:   cspec,
 			Ladder: ladder,
 			// The delivery paragraph, then the speech-mark instructions, ride after the rules
 			// (realtime.ResponseInstructions).
-			Style:    chunkStyle(delivery, c.Instructions),
+			Style:    chunkStyle(realtime.DeliveryParagraph(emotion, c.Delivery.Style), c.Instructions),
 			CacheKey: c.CacheKey,
 		}
 	}

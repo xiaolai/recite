@@ -88,6 +88,8 @@ type SayRequest struct {
 	Marks       bool                 // speech marks are read (TXT-13)
 	Markdown    text.MarkdownOptions // --read-alt and --code (TXT-05)
 	Lang        string               // the front-matter language (TXT-08); "" means detect
+	Voices      speakerMap           // the front-matter speaker map of a script (TXT-06)
+	Directives  bool                 // --directives: read directives in text or Markdown (TXT-07)
 	preread     *prereadInput        // the input, when it was read before the settings; nil means read it
 
 	ChunkSeconds  float64 // segmentation budget (TXT-03)
@@ -190,6 +192,7 @@ type textFlags struct {
 	readAlt      bool
 	code         string
 	lexiconFile  string
+	directives   bool
 }
 
 func (f *textFlags) register(fs *flag.FlagSet) {
@@ -203,7 +206,8 @@ func (f *textFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.dateStyle, "date-style", f.dateStyle, "spoken date `STYLE`: us, uk or iso")
 	f.chunkSeconds = text.DefaultChunkSeconds
 	fs.Float64Var(&f.chunkSeconds, "chunk-seconds", f.chunkSeconds, "segmentation budget in `SECONDS` per chunk")
-	fs.StringVar(&f.inputFormat, "input-format", "", "input `FORMAT`: text, markdown, or spoken (a prepare script: no guard, no spoken-form rules); default markdown for .md and .markdown files, else text")
+	fs.StringVar(&f.inputFormat, "input-format", "", "input `FORMAT`: text, markdown, script (a NAME: dialogue with a [voices] map), or spoken (a prepare script: no guard, no spoken-form rules); default markdown for .md and .markdown, script for .tts and .script, else text")
+	fs.BoolVar(&f.directives, "directives", false, "read [pause 800ms], [section Title] and a leading (direction) per line in text or Markdown")
 	fs.BoolVar(&f.readAlt, "read-alt", false, "read the alt text of Markdown images")
 	f.code = codeSkip
 	fs.StringVar(&f.code, "code", f.code, "Markdown code blocks: `MODE` skip, or announce (say \"Code block omitted.\")")
@@ -378,7 +382,7 @@ func setupSay(fs *flag.FlagSet, c *CLI) func([]string) int {
 	fs.BoolVar(&dryRun, "dry-run", false, "print the chunk plan and estimates (cache hits, audio, wall time, list price); no network, no login")
 	all.register(fs)
 	run := func(args []string) int {
-		pre, code := c.prereadMarkdown("recite say", &all.tf, text.Source{Args: args, File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, file)
+		pre, code := c.prereadFrontMatter("recite say", &all.tf, text.Source{Args: args, File: file, Stdin: c.Stdin, StdinIsTTY: c.StdinIsTTY()}, file)
 		if code != ExitOK {
 			return code
 		}
@@ -441,10 +445,14 @@ func (c *CLI) sayRequest(fs *flag.FlagSet, all *settingFlags, fm *frontMatterSou
 	if err != nil {
 		return SayRequest{}, err
 	}
+	voices, err := voicesOf(st)
+	if err != nil {
+		return SayRequest{}, err
+	}
 	g.Marks = marks
 	g.Markdown = inFormat == formatMarkdown
 	req := SayRequest{Globals: c.globals, MaxInput: all.tf.maxInput, Settings: settings, RetryEffort: ladder, Guard: g, Spoken: so,
-		InputFormat: inFormat, Marks: marks, Markdown: mdOpts, Lang: st.Get(langKey).Raw,
+		InputFormat: inFormat, Marks: marks, Markdown: mdOpts, Lang: st.Get(langKey).Raw, Voices: voices, Directives: all.tf.directives,
 		ChunkSeconds: all.tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
 	if err := all.rf.apply(&req); err != nil {
 		return SayRequest{}, err

@@ -1,0 +1,40 @@
++++
+title = "Episode 12: The Night Shift"
+[voices]
+HOST = "cedar"
+GUEST = { voice = "marin", style = "warm, curious" }
+NARRATOR = { voice = "sage", style = "calm and low" }
++++
+
+[section Cold open]
+NARRATOR: (quietly) It was a little after two in the morning
+when the lights on the third floor came back on.
+[pause 800ms]
+HOST: Welcome back to the show.
+GUEST: (amused) Thanks for having me. It is late, though.
+HOST: It is. Let's begin with the night itself.
+
+[section The interview]
+HOST: You were the only one in the building that night.
+GUEST: I was. Or I thought I was, anyway.
+[pause 1.5s]
+GUEST: (hesitant) Then the elevator started moving on its own.
+HOST: What did you do?
+GUEST: I waited. [pause 600ms] And then I took the stairs.
+
+NARRATOR: The stairwell was cold, and the door at the top
+was already open.
+HOST: (serious) Did you call anyone?
+GUEST: Not right away. I wanted to see it for myself first.
+[pause 1s]
+[pause 500ms]
+HOST: And what did you see?
+GUEST: Nothing at all. That was the strange part.
+
+[section Afterwards]
+NARRATOR: (slowly) By morning, the lights were off again,
+and the elevator stood still on the ground floor.
+HOST: Thank you for telling us this.
+GUEST: Thank you for listening.
+HOST: (warmly) That's our show for tonight.
+NARRATOR: Good night.

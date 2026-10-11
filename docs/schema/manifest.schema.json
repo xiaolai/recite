@@ -154,11 +154,13 @@
     "seconds": { "type": ["number", "null"], "minimum": 0 },
     "chunk": {
       "type": "object",
-      "required": ["id", "section", "text_sha256", "spoken_sha256", "chars", "lang", "findings", "request_like", "start_s", "end_s", "gap_after_s", "gap_type", "cache_key", "cached", "state", "verified", "attempts", "final_attempt", "score", "stt_calls", "attempt_log", "usage"],
+      "required": ["id", "section", "speaker", "voice", "text_sha256", "spoken_sha256", "chars", "lang", "findings", "request_like", "start_s", "end_s", "gap_after_s", "gap_type", "cache_key", "cached", "state", "verified", "attempts", "final_attempt", "score", "stt_calls", "attempt_log", "usage"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "pattern": "^c[0-9]{4,}$" },
         "section": { "type": ["string", "null"] },
+        "speaker": { "description": "The script speaker of the chunk (TXT-06); null outside a script.", "type": ["string", "null"] },
+        "voice": { "description": "The voice the chunk is rendered with (SPK-09).", "type": "string", "minLength": 1 },
         "text_sha256": { "$ref": "#/$defs/sha256" },
         "spoken_sha256": { "$ref": "#/$defs/sha256" },
         "chars": { "$ref": "#/$defs/count" },

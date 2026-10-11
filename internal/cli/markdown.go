@@ -31,7 +31,8 @@ func checkLang(s string) error {
 }
 
 // format is --input-format, or by default the format the file's extension names: .md and
-// .markdown are Markdown, everything else (and stdin or text arguments) is plain text.
+// .markdown are Markdown, .tts and .script are dialogue scripts, everything else (and stdin or
+// text arguments) is plain text.
 func (f *textFlags) format(file string) string {
 	if f.inputFormat != "" {
 		return f.inputFormat
@@ -40,6 +41,8 @@ func (f *textFlags) format(file string) string {
 		switch strings.ToLower(filepath.Ext(file)) {
 		case ".md", ".markdown":
 			return formatMarkdown
+		case ".tts", ".script":
+			return formatScript
 		}
 	}
 	return formatText
@@ -58,8 +61,8 @@ func (f *textFlags) markdownOptions() (text.MarkdownOptions, error) {
 	return o, nil
 }
 
-// prereadInput is a Markdown input read before the settings resolve, because its front
-// matter is a settings layer (TXT-08) and stdin cannot be read twice.
+// prereadInput is a Markdown or script input read before the settings resolve, because its
+// front matter is a settings layer (TXT-08) and stdin cannot be read twice.
 type prereadInput struct {
 	input  string // decoded and normalised, front matter included
 	origin string // the input as named in a front-matter value's source
@@ -91,10 +94,11 @@ func (s *frontMatterSource) values(schema *config.Schema) (config.Values, error)
 	return v, nil
 }
 
-// prereadMarkdown reads src when the input is Markdown and returns it with its front matter;
-// for any other format it reads nothing and returns nil. A non-zero code has been reported.
-func (c *CLI) prereadMarkdown(cmd string, tf *textFlags, src text.Source, file string) (*prereadInput, int) {
-	if tf.format(file) != formatMarkdown {
+// prereadFrontMatter reads src when the input is Markdown or a dialogue script and returns it
+// with its front matter; for any other format it reads nothing and returns nil. A non-zero
+// code has been reported.
+func (c *CLI) prereadFrontMatter(cmd string, tf *textFlags, src text.Source, file string) (*prereadInput, int) {
+	if f := tf.format(file); f != formatMarkdown && f != formatScript {
 		return nil, ExitOK
 	}
 	input, err := text.Read(src, tf.maxInput)
@@ -114,13 +118,15 @@ func (c *CLI) prereadMarkdown(cmd string, tf *textFlags, src text.Source, file s
 	return &prereadInput{input: input, origin: origin, fm: fm}, ExitOK
 }
 
-// textInput is how to read an input's text: its format, the Markdown options and the
-// front-matter language.
+// textInput is how to read an input's text: its format, the Markdown options, the
+// front-matter language, the speaker map of a script and whether directives are read.
 type textInput struct {
-	format   string
-	markdown text.MarkdownOptions
-	lang     string
-	preread  *prereadInput
+	format     string
+	markdown   text.MarkdownOptions
+	lang       string
+	voices     speakerMap // script input (TXT-06)
+	directives bool       // --directives: read directives in text or Markdown (TXT-07)
+	preread    *prereadInput
 }
 
 // textDoc is the text the guard reads: the input itself for plain text, or the speech text of
@@ -133,6 +139,10 @@ type textDoc struct {
 	// headingFirst says the speech text opens with a heading, so its first chunk starts a
 	// section (OUT-04); every later section follows a section break.
 	headingFirst bool
+	// directed holds the directives taken out of the text (script input, or --directives), in
+	// input coordinates; nil when none were read.
+	directed *text.Directed
+	voices   speakerMap // the speaker map a script's lines name
 }
 
 func plainDoc(input string) textDoc { return textDoc{text: input} }
@@ -151,8 +161,23 @@ func (c *CLI) readInput(cmd string, in textInput, src text.Source, max int64) (s
 	return input, ExitOK
 }
 
-// speechDoc turns input into the text the guard reads (TXT-05).
+// speechDoc turns input into the text the guard reads (TXT-05, TXT-06, TXT-07).
 func speechDoc(input string, in textInput) (textDoc, error) {
+	switch {
+	case in.format == formatScript:
+		return scriptDoc(input, in)
+	case in.directives:
+		doc, err := markupDoc(input, in)
+		if err != nil {
+			return doc, err
+		}
+		return directedDoc(doc)
+	}
+	return markupDoc(input, in)
+}
+
+// markupDoc is the speech text of plain text or Markdown.
+func markupDoc(input string, in textInput) (textDoc, error) {
 	if in.format != formatMarkdown {
 		return textDoc{text: input, lang: in.lang}, nil
 	}
