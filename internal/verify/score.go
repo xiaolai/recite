@@ -96,22 +96,69 @@ type unit struct {
 
 func units(src string, metric text.Metric) []unit {
 	toks := CanonTokens(src)
-	out := make([]unit, 0, len(toks))
-	for _, t := range toks {
-		if metric != text.MetricCER {
-			out = append(out, unit{t.Text, t.Start, t.End})
+	if metric == text.MetricCER {
+		var out []unit
+		for _, t := range toks {
+			out = append(out, runeUnits(src, t, func(rune) bool { return true })...)
+		}
+		return out
+	}
+	texts := make([]string, len(toks))
+	for i, t := range toks {
+		texts[i] = t.Text
+	}
+	var out []unit
+	for i := 0; i < len(toks); {
+		// A year read as a pair compares as its cardinal, whichever way either side read it
+		// (design §8.3); the cardinal's words keep the span of the pair.
+		if v, n := yearPairAt(texts, i); n > 0 {
+			for _, w := range cardinal(uint64(v)) {
+				out = append(out, unit{w, toks[i].Start, toks[i+n-1].End})
+			}
+			i += n
 			continue
 		}
-		spans := runeSpans(src[t.Start:t.End], t.Text)
-		k := 0
-		for _, r := range t.Text {
-			u := unit{string(r), t.Start, t.End}
-			if spans != nil {
-				u.start, u.end = t.Start+spans[k][0], t.Start+spans[k][1]
-			}
-			out = append(out, u)
-			k++
+		t := toks[i]
+		if strings.IndexFunc(t.Text, unspaced) >= 0 {
+			// Han, Kana and Thai have no spaces between words, so inside a word-scored chunk
+			// they are compared by character ("上打开App" = "上打开 App").
+			out = append(out, runeUnits(src, t, unspaced)...)
+		} else {
+			out = append(out, unit{t.Text, t.Start, t.End})
 		}
+		i++
+	}
+	return out
+}
+
+// unspaced reports a rune of a script written without spaces between words.
+func unspaced(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Thai)
+}
+
+// runeUnits splits token t into one unit per rune for which single is true, and one unit per
+// run of the other runes, each with its own source span when the source spells the token
+// letter for letter.
+func runeUnits(src string, t CanonToken, single func(rune) bool) []unit {
+	spans := runeSpans(src[t.Start:t.End], t.Text)
+	span := func(a, b int) (int, int) {
+		if spans == nil {
+			return t.Start, t.End
+		}
+		return t.Start + spans[a][0], t.Start + spans[b][1]
+	}
+	rs := []rune(t.Text)
+	var out []unit
+	for k := 0; k < len(rs); {
+		e := k + 1
+		if !single(rs[k]) {
+			for e < len(rs) && !single(rs[e]) {
+				e++
+			}
+		}
+		a, b := span(k, e-1)
+		out = append(out, unit{string(rs[k:e]), a, b})
+		k = e
 	}
 	return out
 }

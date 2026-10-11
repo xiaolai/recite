@@ -13,7 +13,7 @@ import (
 
 // CanonVersion identifies the canonicaliser's behaviour. Bump it on any change
 // to Canon's output: cache keys and verification provenance record it.
-const CanonVersion = 1
+const CanonVersion = 2
 
 // Canon canonicalises s into comparison tokens (design §8.3): NFKC and width
 // folding, abbreviation expansion, lower case, numbers to English words (one
@@ -54,6 +54,7 @@ func canon(s string, joinHyphens bool) []string {
 	// boundary from the abbreviation pass, or a second pass would differ.
 	s = chineseNumbers(englishNumbers(s))
 	s = expandAbbreviations(s)
+	s = domainDots(s)
 	s = norm.NFKC.String(strings.ToLower(s))
 	var b strings.Builder
 	for _, r := range s {
@@ -94,6 +95,23 @@ func isApostrophe(r rune) bool { return r == '\'' || r == '’' || r == 'ʼ' || 
 
 func isHyphen(r rune) bool {
 	return r == '-' || r == '‐' || r == '‑' || r == '‒' || r == '–' || r == '—' || r == '−'
+}
+
+// --- domains ---
+
+// domainDot is a dot between two letter or digit runs whose right side is letters, as in
+// "example.com": the spoken form reads it "dot", the recogniser writes it. Decimals ("3.5")
+// and initials ("U.S.") do not match.
+var domainDot = regexp.MustCompile(`([\p{L}\p{N}]{2})\.(\p{L}{2})`)
+
+func domainDots(s string) string {
+	for {
+		t := domainDot.ReplaceAllString(s, "$1 dot $2")
+		if t == s {
+			return s
+		}
+		s = t
+	}
 }
 
 // --- abbreviations ---
@@ -278,32 +296,38 @@ func twoDigit(toks []string, i int) (int, int) {
 func yearPairsToCardinal(toks []string) []string {
 	var out []string
 	for i := 0; i < len(toks); {
-		hi, n := twoDigit(toks, i)
-		if n == 1 && hi >= 10 && hi <= 20 && i+1 < len(toks) {
-			j := i + 1
-			lo, m := -1, 0
-			switch {
-			case toks[j] == "hundred":
-				lo, m = 0, 1
-			case toks[j] == "oh" && j+1 < len(toks):
-				if v, ok := smallValue(toks[j+1]); ok && v >= 1 && v <= 9 {
-					lo, m = v, 2
-				}
-			default:
-				if v, k := twoDigit(toks, j); k > 0 && v >= 10 {
-					lo, m = v, k
-				}
-			}
-			if lo >= 0 {
-				out = append(out, cardinal(uint64(hi*100+lo))...)
-				i = j + m
-				continue
-			}
+		if v, n := yearPairAt(toks, i); n > 0 {
+			out = append(out, cardinal(uint64(v))...)
+			i += n
+			continue
 		}
 		out = append(out, toks[i])
 		i++
 	}
 	return out
+}
+
+// yearPairAt reports the year read as a pair at toks[i] ("nineteen ninety-nine", "nineteen
+// hundred", "nineteen oh five") and how many tokens it spans; n is 0 when there is none.
+func yearPairAt(toks []string, i int) (v, n int) {
+	hi, k := twoDigit(toks, i)
+	if k != 1 || hi < 10 || hi > 20 || i+1 >= len(toks) {
+		return 0, 0
+	}
+	j := i + 1
+	switch {
+	case toks[j] == "hundred":
+		return hi * 100, 2
+	case toks[j] == "oh" && j+1 < len(toks):
+		if lo, ok := smallValue(toks[j+1]); ok && lo >= 1 && lo <= 9 {
+			return hi*100 + lo, 3
+		}
+	default:
+		if lo, m := twoDigit(toks, j); m > 0 && lo >= 10 {
+			return hi*100 + lo, 1 + m
+		}
+	}
+	return 0, 0
 }
 
 // --- Chinese numbers ---

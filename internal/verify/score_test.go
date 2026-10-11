@@ -201,3 +201,33 @@ func FuzzAlignDistance(f *testing.F) {
 		}
 	})
 }
+
+// Cases from the live TXT-11#3 corpus where the audio was right and the score was not
+// (design §8.3: years read as pairs and as cardinals are both accepted; §8.4: Han is compared
+// by character even inside a word-scored chunk).
+func TestScoreEquivalentForms(t *testing.T) {
+	for _, c := range []struct{ ref, hyp string }{
+		{"the years nineteen fourteen to nineteen eighteen", "the years 1914 to 1918"},
+		{"in twenty twenty-six", "in 2026"},
+		{"in nineteen oh five", "in 1905"},
+		{"请在iPhone 17上打开App Store，下载版本v2.0。", "请在 iPhone 17 上打开 App Store，下载版本 V2.0。"},
+		{"Visit example dot com for details.", "Visit example.com for details."},
+		{"mail ops at example dot co dot uk", "mail ops at example.co.uk"},
+	} {
+		got := Score(c.ref, c.hyp, ScriptMetric(c.ref))
+		if got.Errors != 0 || got.Score != 1 {
+			t.Errorf("Score(%q, %q) = %d errors, score %.3f; want a match", c.ref, c.hyp, got.Errors, got.Score)
+		}
+	}
+	for _, c := range []struct{ ref, hyp string }{
+		{"in nineteen fourteen", "in 1940"},
+		{"in twenty twenty-six", "in 2025"},
+		{"请在iPhone 17上打开App", "请在 iPhone 18 上打开 App"},
+		{"grew three point five percent", "grew 35 percent"},
+		{"see e.g. this", "see eg this"},
+	} {
+		if got := Score(c.ref, c.hyp, ScriptMetric(c.ref)); got.Errors == 0 {
+			t.Errorf("Score(%q, %q) found no error", c.ref, c.hyp)
+		}
+	}
+}
