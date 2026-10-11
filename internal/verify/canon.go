@@ -13,12 +13,13 @@ import (
 
 // CanonVersion identifies the canonicaliser's behaviour. Bump it on any change
 // to Canon's output: cache keys and verification provenance record it.
-const CanonVersion = 5
+const CanonVersion = 6
 
 // Canon canonicalises s into comparison tokens (design §8.3): NFKC and width
 // folding, abbreviation expansion, lower case, numbers to English words (one
 // canonical form for digits and words), apostrophes removed, hyphens to a
-// space, every other punctuation or symbol removed. Canon is idempotent:
+// space, every other punctuation or symbol removed, and a run of single Latin letters joined
+// into one token ("X J" = "XJ": a spelled-out code). Canon is idempotent:
 // Canon(strings.Join(Canon(x), " ")) equals Canon(x).
 func Canon(s string) []string { return canon(s, false) }
 
@@ -73,9 +74,33 @@ func canon(s string, joinHyphens bool) []string {
 			b.WriteByte(' ')
 		}
 	}
+	// Letters join before abbreviations expand, or a second pass would expand what the first
+	// joined ("M s" -> "ms" -> "miz").
 	// Dropping an apostrophe can bring a letter and a combining mark together ("A'̆"), which a
 	// second pass would compose; compose them now.
-	return expandTokens(dropNumberAnd(strings.Fields(norm.NFKC.String(b.String()))))
+	return expandTokens(joinLetters(dropNumberAnd(strings.Fields(norm.NFKC.String(b.String())))))
+}
+
+// joinLetters joins each run of two or more single-letter Latin tokens into one token. A code
+// read letter by letter is transcribed spaced ("X J 4471 B") or not ("XJ 4471B"); joining
+// removes only that spacing, so different letters still compare different.
+func joinLetters(toks []string) []string {
+	single := func(t string) bool { return len(t) == 1 && t[0] >= 'a' && t[0] <= 'z' }
+	var out []string
+	for i := 0; i < len(toks); {
+		j := i
+		for j < len(toks) && single(toks[j]) {
+			j++
+		}
+		if j-i >= 2 {
+			out = append(out, strings.Join(toks[i:j], ""))
+			i = j
+			continue
+		}
+		out = append(out, toks[i])
+		i++
+	}
+	return out
 }
 
 // expandTokens expands abbreviations that only became whole tokens after

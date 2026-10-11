@@ -29,13 +29,20 @@ func TestEquivalencePairs(t *testing.T) {
 		{"Main St.", "main street"},
 		{"Don't", "dont"},
 		{"ＨＥＬＬＯ，　ｗｏｒｌｄ！", "hello world"},
+		// A code spelled out loud is transcribed with or without spaces between its letters.
+		{"part XJ 4471 B", "part X J 4471 B"},
+		{"account DE89", "account D E eighty-nine"},
+		{"ticket JIRA-10442", "ticket J I R A 10442"},
+		{"use the A P I", "use the API"},
 	}
 	for _, p := range pairs {
 		if !Equivalent(p[0], p[1]) {
 			t.Errorf("Equivalent(%q, %q) = false; canon %q vs %q", p[0], p[1], Canon(p[0]), Canon(p[1]))
 		}
 	}
-	for _, p := range [][2]string{{"42", "forty-three"}, {"1999", "nineteen ninety-eight"}, {"3.5", "35"}, {"四十二", "24"}} {
+	for _, p := range [][2]string{{"42", "forty-three"}, {"1999", "nineteen ninety-eight"}, {"3.5", "35"}, {"四十二", "24"},
+		// Joining spelled letters removes spacing only: different or extra letters still differ.
+		{"part X J", "part X K"}, {"plan A", "plan A B"}, {"XJ", "JX"}} {
 		if Equivalent(p[0], p[1]) {
 			t.Errorf("Equivalent(%q, %q) = true", p[0], p[1])
 		}
@@ -57,6 +64,7 @@ func TestCanonForms(t *testing.T) {
 		"一亿两千万":            "one hundred twenty million",
 		"Hello—world":      "hello world",
 		"msð":              "msð", // "ms" is not a whole word here, though regexp's \b says so
+		"X J 4471":         "xj four thousand four hundred seventy one",
 	}
 	for in, want := range cases {
 		if got := strings.Join(Canon(in), " "); got != want {

@@ -231,3 +231,17 @@ func TestScoreEquivalentForms(t *testing.T) {
 		}
 	}
 }
+
+// A spelled-out code scores the same however STT spaces its letters, and a wrong letter in it
+// still costs exactly one error.
+func TestSpelledCodeScoresWithoutSpacingErrors(t *testing.T) {
+	ref := "Order part XJ four thousand four hundred seventy-one B today."
+	for _, hyp := range []string{"Order part X J 4471 B today.", "Order part XJ 4471 B today.", "Order part XJ-4471-B today."} {
+		if r := Score(ref, hyp, text.MetricWER); r.Errors != 0 || r.Score != 1 {
+			t.Errorf("%q: %d errors, score %v", hyp, r.Errors, r.Score)
+		}
+	}
+	if r := Score(ref, "Order part X K 4471 B today.", text.MetricWER); r.Errors != 1 {
+		t.Errorf("wrong letter: %d errors, want 1", r.Errors)
+	}
+}
