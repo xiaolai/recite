@@ -75,6 +75,23 @@ func record() error {
 	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
 
+// recordRequest appends one received line as req=<line> to $FAKECODEX_RECORD when set.
+func recordRequest(line []byte) error {
+	path := os.Getenv("FAKECODEX_RECORD")
+	if path == "" {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	_, werr := fmt.Fprintf(f, "req=%s\n", line)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
+}
+
 var extraModes = []string{"logged-out", "slow", "crash", "refresh-ok", "refresh-fails", "future-mode",
 	"rpc-error", "unknown-method", "stderr-canary"}
 
@@ -137,7 +154,12 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 		_ = enc.Encode(msg)
 	}
 	refreshed := false
+	leak := os.Getenv("FAKECODEX_LEAK")
 	for sc.Scan() {
+		if err := recordRequest(sc.Bytes()); err != nil {
+			fmt.Fprintln(os.Stderr, "fakecodex: record:", err)
+			return 70
+		}
 		var req request
 		if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
 			fmt.Fprintln(os.Stderr, "fakecodex: malformed request")
@@ -162,6 +184,14 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 				RefreshToken bool `json:"refreshToken"`
 			}
 			_ = json.Unmarshal(req.Params, &p)
+			switch leak {
+			case "rpc-error":
+				reply(req.ID, nil, &rpcError{Code: -32000, Message: "store failed for " + canary()})
+				continue
+			case "malformed":
+				_, _ = fmt.Fprintf(out, "{\"id\":%s,\"result\":{\"authToken\":\"%s\"\n", req.ID, canary())
+				continue
+			}
 			switch mode {
 			case "unknown-method":
 				reply(req.ID, nil, &rpcError{Code: -32601, Message: "Method not found: getAuthStatus"})
@@ -185,6 +215,8 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 				res["authMethod"] = m
 				if p.IncludeToken {
 					res["authToken"] = token(m, refreshed)
+				} else if leak == "token" {
+					res["authToken"] = canary() // a Codex that ignores includeToken:false
 				}
 			}
 			reply(req.ID, res, nil)
