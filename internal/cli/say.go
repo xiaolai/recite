@@ -556,7 +556,7 @@ func (c *CLI) planText(req SayRequest, input string) (pipeline.Plan, text.Segmen
 	if code != ExitOK {
 		return pipeline.Plan{}, text.Segmentation{}, doc, code
 	}
-	plan, seg, err := planDoc(doc, g, form, req.ChunkSeconds, req.Settings)
+	plan, seg, err := planDoc(doc, g, form, req.Spoken.Lexicon, req.ChunkSeconds, req.Settings)
 	if err != nil {
 		c.errorf("%s: %v", req.prefix(), err)
 		return plan, seg, doc, ExitInternal

@@ -61,7 +61,13 @@ type Chunk struct {
 	Lexicon     []string
 	Protected   []spoken.Range // {{spell}}, {{digits}} and {{say}} spans, in Spoken coordinates
 	LangSpans   []LangSpan     // {{lang}} spans, in Spoken coordinates, sorted, not overlapping
+	// Equivalents are the chunk's lexicon say pairs: the transcript may spell either form.
+	Equivalents []SayPair
 }
+
+// SayPair is a lexicon say pair (SPK-08): Written is the term, Spoken the rewrite the
+// model says. STT often writes the term back, as it writes "42" for "forty-two".
+type SayPair struct{ Written, Spoken string }
 
 // LangSpan is a {{lang}} span (design §7.8): it is scored under its own language and adds
 // that language to the STT hint.

@@ -63,6 +63,9 @@ type Key struct {
 	// FrontMatter allows the key in an input's front matter (TXT-08), whatever NoFile says.
 	FrontMatter bool
 	List        bool // a TOML array of strings, carried comma-joined
+	// Table, when set, makes the key a TOML table (such as [lexicon]) and encodes it as the
+	// key's text. A higher layer's table replaces a lower one's whole.
+	Table func(map[string]any) (string, error)
 	// Check validates a value; nil accepts any value.
 	Check func(string) error
 }

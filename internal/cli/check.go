@@ -223,7 +223,7 @@ func runDocStages(doc textDoc, g guard.Options, so spoken.Options, budget float6
 	if len(form.Findings) > 0 && g.Policy == guard.PolicyStrict {
 		st.failed = true
 	}
-	st.plan, st.seg, err = planDoc(doc, gr, form, budget, settings)
+	st.plan, st.seg, err = planDoc(doc, gr, form, so.Lexicon, budget, settings)
 	if err != nil {
 		return st, err
 	}

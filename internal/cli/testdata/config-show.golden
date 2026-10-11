@@ -8,6 +8,7 @@ speed                 0.9                profile narrator ($DIR/recite/config.to
 emotion               neutral            default
 style                 ""                 default
 lang                  ""                 default
+lexicon               ""                 default
 jobs                  2                  user ($DIR/recite/config.toml:2)
 verify.mode           normal             default
 verify.max_attempts   3                  default

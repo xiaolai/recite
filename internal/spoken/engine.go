@@ -73,6 +73,9 @@ type Options struct {
 	// they must be sorted, non-overlapping, in bounds and on rune boundaries.
 	Protected []Range
 	Overrides []Override
+	// Lexicon entries (§7.8) found outside the protected ranges and overrides become
+	// overrides of their own (Normalize only).
+	Lexicon Lexicon
 }
 
 // Override is a display range whose spoken form is decided outside the rules:
@@ -164,7 +167,16 @@ func (r Result) Rewrites() []Rewrite {
 
 // Normalize applies the rules for language lang ("en", "en-US", …) to s.
 // Languages without a table pass through unchanged.
+// The lexicon is matched first, around the speech marks, so a user entry takes
+// precedence over every rule, the built-in tech terms included.
 func Normalize(s, lang string, o Options) (Result, error) {
+	if len(o.Lexicon) > 0 {
+		var skip []Range
+		for _, f := range o.fixed() {
+			skip = append(skip, f.Range)
+		}
+		o.Overrides = append(slices.Clip(o.Overrides), o.Lexicon.Overrides(s, lang, skip)...)
+	}
 	return Run(s, TableFor(lang), o)
 }
 

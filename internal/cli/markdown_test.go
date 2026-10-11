@@ -27,6 +27,8 @@ speed = 1.2
 effort = "low"
 lang = "fr"
 style = "Unhurried, warm."
+[lexicon]
+"SQL" = { say = "sequel" }
 +++
 # Field notes
 
@@ -37,7 +39,7 @@ Bonjour.
 // its line of the input; the environment still wins over it, and it wins over the user file.
 // accept: TXT-08#1
 func TestConfigShowFrontMatter(t *testing.T) {
-	userConfig(t, "voice = \"alloy\"\nspeed = 0.9\n")
+	userConfig(t, "voice = \"alloy\"\nspeed = 0.9\n[lexicon]\nOkafor = { hint = \"oh-KAH-for\" }\n")
 	t.Setenv("RECITE_EFFORT", "medium")
 	doc := writeNamedInput(t, "notes.md", frontMatterDoc)
 	r := run("config", "show", "--input", doc, "--json")
@@ -58,6 +60,7 @@ func TestConfigShowFrontMatter(t *testing.T) {
 		{Key: "speed", Value: "1.2", Layer: "front matter", Origin: doc + ":4"},
 		{Key: "lang", Value: "fr", Layer: "front matter", Origin: doc + ":6"},
 		{Key: "style", Value: "Unhurried, warm.", Layer: "front matter", Origin: doc + ":7"},
+		{Key: "lexicon", Value: `{"SQL":{"say":"sequel"}}`, Layer: "front matter", Origin: doc + ":8"},
 		{Key: "effort", Value: "medium", Layer: "env", Origin: "RECITE_EFFORT"},
 	} {
 		if got[want.Key] != want {
@@ -97,10 +100,11 @@ func TestFrontMatterReachesSay(t *testing.T) {
 
 func TestFrontMatterErrorsExit2(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
-		{"+++\njobs = 4\n+++\nHi.\n", `notes.md:2: key "jobs" cannot be set in front matter (allowed: title, voice, effort, speed, style, lang)`},
+		{"+++\njobs = 4\n+++\nHi.\n", `notes.md:2: key "jobs" cannot be set in front matter (allowed: title, voice, effort, speed, style, lang, lexicon)`},
 		{"+++\nstyle = \"warm\\nsad\"\n+++\nHi.\n", `notes.md:2: style:`},
 		{"+++\nemotion = \"warm\"\n+++\nHi.\n", `key "emotion" cannot be set in front matter`},
-		{"+++\nlexicon = {}\n+++\nHi.\n", `key "lexicon" is not supported by this version`},
+		{"+++\nlexicon = \"SQL\"\n+++\nHi.\n", `notes.md:2: lexicon: want a table, not a string`},
+		{"+++\n[lexicon]\nSQL = { say = \"sequel\", hint = \"x\" }\n+++\nHi.\n", `set exactly one of say and hint`},
 		{"+++\nvoices = {}\n+++\nHi.\n", `key "voices" is not supported by this version`},
 		{"+++\n\nvoice = \"nobody\"\n+++\nHi.\n", `notes.md:3: voice:`},
 		{"+++\nlang = \"???\"\n+++\nHi.\n", `want a BCP 47 language tag`},

@@ -137,6 +137,51 @@ func markSpans(ms []text.SpokenMark) []pipeline.MarkSpan {
 	return out
 }
 
+// lexiconSpans are the planner's view of the lexicon matches of form (SPK-08): a say entry
+// protects its rewrite for verification, a hint entry adds its instruction, and each records
+// the pair it used.
+func lexiconSpans(form spoken.Result, lex spoken.Lexicon) []pipeline.MarkSpan {
+	var out []pipeline.MarkSpan
+	for _, sg := range form.Segments {
+		if sg.Rule != spoken.RuleLexiconSay && sg.Rule != spoken.RuleLexiconHint {
+			continue
+		}
+		e, ok := lex.Lookup(form.Display[sg.Display.Start:sg.Display.End])
+		if !ok {
+			continue
+		}
+		out = append(out, lexiconSpan(sg.Spoken, e))
+	}
+	return out
+}
+
+func lexiconSpan(r spoken.Range, e spoken.Entry) pipeline.MarkSpan {
+	if e.Say != "" {
+		return pipeline.MarkSpan{Spoken: r, Protect: true, Pair: &pipeline.Hint{Term: e.Term, Say: e.Say}}
+	}
+	return pipeline.MarkSpan{Spoken: r, Instruction: e.Instruction(), Pair: &pipeline.Hint{Term: e.Term, Hint: e.Hint}}
+}
+
+// scriptHintSpans are the hint entries found in a spoken script outside its marks. A spoken
+// script is already the spoken form, so say entries do not rewrite it again.
+func scriptHintSpans(doc text.SpokenDoc, lex spoken.Lexicon, lang string) []pipeline.MarkSpan {
+	var hints spoken.Lexicon
+	for _, e := range lex {
+		if e.Hint != "" {
+			hints = append(hints, e)
+		}
+	}
+	skip := make([]spoken.Range, 0, len(doc.Marks))
+	for _, m := range doc.Marks {
+		skip = append(skip, m.Spoken)
+	}
+	var out []pipeline.MarkSpan
+	for _, m := range hints.Match(doc.Spoken, lang, skip) {
+		out = append(out, lexiconSpan(m.Range, m.Entry))
+	}
+	return out
+}
+
 // languageName is the English name of a BCP 47 tag ("fr" → "French"), or the tag itself.
 func languageName(tag string) string {
 	t, err := language.Parse(strings.TrimSpace(tag))
@@ -179,7 +224,8 @@ func spokenScriptPlan(input string, marks bool, so spoken.Options, settings pipe
 	if err != nil {
 		return pipeline.Plan{}, doc, err
 	}
-	p, err := pipeline.Build(pipeline.Input{Display: doc.Display, Seg: doc.Seg, Pauses: doc.Pauses, Marks: markSpans(doc.Marks)}, settings)
+	spans := append(markSpans(doc.Marks), scriptHintSpans(doc, so.Lexicon, lang.Code)...)
+	p, err := pipeline.Build(pipeline.Input{Display: doc.Display, Seg: doc.Seg, Pauses: doc.Pauses, Marks: spans}, settings)
 	return p, doc, err
 }
 

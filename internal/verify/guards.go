@@ -116,6 +116,8 @@ type judgement struct {
 // judge scores one transcript against the chunk and runs the language, protected-token and
 // edge-insertion guards, and collects the content-word mismatches (design §8.4).
 func judge(c Chunk, t stt.Transcript) judgement {
+	// Every offset below is into this rewritten transcript.
+	t.Text = applyEquivalents(t.Text, sayPairsFor(c.Spoken, c.Equivalents))
 	metric := ScriptMetric(c.Spoken)
 	ref, hyp := toFormSpans(c.Spoken, c.Language.Code, c.LangSpans), toForm(t.Text, c.Language.Code)
 	res, al := score(ref.text, hyp.text, metric)

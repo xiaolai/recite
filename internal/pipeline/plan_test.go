@@ -14,7 +14,7 @@ import (
 
 func testSettings() Settings {
 	return Settings{Model: "gpt-realtime-2.1", Voice: "cedar", Speed: 1, Effort: "minimal",
-		InstructionsVersion: 2, Emotion: "neutral", Hints: []Hint{{Term: "Okafor", Hint: "oh-KAH-for"}}}
+		InstructionsVersion: 2, Emotion: "neutral"}
 }
 
 // planText runs the design §7 order: guard, spoken form, segmentation, plan.
@@ -72,9 +72,6 @@ func TestPlanJSONByteIdentical(t *testing.T) {
 	if c.SessionKey != "gpt-realtime-2.1|cedar|1" || c.Effort != "minimal" || c.Delivery.Emotion != "neutral" {
 		t.Fatalf("chunk settings: %+v", c)
 	}
-	if len(c.Hints) != 1 || len(p.Chunks[1].Hints) != 0 {
-		t.Fatalf("hints are those the chunk uses: %+v / %+v", c.Hints, p.Chunks[1].Hints)
-	}
 	if c.Gap != audio.GapSentence && c.Gap != audio.GapParagraph {
 		t.Fatalf("gap class %q", c.Gap)
 	}
@@ -114,12 +111,16 @@ func TestCacheKeyIgnoresDisplayOnlyEdits(t *testing.T) {
 			t.Errorf("%s does not change the cache key", name)
 		}
 	}
-	if CacheKey(s, nil, "Hello!") == base || CacheKey(s, []Hint{{"Hello", "heh-LOW"}}, "Hello.") == base {
+	if CacheKey(s, nil, "Hello!") == base || CacheKey(s, []Hint{{Term: "Hello", Hint: "heh-LOW"}}, "Hello.") == base {
 		t.Error("spoken text or hints do not change the cache key")
 	}
-	h := []Hint{{"b", "2"}, {"a", "1"}}
-	if CacheKey(s, h, "x") != CacheKey(s, []Hint{h[1], h[0]}, "x") {
+	h := []Hint{{Term: "b", Hint: "2"}, {Term: "a", Say: "1"}, {Term: "c", Say: "3"}}
+	if CacheKey(s, h, "x") != CacheKey(s, []Hint{h[2], h[1], h[0]}, "x") {
 		t.Error("hint order changes the cache key")
+	}
+	// A say pair's rewrite is in the spoken text already; the pair adds nothing to the key.
+	if CacheKey(s, []Hint{{Term: "a", Say: "1"}}, "x") != CacheKey(s, nil, "x") {
+		t.Error("a say pair changes the key of the same spoken text")
 	}
 }
 

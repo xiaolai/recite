@@ -33,13 +33,14 @@ type Settings struct {
 	InstructionsVersion int
 	Emotion             string
 	Style               string
-	Hints               []Hint // lexicon pronunciation hints; a chunk uses those whose term it contains
 }
 
-// Hint is one lexicon pronunciation hint (design §7.8).
+// Hint is one lexicon pair a chunk uses (design §7.8, SPK-08): exactly one of Hint (the text
+// is kept and an instruction added) and Say (the spoken form was rewritten).
 type Hint struct {
 	Term string `json:"term"`
-	Hint string `json:"hint"`
+	Hint string `json:"hint,omitempty"`
+	Say  string `json:"say,omitempty"`
 }
 
 // Finding is a guard or spoken-form finding at a byte offset of the display text.
@@ -67,6 +68,7 @@ type MarkSpan struct {
 	Instruction string
 	Protect     bool
 	Lang        string // a {{lang}} tag: the span is scored and hinted in this language
+	Pair        *Hint  // the lexicon pair that made the span; part of the cache key
 }
 
 // LangSpan is a {{lang}} span of a chunk, relative to its Spoken.
@@ -92,7 +94,7 @@ type Chunk struct {
 	SessionKey string        `json:"session_key"`
 	Effort     string        `json:"effort"`
 	Delivery   Delivery      `json:"delivery"`
-	Hints      []Hint        `json:"hints"`
+	Hints      []Hint        `json:"hints"` // the lexicon pairs used, in text order
 	// Instructions are the chunk's speech-mark instructions ({{hint}}, {{emph}}, {{lang}}).
 	Instructions []string `json:"instructions,omitempty"`
 	// Protected are the chunk's {{say}}, {{spell}} and {{digits}} spans, relative to Spoken.
@@ -152,11 +154,15 @@ func CacheKey(s Settings, hints []Hint, spoken string) string {
 }
 
 // CacheKeyWith is CacheKey for a chunk with speech-mark instructions, in chunk order. With
-// none it equals CacheKey, so chunks without marks keep their keys.
+// none it equals CacheKey, so chunks without marks keep their keys. The hint pairs are keyed;
+// a say pair's whole effect is its rewrite, which is already in the keyed spoken text, so a
+// take is shared with the same words written out (a prepared spoken script, CLI-15).
 func CacheKeyWith(s Settings, hints []Hint, instructions []string, spoken string) string {
-	pairs := make([][2]string, len(hints))
-	for i, h := range hints {
-		pairs[i] = [2]string{h.Term, h.Hint}
+	pairs := [][2]string{}
+	for _, h := range hints {
+		if h.Say == "" {
+			pairs = append(pairs, [2]string{h.Term, h.Hint})
+		}
 	}
 	slices.SortFunc(pairs, func(a, b [2]string) int {
 		if c := strings.Compare(a[0], b[0]); c != 0 {
@@ -215,13 +221,7 @@ func Build(in Input, s Settings) (Plan, error) {
 			}
 			pause, pauses = pauses[0], pauses[1:]
 		}
-		hints := []Hint{}
-		for _, h := range s.Hints {
-			if h.Term != "" && strings.Contains(c.Text, h.Term) {
-				hints = append(hints, h)
-			}
-		}
-		instr, prot, langs := chunkMarks(in.Marks, c)
+		instr, prot, langs, hints := chunkMarks(in.Marks, c)
 		p.Chunks = append(p.Chunks, Chunk{
 			ID:           fmt.Sprintf("c%04d", i+1),
 			Display:      c.DisplayText,
@@ -248,18 +248,22 @@ func Build(in Input, s Settings) (Plan, error) {
 	return p, nil
 }
 
-// chunkMarks returns the instructions and protected ranges of the marks inside the chunk's
-// spoken range.
-func chunkMarks(ms []MarkSpan, c text.Chunk) ([]string, []spoken.Range, []LangSpan) {
+// chunkMarks returns the instructions, protected ranges, language spans and distinct lexicon
+// pairs of the marks inside the chunk's spoken range.
+func chunkMarks(ms []MarkSpan, c text.Chunk) ([]string, []spoken.Range, []LangSpan, []Hint) {
 	var instr []string
 	var prot []spoken.Range
 	var langs []LangSpan
+	hints := []Hint{}
 	for _, m := range ms {
 		if m.Spoken.Start < c.Spoken.Start || m.Spoken.End > c.Spoken.End || m.Spoken.Start == m.Spoken.End {
 			continue
 		}
 		if m.Instruction != "" && !slices.Contains(instr, m.Instruction) {
 			instr = append(instr, m.Instruction)
+		}
+		if m.Pair != nil && !slices.Contains(hints, *m.Pair) {
+			hints = append(hints, *m.Pair)
 		}
 		rel := spoken.Range{Start: m.Spoken.Start - c.Spoken.Start, End: m.Spoken.End - c.Spoken.Start}
 		if m.Protect {
@@ -269,7 +273,7 @@ func chunkMarks(ms []MarkSpan, c text.Chunk) ([]string, []spoken.Range, []LangSp
 			langs = append(langs, LangSpan{Spoken: rel, Lang: m.Lang})
 		}
 	}
-	return instr, prot, langs
+	return instr, prot, langs, hints
 }
 
 // chunkFindings returns the findings inside the chunk's display range, separator included.

@@ -18,11 +18,12 @@ import (
 // the guard ran on, g its result, and form the spoken form of g.Text. Findings are passed to
 // the planner at byte offsets of the display text (form.Display).
 func planChunks(input string, g guard.Result, form spoken.Result, budget float64, s realtime.Settings) (pipeline.Plan, text.Segmentation, error) {
-	return planDoc(plainDoc(input), g, form, budget, s)
+	return planDoc(plainDoc(input), g, form, nil, budget, s)
 }
 
 // planDoc is planChunks for a text document: a Markdown document brings its own block breaks.
-func planDoc(doc textDoc, g guard.Result, form spoken.Result, budget float64, s realtime.Settings) (pipeline.Plan, text.Segmentation, error) {
+// lex is the lexicon form was normalised with, so its spans become hints and protected ranges.
+func planDoc(doc textDoc, g guard.Result, form spoken.Result, lex spoken.Lexicon, budget float64, s realtime.Settings) (pipeline.Plan, text.Segmentation, error) {
 	input := doc.text
 	breaks := docBreaks(doc, form.Display, func(off int) int { return displayOffset(g.Edits, off) })
 	pauses := pausesOf(g)
@@ -43,7 +44,7 @@ func planDoc(doc textDoc, g guard.Result, form spoken.Result, budget float64, s 
 		Seg:      seg,
 		Findings: planFindings(input, g, form),
 		Pauses:   durations,
-		Marks:    markSpans(spokenMarks(g, form)),
+		Marks:    append(markSpans(spokenMarks(g, form)), lexiconSpans(form, lex)...),
 	}
 	p, err := pipeline.Build(in, planSettings(s))
 	if err != nil {
@@ -128,6 +129,8 @@ func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, delivery string, ladde
 				RequestLike: requestLike,
 				Protected:   c.Protected,
 				LangSpans:   langSpans(c.LangSpans),
+				Lexicon:     lexiconWords(c.Hints),
+				Equivalents: equivalents(c.Hints),
 			},
 			Spec:   spec,
 			Ladder: ladder,
@@ -138,6 +141,32 @@ func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, delivery string, ladde
 		}
 	}
 	return tasks
+}
+
+// lexiconWords are the words the lexicon pairs of a chunk put in its spoken form: the term
+// of a hint (the text is unchanged, so the transcript should spell it) and the rewrite of a
+// say entry. Verification protects them and offers them to STT as keywords.
+func lexiconWords(hs []pipeline.Hint) []string {
+	var out []string
+	for _, h := range hs {
+		if h.Say != "" {
+			out = append(out, h.Say)
+		} else {
+			out = append(out, h.Term)
+		}
+	}
+	return out
+}
+
+// equivalents are the say pairs of a chunk, for verification.
+func equivalents(hs []pipeline.Hint) []verify.SayPair {
+	var out []verify.SayPair
+	for _, h := range hs {
+		if h.Say != "" {
+			out = append(out, verify.SayPair{Written: h.Term, Spoken: h.Say})
+		}
+	}
+	return out
 }
 
 // langSpans converts the plan's {{lang}} spans for verification.

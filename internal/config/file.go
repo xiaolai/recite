@@ -151,7 +151,7 @@ func (p *fileParser) walk(dst map[string]Value, docPrefix, keyPath []string, nam
 		return
 	}
 	if known && (!k.NoFile || layer == LayerFrontMatter) {
-		raw, err := toText(v, k.List)
+		raw, err := keyText(k, v)
 		if err == nil && k.Check != nil {
 			err = k.Check(raw)
 		}
@@ -169,6 +169,18 @@ func (p *fileParser) walk(dst map[string]Value, docPrefix, keyPath []string, nam
 		return
 	}
 	p.fail(doc, "unknown key %q", full)
+}
+
+// keyText renders a TOML value as the text of key k.
+func keyText(k Key, v any) (string, error) {
+	if k.Table == nil {
+		return toText(v, k.List)
+	}
+	t, ok := v.(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("want a table, not %s", tomlType(v))
+	}
+	return k.Table(t)
 }
 
 // toText renders a TOML value in the syntax the matching flag takes.
