@@ -1,0 +1,6 @@
+start     "Parsing JSON in Go"
+paragraph "Use encoding/json from the standard library."
+paragraph "Decode with json.Unmarshal:"
+paragraph "Errors wrap with %w, so errors.Is works."
+heading 1 "Parsing JSON in Go"
+warning: "skipped 4 code blocks, 3 HTML elements, 2 tables"
