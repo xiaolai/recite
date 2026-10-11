@@ -146,7 +146,7 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 		c.errorf("%s: %v", req.prefix(), err)
 		return sayJob{}, ExitUsage
 	}
-	tasks := tasksFor(plan, spec)
+	tasks := tasksFor(plan, spec, req.RetryEffort)
 	if req.DryRun {
 		// A dry run writes nothing and needs no output target; it reads the cache if one exists.
 		job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc}

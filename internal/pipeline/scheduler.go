@@ -55,10 +55,13 @@ func ValidateJobs(jobs, verifyJobs int) error {
 
 // Task is one chunk to render and verify.
 type Task struct {
-	Chunk  verify.Chunk
-	Spec   realtime.SessionSpec // its session key is the pool key
-	Style  string
-	Effort realtime.Effort // the chunk's effective effort; "" means the session's
+	Chunk verify.Chunk
+	Spec  realtime.SessionSpec // its session key is the pool key
+	Style string
+	// Ladder is --retry-effort (SPK-11): the effort of each attempt, the last entry repeating.
+	// Without one every attempt runs at Spec.Effort. The effective effort is always sent, so
+	// a response on a pooled session minted at another effort carries its override (N3).
+	Ladder []realtime.Effort
 	// Render, when set, is sent to the synthesizer instead of Chunk.Spoken, which stays the
 	// reference the take is verified against. Only the calibration harness sets it (VER-07):
 	// it renders an edited passage and verifies it against the original.
@@ -510,7 +513,8 @@ func (s *sched) render(ctx context.Context, j renderJob) (realtime.Take, error) 
 			say = t.Render
 		}
 		tk, err := lease.Render(ctx, realtime.RenderRequest{
-			ChunkID: t.Chunk.ID, Text: say, Style: t.Style, Effort: t.Effort,
+			ChunkID: t.Chunk.ID, Text: say, Style: t.Style,
+			Effort:  realtime.EffectiveEffort(t.Spec.Effort, t.Ladder, j.n),
 			Attempt: j.n, Estimate: t.Chunk.Estimate,
 		})
 		if err != nil {

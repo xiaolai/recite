@@ -87,8 +87,10 @@ type SayRequest struct {
 	Force      bool
 	MaxInput   int64
 	Settings   realtime.Settings
-	Guard      guard.Options
-	Spoken     spoken.Options
+	// RetryEffort is --retry-effort (SPK-11); nil means every attempt runs at Settings.Effort.
+	RetryEffort []realtime.Effort
+	Guard       guard.Options
+	Spoken      spoken.Options
 
 	InputFormat string // --input-format: text or spoken (TXT-15)
 	Marks       bool   // speech marks are read (TXT-13)
@@ -128,6 +130,7 @@ var hiddenFlags = map[string]bool{"instructions-version": true}
 // every error lists the valid values and nothing touches the network first.
 type sayFlags struct {
 	model, voice, speed, effort string
+	retryEffort                 string
 	modelUnchecked              bool
 	instructionsVersion         int
 }
@@ -138,6 +141,7 @@ func (f *sayFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.voice, "voice", realtime.DefaultVoice, "`VOICE`: "+strings.Join(realtime.Voices, ", "))
 	fs.StringVar(&f.speed, "speed", "1.0", "`SPEED` from 0.25 to 1.5 in steps of 0.01")
 	fs.StringVar(&f.effort, "effort", string(realtime.DefaultEffort), "reasoning `EFFORT`: minimal, low, medium, high, xhigh")
+	fs.StringVar(&f.retryEffort, "retry-effort", "", "`LIST` of efforts for attempts 1, 2, 3…, the last repeating, e.g. minimal,low,medium (default off)")
 	fs.IntVar(&f.instructionsVersion, "instructions-version", realtime.InstructionsVersion, "instruction `VERSION` (regression comparison only)")
 }
 
@@ -379,12 +383,16 @@ func (c *CLI) sayRequest(fs *flag.FlagSet, all *settingFlags) (SayRequest, error
 	if err != nil {
 		return SayRequest{}, err
 	}
+	ladder, err := realtime.ParseEffortLadder(all.sf.retryEffort)
+	if err != nil {
+		return SayRequest{}, err
+	}
 	inFormat, marks, err := all.tf.inputMode()
 	if err != nil {
 		return SayRequest{}, err
 	}
 	g.Marks = marks
-	req := SayRequest{Globals: c.globals, MaxInput: all.tf.maxInput, Settings: settings, Guard: g, Spoken: so,
+	req := SayRequest{Globals: c.globals, MaxInput: all.tf.maxInput, Settings: settings, RetryEffort: ladder, Guard: g, Spoken: so,
 		InputFormat: inFormat, Marks: marks, ChunkSeconds: all.tf.chunkSeconds, CacheDir: st.Get("cache_dir").Raw}
 	if err := all.rf.apply(&req); err != nil {
 		return SayRequest{}, err

@@ -108,3 +108,30 @@ func ParseEffort(s string) (Effort, error) {
 	}
 	return "", fmt.Errorf("unknown effort %q; valid efforts: %s", s, strings.Join(names, ", "))
 }
+
+// ParseEffortLadder validates --retry-effort: a comma-separated list of efforts, one per
+// attempt (SPK-11). "" means no ladder and returns nil.
+func ParseEffortLadder(s string) ([]Effort, error) {
+	if s == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]Effort, len(parts))
+	for i, p := range parts {
+		e, err := ParseEffort(strings.TrimSpace(p))
+		if err != nil {
+			return nil, fmt.Errorf("--retry-effort %q, entry %d: %w", s, i+1, err)
+		}
+		out[i] = e
+	}
+	return out, nil
+}
+
+// EffectiveEffort is the effort of a 1-based attempt (SPK-11): ladder[attempt-1] when a ladder
+// is set, its last entry repeating, otherwise base.
+func EffectiveEffort(base Effort, ladder []Effort, attempt int) Effort {
+	if len(ladder) == 0 {
+		return base
+	}
+	return ladder[min(max(attempt, 1), len(ladder))-1]
+}

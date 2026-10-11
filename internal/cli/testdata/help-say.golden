@@ -71,6 +71,8 @@ Flags:
     	render every chunk anew; the takes still go to the cache
   -request-extra-attempts N
     	extra renders for a request-like chunk, N (default 1)
+  -retry-effort LIST
+    	LIST of efforts for attempts 1, 2, 3…, the last repeating, e.g. minimal,low,medium (default off)
   -sample-rate HZ
     	output sample rate HZ: 16000, 22050, 24000, 44100, 48000 (default "24000")
   -session-chunks N

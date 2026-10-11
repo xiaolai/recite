@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/xiaolai/recite/internal/guard"
+	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 )
 
@@ -56,6 +58,30 @@ func TestSayEffortFlag(t *testing.T) {
 	}
 	if r := run("say", "Hi", "--effort", "xhigh"); r.code != ExitOK || r.says[0].Settings.Effort != "xhigh" {
 		t.Errorf("xhigh: %+v", r)
+	}
+}
+
+// accept: SPK-11#5
+func TestSayRetryEffortFlag(t *testing.T) {
+	for _, bad := range []string{"minimal,max", "low,,medium", ",", "none"} {
+		rejected(t, "minimal, low, medium, high, xhigh", "--retry-effort", bad)
+	}
+	r := run("say", "Hi", "--effort", "high", "--retry-effort", "minimal, low")
+	if r.code != ExitOK || !slices.Equal(r.says[0].RetryEffort, []realtime.Effort{"minimal", "low"}) || r.says[0].Settings.Effort != "high" {
+		t.Errorf("ladder: %+v", r)
+	}
+	if r := run("say", "Hi"); r.code != ExitOK || r.says[0].RetryEffort != nil {
+		t.Errorf("default is off: %+v", r)
+	}
+}
+
+func TestTasksForCarriesLadder(t *testing.T) {
+	p := pipeline.Plan{Chunks: []pipeline.Chunk{{ID: "c0001", Spoken: "Hi."}, {ID: "c0002", Spoken: "Bye."}}}
+	ladder := []realtime.Effort{"minimal", "low"}
+	for _, task := range tasksFor(p, realtime.SessionSpec{Effort: "high"}, ladder) {
+		if !slices.Equal(task.Ladder, ladder) || task.Spec.Effort != "high" {
+			t.Errorf("%s: ladder %v effort %s", task.Chunk.ID, task.Ladder, task.Spec.Effort)
+		}
 	}
 }
 

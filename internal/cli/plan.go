@@ -103,7 +103,7 @@ func displayOffset(edits []guard.Edit, orig int) int {
 
 // tasksFor turns the plan into scheduler tasks. A chunk holding a G-REQUEST finding gets the
 // extra attempt of TXT-14.
-func tasksFor(p pipeline.Plan, spec realtime.SessionSpec) []pipeline.Task {
+func tasksFor(p pipeline.Plan, spec realtime.SessionSpec, ladder []realtime.Effort) []pipeline.Task {
 	tasks := make([]pipeline.Task, len(p.Chunks))
 	for i, c := range p.Chunks {
 		requestLike := false
@@ -122,7 +122,8 @@ func tasksFor(p pipeline.Plan, spec realtime.SessionSpec) []pipeline.Task {
 				Protected:   c.Protected,
 				LangSpans:   langSpans(c.LangSpans),
 			},
-			Spec: spec,
+			Spec:   spec,
+			Ladder: ladder,
 			// Speech-mark instructions ride after the rules (realtime.ResponseInstructions).
 			Style:    strings.Join(c.Instructions, "\n"),
 			CacheKey: c.CacheKey,
