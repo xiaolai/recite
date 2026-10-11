@@ -131,7 +131,8 @@ func scanMoney(s string, i int) (money, bool) {
 			}
 			n.Neg = neg
 			mo = money{n: n, sym: sym, end: n.End}
-			if m := scaleRe.FindStringSubmatch(s[n.End:]); m != nil {
+			// scaleRe's \b knows only ASCII letters; wordEnd applies it to Unicode ("$5 bñ").
+			if m := scaleRe.FindStringSubmatch(s[n.End:]); m != nil && wordEnd(s, n.End+len(m[0])) {
 				mo.scale = m[1] + scaleWords[m[2]]
 				mo.end = n.End + len(m[0])
 			}

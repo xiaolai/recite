@@ -13,7 +13,7 @@ import (
 
 // CanonVersion identifies the canonicaliser's behaviour. Bump it on any change
 // to Canon's output: cache keys and verification provenance record it.
-const CanonVersion = 2
+const CanonVersion = 3
 
 // Canon canonicalises s into comparison tokens (design §8.3): NFKC and width
 // folding, abbreviation expansion, lower case, numbers to English words (one
@@ -64,7 +64,7 @@ func canon(s string, joinHyphens bool) []string {
 			if !joinHyphens {
 				b.WriteByte(' ')
 			}
-		case unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r):
+		case tokenRune(r):
 			b.WriteRune(r)
 		default:
 			b.WriteByte(' ')
@@ -131,15 +131,28 @@ var abbreviations = map[string]string{
 // "street" (Main St.). "dr" is always "doctor": the Drive reading is rare
 // enough in spoken text that a context rule would misfire more than it helps.
 func expandAbbreviations(s string) string {
-	s = latinAbbrev.ReplaceAllStringFunc(s, func(m string) string {
-		if strings.EqualFold(m[:1], "e") {
-			return " for example "
-		}
-		return " that is "
-	})
 	var b strings.Builder
 	last := 0
+	for _, loc := range latinAbbrev.FindAllStringSubmatchIndex(s, -1) {
+		if !wordBounded(s, loc[2], loc[3]) {
+			continue
+		}
+		b.WriteString(s[last:loc[0]])
+		if strings.EqualFold(s[loc[2]:loc[2]+1], "e") {
+			b.WriteString(" for example ")
+		} else {
+			b.WriteString(" that is ")
+		}
+		last = loc[1]
+	}
+	b.WriteString(s[last:])
+	s = b.String()
+	b.Reset()
+	last = 0
 	for _, loc := range wordAbbrev.FindAllStringSubmatchIndex(s, -1) {
+		if !wordBounded(s, loc[2], loc[3]) {
+			continue
+		}
 		b.WriteString(s[last:loc[0]])
 		word := strings.ToLower(s[loc[2]:loc[3]])
 		exp := abbreviations[word]
@@ -172,6 +185,17 @@ const maxCardinal = numwords.MaxCardinal
 func isASCIIDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+// wordBounded reports whether s[start:end] is a whole word under Unicode: regexp's \b knows
+// only ASCII letters, so "ms" in "msð" passes \b, and a second Canon pass would expand it.
+func wordBounded(s string, start, end int) bool {
+	before, _ := utf8.DecodeLastRuneInString(s[:start])
+	after, _ := utf8.DecodeRuneInString(s[end:])
+	return !tokenRune(before) && !tokenRune(after)
+}
+
+// tokenRune is a rune canon keeps inside a token: a letter, a combining mark or a digit.
+func tokenRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r) }
 
 // englishNumbers rewrites every ASCII digit run as English words, so no ASCII
 // digit survives (which keeps Canon idempotent). It reads thousands

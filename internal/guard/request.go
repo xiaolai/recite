@@ -11,7 +11,7 @@ import (
 // It never changes text: a false flag costs at most one extra render attempt,
 // so the patterns favour recall.
 var (
-	reIgnore     = regexp.MustCompile(`(?i)\b(?:ignore|disregard|forget)\b.{0,60}\b(?:instructions?|rules|prompts?|directions|guidelines|everything)\b`)
+	reIgnore     = regexp.MustCompile(`(?i)\b(ignore|disregard|forget)\b.{0,60}?\b(instructions?|rules|prompts?|directions|guidelines|everything)\b`)
 	reYou        = regexp.MustCompile(`(?i)\byou(?:r|rs|rself)?\b`)
 	reModalYou   = regexp.MustCompile(`(?i)\b(?:can|could|would|will|won't|do|did|are|have|should)\s+you\b`)
 	reWantYou    = regexp.MustCompile(`(?i)\b(?:want|need|like)\s+you\s+to\b`)
@@ -33,6 +33,17 @@ var imperativeVerbs = map[string]bool{
 	"stop": true, "continue": true, "send": true, "search": true, "look": true, "say": true,
 }
 
+// ignoreRequest is reIgnore with both keywords whole Unicode words: its inner \b, like every
+// \b, knows only ASCII letters ("Ignoreé" is not "ignore").
+func ignoreRequest(s string) bool {
+	for _, loc := range reIgnore.FindAllStringSubmatchIndex(s, -1) {
+		if bounded(s, loc[2], loc[3]) && bounded(s, loc[4], loc[5]) {
+			return true
+		}
+	}
+	return false
+}
+
 // RequestLike reports whether sentence reads like a request to the model:
 // a question to "you", an imperative opening, "ignore … instructions", or a
 // Chinese 请/帮我/你 + verb pattern.
@@ -43,10 +54,10 @@ func RequestLike(sentence string) bool {
 	if s == "" {
 		return false
 	}
-	if reIgnore.MatchString(s) || reModalYou.MatchString(s) || reWantYou.MatchString(s) {
+	if ignoreRequest(s) || matchBounded(reModalYou, s) || matchBounded(reWantYou, s) {
 		return true
 	}
-	if last, _ := utf8.DecodeLastRuneInString(s); (last == '?' || last == '？') && reYou.MatchString(s) {
+	if last, _ := utf8.DecodeLastRuneInString(s); (last == '?' || last == '？') && matchBounded(reYou, s) {
 		return true
 	}
 	if w := reFirstWord.FindString(s); imperativeVerbs[strings.ToLower(w)] {

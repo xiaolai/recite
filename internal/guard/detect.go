@@ -63,8 +63,18 @@ func mk(code Code, act Action, start, end int, repl string, sev Severity) match 
 // regexMatches turns every match of re into a match, with repl computing the
 // replacement (and ok=false to skip the occurrence).
 func regexMatches(s string, re *regexp.Regexp, code Code, act Action, sev Severity, repl func(m string) (string, bool)) []match {
+	return regexLocMatches(s, re.FindAllStringIndex(s, -1), code, act, sev, repl)
+}
+
+// regexMatchesBounded is regexMatches for a pattern bounded by \b, with the boundary applied
+// to Unicode letters and digits (see bounded).
+func regexMatchesBounded(s string, re *regexp.Regexp, code Code, act Action, sev Severity, repl func(m string) (string, bool)) []match {
+	return regexLocMatches(s, boundedIndex(re, s), code, act, sev, repl)
+}
+
+func regexLocMatches(s string, locs [][]int, code Code, act Action, sev Severity, repl func(m string) (string, bool)) []match {
 	var ms []match
-	for _, loc := range re.FindAllStringIndex(s, -1) {
+	for _, loc := range locs {
 		r, ok := repl(s[loc[0]:loc[1]])
 		if !ok {
 			continue
@@ -134,7 +144,7 @@ func findMarkup(s string, act Action, o *Options) []match {
 	sev := rules[Markup].sev
 	var ms []match
 	ms = append(ms, regexMatches(s, reTag, Markup, act, sev, func(m string) (string, bool) {
-		if reBlockTag.MatchString(m) {
+		if loc := reBlockTag.FindStringSubmatchIndex(m); loc != nil && bounded(m, 0, loc[3]) {
 			return " ", true
 		}
 		return "", true
@@ -185,7 +195,7 @@ func dotted(host string) string {
 
 func findURL(s string, act Action, _ *Options) []match {
 	var ms []match
-	for _, loc := range reURL.FindAllStringIndex(s, -1) {
+	for _, loc := range boundedIndex(reURL, s) {
 		raw := trimURL(s[loc[0]:loc[1]])
 		end := loc[0] + len(raw)
 		full := raw
@@ -264,7 +274,7 @@ func findPath(s string, act Action, _ *Options) []match {
 		return "", true
 	}
 	ms := regexMatches(s, rePathSlash, Path, act, rules[Path].sev, repl)
-	ms = append(ms, regexMatches(s, rePathBack, Path, act, rules[Path].sev, repl)...)
+	ms = append(ms, regexMatchesBounded(s, rePathBack, Path, act, rules[Path].sev, repl)...)
 	// speak keeps the text; the spoken-form stage reads it.
 	for i := range ms {
 		if act == ActSpeak {
@@ -277,7 +287,7 @@ func findPath(s string, act Action, _ *Options) []match {
 var reCode = regexp.MustCompile(`\b[A-Za-z_]\w*\(\)|\b[A-Za-z_]\w*(?:\.\w+){2,}\b|\b0[xX][0-9A-Fa-f]+\b|\b[A-Za-z]\w*_\w+\b`)
 
 func findCode(s string, act Action, _ *Options) []match {
-	return regexMatches(s, reCode, CodeToken, act, rules[CodeToken].sev, drop)
+	return regexMatchesBounded(s, reCode, CodeToken, act, rules[CodeToken].sev, drop)
 }
 
 // --- G-FOOTNOTE ---

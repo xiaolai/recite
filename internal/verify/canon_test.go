@@ -56,6 +56,7 @@ func TestCanonForms(t *testing.T) {
 		"一九九九":             "one thousand nine hundred ninety nine",
 		"一亿两千万":            "one hundred twenty million",
 		"Hello—world":      "hello world",
+		"msð":              "msð", // "ms" is not a whole word here, though regexp's \b says so
 	}
 	for in, want := range cases {
 		if got := strings.Join(Canon(in), " "); got != want {
