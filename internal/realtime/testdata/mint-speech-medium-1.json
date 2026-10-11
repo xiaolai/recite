@@ -1,0 +1,1 @@
+{"session":{"type":"realtime","model":"gpt-realtime-2.1","instructions":"<INSTR>","tools":[],"tool_choice":"none","output_modalities":["audio"],"reasoning":{"effort":"medium"},"audio":{"output":{"format":{"type":"audio/pcm","rate":24000},"voice":"cedar","speed":1}}},"expires_after":{"anchor":"created_at","seconds":600}}

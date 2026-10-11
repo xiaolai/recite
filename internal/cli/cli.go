@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/xiaolai/recite/internal/logx"
 )
@@ -20,13 +21,16 @@ type CLI struct {
 	Say    func(SayRequest) int
 	// Logger is the redacting logger, set up from the global flags before a command runs.
 	Logger *slog.Logger
+	// Getenv and Now are the environment and clock; tests replace them.
+	Getenv func(string) string
+	Now    func() time.Time
 
 	globals Globals
 }
 
 // New returns a CLI writing to stdout and stderr.
 func New(stdout, stderr io.Writer) *CLI {
-	c := &CLI{Stdout: stdout, Stderr: stderr}
+	c := &CLI{Stdout: stdout, Stderr: stderr, Getenv: os.Getenv, Now: time.Now}
 	c.Say = c.defaultSay
 	return c
 }

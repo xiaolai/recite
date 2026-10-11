@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/xiaolai/recite/internal/logx"
 )
@@ -87,10 +89,63 @@ func (c *Client) GetAuthStatus(ctx context.Context, includeToken, refreshToken b
 	return s, nil
 }
 
-// ReadAccount calls account/read and returns the raw result (decoded by WP-1.4).
+// ReadAccount calls account/read and returns the raw result.
 func (c *Client) ReadAccount(ctx context.Context) (json.RawMessage, error) {
 	var out json.RawMessage
 	return out, c.Call(ctx, "account/read", nil, &out)
+}
+
+// PlanType returns account/read's account.planType, "" when absent. Only this
+// field is decoded: the email and account IDs never reach a Go value (AUTH-06).
+func (c *Client) PlanType(ctx context.Context) (string, error) {
+	var out struct {
+		Account *struct {
+			PlanType string `json:"planType"`
+		} `json:"account"`
+	}
+	if err := c.Call(ctx, "account/read", nil, &out); err != nil {
+		return "", err
+	}
+	if out.Account == nil {
+		return "", nil
+	}
+	return logx.Scrub(out.Account.PlanType), nil
+}
+
+// Version extracts the Codex version from an initialize userAgent such as
+// "codex_cli_rs/0.162.1 (Mac OS 15.0; arm64)"; "" when there is none.
+func Version(userAgent string) string {
+	_, rest, ok := strings.Cut(userAgent, "/")
+	if !ok {
+		return ""
+	}
+	end := strings.IndexFunc(rest, func(r rune) bool { return r != '.' && (r < '0' || r > '9') })
+	if end >= 0 {
+		rest = rest[:end]
+	}
+	if rest == "" || rest[0] < '0' || rest[0] > '9' {
+		return ""
+	}
+	return rest
+}
+
+// VersionLess reports whether dotted numeric version a is below b. Missing
+// components count as zero.
+func VersionLess(a, b string) bool {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := range max(len(as), len(bs)) {
+		x, y := 0, 0
+		if i < len(as) {
+			x, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			y, _ = strconv.Atoi(bs[i])
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
 }
 
 // ReadRateLimits calls account/rateLimits/read and returns the raw result.

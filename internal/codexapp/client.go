@@ -59,6 +59,7 @@ type Client struct {
 	timeout time.Duration
 	logger  *slog.Logger
 	stderr  boundedBuffer
+	agent   string // initialize userAgent, scrubbed
 
 	writeMu sync.Mutex
 	mu      sync.Mutex
@@ -142,10 +143,14 @@ func Start(ctx context.Context, cfg Config) (*Client, error) {
 		"clientInfo":   map[string]any{"name": "recite", "version": "0"},
 		"capabilities": map[string]any{},
 	}
-	if err := c.Call(ctx, "initialize", init, nil); err != nil {
+	var hello struct {
+		UserAgent string `json:"userAgent"`
+	}
+	if err := c.Call(ctx, "initialize", init, &hello); err != nil {
 		_ = c.Close()
 		return nil, err
 	}
+	c.agent = logx.Scrub(hello.UserAgent)
 	if err := c.notify("initialized"); err != nil {
 		_ = c.Close()
 		return nil, err
@@ -169,6 +174,9 @@ func childEnv(env []string, home string) []string {
 	}
 	return out
 }
+
+// UserAgent returns the userAgent of the initialize result, "" when absent.
+func (c *Client) UserAgent() string { return c.agent }
 
 // PID returns the child's process ID.
 func (c *Client) PID() int { return c.cmd.Process.Pid }

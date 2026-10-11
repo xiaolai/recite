@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xiaolai/recite/docs/schema/events.schema.json",
+  "title": "recite --json events",
+  "description": "One NDJSON line on stdout per event (design §12.5). Version 1 (M1); WP-3.8 extends it.",
+  "version": 1,
+  "oneOf": [
+    { "$ref": "#/$defs/auth_error" },
+    { "$ref": "#/$defs/auth_status" }
+  ],
+  "$defs": {
+    "state": {
+      "enum": ["ready", "no-codex", "codex-too-old", "not-signed-in", "api-key", "unsupported-auth", "expired", "codex-error"]
+    },
+    "auth_error": {
+      "description": "The login guide of a non-ready state (design §5.1a, AUTH-07).",
+      "type": "object",
+      "required": ["event", "state", "message", "fix_commands", "link"],
+      "additionalProperties": false,
+      "properties": {
+        "event": { "const": "auth_error" },
+        "state": {
+          "allOf": [ { "$ref": "#/$defs/state" }, { "not": { "const": "ready" } } ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "fix_commands": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "link": { "type": "string", "format": "uri", "pattern": "^https://" }
+      }
+    },
+    "auth_status": {
+      "description": "`recite auth status --json` when the state is ready (AUTH-06). Never a token, email or account ID.",
+      "type": "object",
+      "required": ["event", "state", "source", "codex_path", "codex_version", "auth_method", "plan_type", "token_expires_in_s"],
+      "additionalProperties": false,
+      "properties": {
+        "event": { "const": "auth_status" },
+        "state": { "const": "ready" },
+        "source": { "enum": ["codex app-server", "file"] },
+        "codex_path": { "type": "string" },
+        "codex_version": { "type": "string" },
+        "auth_method": { "const": "chatgpt" },
+        "plan_type": { "type": "string" },
+        "token_expires_in_s": { "type": "integer" }
+      }
+    }
+  }
+}

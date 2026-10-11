@@ -1,0 +1,6 @@
+Codex is signed in with an API key. recite works only with a ChatGPT sign-in, and never uses API keys.
+  Sign out, then sign in with ChatGPT:
+      CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' logout
+      CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' login
+  Warning: this changes how Codex itself signs in.
+More help: https://learn.chatgpt.com/docs/auth

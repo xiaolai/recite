@@ -55,43 +55,68 @@ func (s *FileSource) Token(_ context.Context) (Token, error) {
 }
 
 func (s *FileSource) read() (Token, error) {
+	mode, bearer, err := s.load()
+	if err != nil {
+		return Token{}, err
+	}
+	if err := guard(mode); err != nil {
+		return Token{}, err
+	}
+	return s.bearer(bearer)
+}
+
+// bearer validates the access token of a ChatGPT sign-in.
+func (s *FileSource) bearer(b string) (Token, error) {
+	if b == "" {
+		return Token{}, codexError(fmt.Sprintf("%s has a ChatGPT sign-in without an access token; run `codex login`", s.path))
+	}
+	return newBearer(b, "file")
+}
+
+// errNoFile marks a missing auth.json, so the probe can tell "nothing there"
+// from "something unusable there".
+var errNoFile = errors.New("auth.json does not exist")
+
+// load reads the file and returns its auth_mode ("" when absent) and access
+// token. A missing file is auth-mode wrapping errNoFile; an unreadable,
+// oversized or malformed one is codex-error.
+func (s *FileSource) load() (mode, bearer string, err error) {
 	f, err := os.OpenFile(s.path, os.O_RDONLY, 0)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Token{}, authModeError(fmt.Sprintf("Codex is not signed in: %s does not exist; run `codex login`", s.path))
+		return "", "", &openai.Error{Class: openai.ClassAuthMode, Message: fmt.Sprintf("Codex is not signed in: %s does not exist; run `codex login`", s.path), Err: errNoFile}
 	}
 	if err != nil {
-		return Token{}, &openai.Error{Class: openai.ClassCodexError, Message: "cannot open " + s.path, Err: err}
+		return "", "", &openai.Error{Class: openai.ClassCodexError, Message: "cannot open " + s.path, Err: err}
 	}
 	defer func() { _ = f.Close() }()
 	buf, err := io.ReadAll(io.LimitReader(f, maxAuthFile+1))
 	// The raw bytes hold every field, including OPENAI_API_KEY; wipe them once decoded.
 	defer clear(buf)
 	if err != nil {
-		return Token{}, &openai.Error{Class: openai.ClassCodexError, Message: "cannot read " + s.path, Err: err}
+		return "", "", &openai.Error{Class: openai.ClassCodexError, Message: "cannot read " + s.path, Err: err}
 	}
 	if len(buf) > maxAuthFile {
-		return Token{}, codexError(fmt.Sprintf("%s is larger than 64 KiB; it is not a Codex sign-in file", s.path))
+		return "", "", codexError(fmt.Sprintf("%s is larger than 64 KiB; it is not a Codex sign-in file", s.path))
 	}
 	var af authFile
 	if err := json.Unmarshal(buf, &af); err != nil {
-		return Token{}, codexError(fmt.Sprintf("%s is not valid JSON; run `codex login` to rewrite it", s.path))
+		return "", "", codexError(fmt.Sprintf("%s is not valid JSON; run `codex login` to rewrite it", s.path))
 	}
-	mode := ""
 	if af.AuthMode != nil {
 		mode = *af.AuthMode
 	}
-	if err := guard(mode); err != nil {
-		return Token{}, err
+	if mode == modeChatGPT && af.Tokens != nil {
+		bearer = af.Tokens.AccessToken
 	}
-	if af.Tokens == nil || af.Tokens.AccessToken == "" {
-		return Token{}, codexError(fmt.Sprintf("%s has a ChatGPT sign-in without an access token; run `codex login`", s.path))
-	}
-	return newBearer(af.Tokens.AccessToken, "file")
+	return mode, bearer, nil
 }
+
+// MsgFileCannotRefresh is the AUTH-04 message of the file source, which cannot refresh.
+const MsgFileCannotRefresh = "the ChatGPT sign-in in auth.json has expired or is about to, and recite cannot refresh it; run any `codex` command to refresh it, or `codex login`"
 
 // Refresh is impossible for the file source: only Codex may rotate tokens (design D2).
 func (s *FileSource) Refresh(_ context.Context) (Token, error) {
-	return Token{}, &openai.Error{Class: openai.ClassAuthExpired, Message: "the auth.json source cannot refresh; run `codex login`"}
+	return Token{}, &openai.Error{Class: openai.ClassAuthExpired, Message: MsgFileCannotRefresh}
 }
 
 // Close is a no-op, so both sources share one lifecycle.

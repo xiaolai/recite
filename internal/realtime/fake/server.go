@@ -137,6 +137,9 @@ type config struct {
 	deltaDelay   time.Duration
 	sleep        func(context.Context, time.Duration)
 	mintStatus   int
+	mintCode     string // overrides the code of the injected mint error
+	mintParam    string // the param of the injected mint error; "" = null
+	rejectBearer string // answer 401 invalid_token to mints carrying this bearer
 }
 
 // WithCloseAfter closes the WebSocket abruptly after n server events (close mid-response).
@@ -161,6 +164,18 @@ func WithUnknownEvent(n int) Option { return func(c *config) { c.unknownAfter = 
 // WithMintError makes the mint endpoint answer status with an OpenAI-style error body.
 func WithMintError(status int) Option { return func(c *config) { c.mintStatus = status } }
 
+// WithMintErrorDetail is WithMintError with the error body's code and param set
+// (param "" stays null).
+func WithMintErrorDetail(status int, code, param string) Option {
+	return func(c *config) { c.mintStatus, c.mintCode, c.mintParam = status, code, param }
+}
+
+// WithMintRejectBearer answers 401 invalid_token to every mint whose bearer is
+// bearer, and mints normally otherwise: a token that expired server-side.
+func WithMintRejectBearer(bearer string) Option {
+	return func(c *config) { c.rejectBearer = bearer }
+}
+
 // UnknownEventType is the type sent by WithUnknownEvent.
 const UnknownEventType = "fake.unknown_event"
 
@@ -182,6 +197,7 @@ type Server struct {
 	sent      []string
 	mints     []MintRequest
 	wsHeaders []http.Header
+	pings     int
 	errs      []error
 }
 
@@ -241,6 +257,13 @@ func (s *Server) WebSocketHeaders() []http.Header {
 	return append([]http.Header(nil), s.wsHeaders...)
 }
 
+// Pings returns how many ping frames clients have sent (NET-03: recite sends none).
+func (s *Server) Pings() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pings
+}
+
 // Errors returns script mismatches and protocol errors seen by the fake.
 func (s *Server) Errors() []error {
 	s.mu.Lock()
@@ -272,14 +295,28 @@ func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
 	s.mints = append(s.mints, MintRequest{Header: r.Header.Clone(), Body: body})
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
+	if s.cfg.rejectBearer != "" && r.Header.Get("Authorization") == "Bearer "+s.cfg.rejectBearer {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"message": "token expired", "type": "invalid_request_error", "code": "invalid_token", "param": nil,
+		}})
+		return
+	}
 	if st := s.cfg.mintStatus; st != 0 {
 		tc, ok := mintErrorBodies[st]
 		if !ok {
 			tc = [2]string{"server_error", "server_error"}
 		}
+		if s.cfg.mintCode != "" {
+			tc[1] = s.cfg.mintCode
+		}
+		var param any
+		if s.cfg.mintParam != "" {
+			param = s.cfg.mintParam
+		}
 		w.WriteHeader(st)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
-			"message": fmt.Sprintf("fake mint error %d", st), "type": tc[0], "code": tc[1], "param": nil,
+			"message": fmt.Sprintf("fake mint error %d", st), "type": tc[0], "code": tc[1], "param": param,
 		}})
 		return
 	}
@@ -297,7 +334,12 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.wsHeaders = append(s.wsHeaders, r.Header.Clone())
 	s.mu.Unlock()
-	c, err := websocket.Accept(w, r, nil)
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{OnPingReceived: func(context.Context, []byte) bool {
+		s.mu.Lock()
+		s.pings++
+		s.mu.Unlock()
+		return true
+	}})
 	if err != nil {
 		s.fail(fmt.Errorf("ws accept: %w", err))
 		return

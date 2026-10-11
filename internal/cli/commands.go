@@ -31,7 +31,7 @@ func (c *CLI) commands() []command {
 		{"prepare", "FILE", "Write the editable spoken-form script", stub("prepare")},
 		{"voices", "", "List voices", stub("voices")},
 		{"doctor", "", "Check the environment and the route", stub("doctor")},
-		{"auth", "status|login", "Login state, or sign in through codex", stub("auth")},
+		{"auth", "status|login", "Login state, or sign in through codex", setupAuth},
 		{"usage", "", "Local ledger summary and Codex plan status", stub("usage")},
 		{"cache", "ls|prune|clear", "Manage the take cache", stub("cache")},
 		{"config", "show|path", "Effective merged config and its sources", stub("config")},

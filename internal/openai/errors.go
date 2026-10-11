@@ -137,6 +137,9 @@ func Classify(err error) Class {
 	if errors.As(err, &e) {
 		return e.Class
 	}
+	if c := classifyWebSocket(err); c != "" {
+		return c
+	}
 	if errors.Is(err, context.Canceled) {
 		return ClassCancelled
 	}
@@ -221,7 +224,7 @@ func rawString(raw json.RawMessage) string {
 }
 
 // classifyStatus holds the HTTP rows of design §5.3. The WebSocket rows (close
-// codes and error events) are added beside it in WP-1.4.
+// codes and error events) are beside it in wsclass.go.
 func classifyStatus(status int, code string) Class {
 	switch {
 	case status == http.StatusUnauthorized && code == "missing_scope":

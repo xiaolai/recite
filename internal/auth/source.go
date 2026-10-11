@@ -25,6 +25,9 @@ type Context struct {
 	CodexBin  string // absolute path; "" when no executable was found
 	CodexHome string // the CODEX_HOME in force; "" means Codex's default
 	Source    string // codex or file, after auto is resolved
+	// MissingBin is the executable the user named (--codex-bin or RECITE_CODEX_BIN) when it
+	// was not found, so the guide can point at the path rather than say Codex is missing.
+	MissingBin string
 }
 
 // ResolveContext resolves the executable, CODEX_HOME and the source (design §5.1a

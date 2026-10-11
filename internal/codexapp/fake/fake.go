@@ -5,6 +5,7 @@
 //	FAKECODEX_MODE          one of Modes (default chatgpt); unknown values exit 64
 //	FAKECODEX_TOKEN_EXP     unix exp of the chatgpt JWT (default now+1h)
 //	FAKECODEX_REFRESHED_EXP unix exp after refresh-ok refreshes (default now+2h)
+//	FAKECODEX_VERSION       version in the initialize userAgent (default 0.162.1)
 //	FAKECODEX_DELAY_MS      per-message delay in slow mode (default 15000, past the 10 s timeout)
 //	FAKECODEX_CANARY        stderr-canary token (default eyJcanary.canary.canary)
 //	FAKECODEX_RECORD        file that receives argv= and env= lines, in any mode, then one
@@ -34,6 +35,8 @@ var Modes = append(append([]string(nil), AuthModes...),
 	"rpc-error",      // getAuthStatus → {"code":-32000,"message":"credential store unavailable"}
 	"unknown-method", // getAuthStatus → -32601 method not found (an old Codex)
 	"stderr-canary",  // chatgpt, and the canary token written to stderr
+	"null-token",     // chatgpt, but authToken null even with includeToken true
+	"bad-jwt",        // chatgpt, but authToken is not a JWT
 )
 
 // BuildTo builds fakecodex into dir and returns its path; for use in TestMain.

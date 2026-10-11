@@ -94,8 +94,11 @@ func TestCodexSourceReturnsToken(t *testing.T) {
 	if i < 0 || j < i || strings.Count(reqs, "getAuthStatus") != 2 {
 		t.Fatalf("request order wrong:\n%s", reqs)
 	}
-	if _, err := s.Refresh(context.Background()); !errors.Is(err, ErrRefreshNotImplemented) {
+	if _, err := s.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh = %v", err)
+	}
+	if !strings.Contains(record(t, rec), `"refreshToken":true`) {
+		t.Fatal("Refresh did not ask Codex with refreshToken: true")
 	}
 }
 

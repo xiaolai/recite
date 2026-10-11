@@ -172,7 +172,7 @@ func TestStubsAndDefaultSay(t *testing.T) {
 		t.Errorf("say: code %d, %q", code, errb.String())
 	}
 	for _, cmd := range New(nil, nil).commands() {
-		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" {
+		if cmd.name == "say" || cmd.name == "version" || cmd.name == "help" || cmd.name == "auth" {
 			continue
 		}
 		r := run(cmd.name)

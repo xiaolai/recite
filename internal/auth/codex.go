@@ -12,8 +12,8 @@ import (
 	"github.com/xiaolai/recite/internal/openai"
 )
 
-// ErrRefreshNotImplemented is returned by CodexSource.Refresh until AUTH-04 (WP-1.4).
-var ErrRefreshNotImplemented = errors.New("auth: refresh through Codex is not implemented yet")
+// MsgRefreshFailed is the AUTH-04 message when Codex cannot refresh the sign-in.
+const MsgRefreshFailed = "Codex could not refresh the ChatGPT sign-in; run `codex login`"
 
 // CodexSource asks a `codex app-server` child for the token (AUTH-01). One child
 // is started on first use and kept until Close.
@@ -39,21 +39,49 @@ func (s *CodexSource) Token(ctx context.Context) (Token, error) {
 	if s.cached != nil {
 		return *s.cached, nil
 	}
-	if s.client == nil {
-		c, err := codexapp.Start(ctx, s.cfg)
-		if err != nil {
-			return Token{}, err
-		}
-		s.client = c
-	}
-	meta, err := s.client.GetAuthStatus(ctx, false, false)
+	method, err := s.methodLocked(ctx)
 	if err != nil {
 		return Token{}, err
 	}
-	if err := guard(meta.Method); err != nil {
+	if err := guard(method); err != nil {
 		return Token{}, err
 	}
-	full, err := s.client.GetAuthStatus(ctx, true, false)
+	return s.fetchLocked(ctx, false)
+}
+
+// startLocked starts the child on first use. The caller holds s.mu.
+func (s *CodexSource) startLocked(ctx context.Context) (*codexapp.Client, error) {
+	if s.client == nil {
+		c, err := codexapp.Start(ctx, s.cfg)
+		if err != nil {
+			return nil, err
+		}
+		s.client = c
+	}
+	return s.client, nil
+}
+
+// methodLocked is the metadata call, getAuthStatus {includeToken: false}.
+func (s *CodexSource) methodLocked(ctx context.Context) (string, error) {
+	c, err := s.startLocked(ctx)
+	if err != nil {
+		return "", err
+	}
+	meta, err := c.GetAuthStatus(ctx, false, false)
+	if err != nil {
+		return "", err
+	}
+	return meta.Method, nil
+}
+
+// fetchLocked asks for the token, refreshing through Codex when refresh is set.
+// Call it only after the metadata call reported chatgpt.
+func (s *CodexSource) fetchLocked(ctx context.Context, refresh bool) (Token, error) {
+	c, err := s.startLocked(ctx)
+	if err != nil {
+		return Token{}, err
+	}
+	full, err := c.GetAuthStatus(ctx, true, refresh)
 	if err != nil {
 		return Token{}, err
 	}
@@ -68,9 +96,58 @@ func (s *CodexSource) Token(ctx context.Context) (Token, error) {
 	return tok, nil
 }
 
-// Refresh is AUTH-04, built in WP-1.4.
-func (s *CodexSource) Refresh(_ context.Context) (Token, error) {
-	return Token{}, &openai.Error{Class: openai.ClassAuthExpired, Message: "token refresh is not available yet", Err: ErrRefreshNotImplemented}
+// Refresh asks Codex to refresh the sign-in with refreshToken: true. A plain
+// re-read is not enough: a running Codex serves its in-memory token until it
+// refreshes (spike S0.1). A refusal by Codex is auth-expired (exit 3); a crash or
+// timeout stays codex-error.
+func (s *CodexSource) Refresh(ctx context.Context) (Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tok, err := s.fetchLocked(ctx, true)
+	var rpc *codexapp.RPCError
+	if errors.As(err, &rpc) {
+		return Token{}, &openai.Error{Class: openai.ClassAuthExpired, Message: MsgRefreshFailed, Err: err}
+	}
+	return tok, err
+}
+
+// The probe (state.go) drives the same steps one at a time, so it can classify
+// each failure; these wrappers take the lock.
+
+// start starts the child and returns the Codex version from the initialize
+// userAgent, "" when unknown.
+func (s *CodexSource) start(ctx context.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.startLocked(ctx)
+	if err != nil {
+		return "", err
+	}
+	return codexapp.Version(c.UserAgent()), nil
+}
+
+func (s *CodexSource) method(ctx context.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.methodLocked(ctx)
+}
+
+func (s *CodexSource) fetch(ctx context.Context) (Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fetchLocked(ctx, false)
+}
+
+// plan returns the plan type for display; a failure leaves it unknown ("").
+func (s *CodexSource) plan(ctx context.Context) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.startLocked(ctx)
+	if err != nil {
+		return ""
+	}
+	p, _ := c.PlanType(ctx) // display only
+	return p
 }
 
 // Close reaps the child, if one was started.

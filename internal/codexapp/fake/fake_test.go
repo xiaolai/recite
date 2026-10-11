@@ -194,7 +194,8 @@ func TestModesAnswerGetAuthStatus(t *testing.T) {
 				t.Fatal("token returned with includeToken false")
 			}
 			want := map[string]string{"logged-out": "", "future-mode": "futureMode", "slow": "chatgpt",
-				"refresh-ok": "chatgpt", "refresh-fails": "chatgpt", "stderr-canary": "chatgpt"}
+				"refresh-ok": "chatgpt", "refresh-fails": "chatgpt", "stderr-canary": "chatgpt",
+				"null-token": "chatgpt", "bad-jwt": "chatgpt"}
 			wm, ok := want[mode]
 			if !ok {
 				wm = mode // the eight AuthMode values
@@ -207,12 +208,25 @@ func TestModesAnswerGetAuthStatus(t *testing.T) {
 				t.Fatalf("authMethod = %q, want %q", got, wm)
 			}
 			full, _ := c.status(true, false)
+			switch mode {
+			case "null-token":
+				if full.AuthToken != nil {
+					t.Fatal("null-token returned a token")
+				}
+			case "bad-jwt":
+				if full.AuthToken == nil || strings.HasPrefix(*full.AuthToken, "eyJ") {
+					t.Fatal("bad-jwt returned no token or a JWT")
+				}
+			}
 			switch wm {
 			case "":
 				if full.AuthToken != nil {
 					t.Fatal("logged-out returned a token")
 				}
 			case "chatgpt":
+				if mode == "null-token" || mode == "bad-jwt" {
+					break
+				}
 				if full.AuthToken == nil || jwtExp(t, *full.AuthToken) != 1800000000 {
 					t.Fatal("chatgpt token missing or exp not honoured")
 				}

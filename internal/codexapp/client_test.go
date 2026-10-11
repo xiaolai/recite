@@ -249,3 +249,25 @@ func TestBoundedStderr(t *testing.T) {
 		t.Fatalf("n=%d len=%d err=%v", n, len(b.String()), err)
 	}
 }
+
+func TestVersionParsing(t *testing.T) {
+	for ua, want := range map[string]string{
+		"codex_cli_rs/0.162.1 (Mac OS 15.0; arm64) iTerm": "0.162.1",
+		"fakecodex/0.150.3 (fake; test)":                  "0.150.3",
+		"codex/abc":                                       "",
+		"no-slash":                                        "",
+		"":                                                "",
+	} {
+		if got := Version(ua); got != want {
+			t.Errorf("Version(%q) = %q, want %q", ua, got, want)
+		}
+	}
+	for _, c := range []struct {
+		a, b string
+		less bool
+	}{{"0.150.3", "0.162.0", true}, {"0.162.0", "0.162.0", false}, {"0.162.1", "0.162.0", false}, {"0.162", "0.162.0", false}, {"1.0", "0.200.0", false}} {
+		if got := VersionLess(c.a, c.b); got != c.less {
+			t.Errorf("VersionLess(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}

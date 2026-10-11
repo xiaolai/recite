@@ -380,4 +380,50 @@ func TestMint(t *testing.T) {
 			t.Errorf("status %d: got %d %s", st, resp.StatusCode, body)
 		}
 	}
+	// Detail and per-bearer rejection.
+	resp, body = post(NewServer(t, sc, WithMintErrorDetail(400, "invalid_value", "session.audio.output.voice")))
+	if resp.StatusCode != 400 || !strings.Contains(string(body), `"param":"session.audio.output.voice"`) || !strings.Contains(string(body), `"code":"invalid_value"`) {
+		t.Errorf("detail: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := post(NewServer(t, sc, WithMintRejectBearer("eyJcanary.canary.canary"))); resp.StatusCode != 401 || !strings.Contains(string(body), "invalid_token") {
+		t.Errorf("reject bearer: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := post(NewServer(t, sc, WithMintRejectBearer("eyJother.other.other"))); resp.StatusCode != 200 {
+		t.Errorf("other bearer refused: %d", resp.StatusCode)
+	}
+}
+
+func TestPingsCounted(t *testing.T) {
+	sc, err := LoadScenario("speak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(t, sc)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, s.WebSocketURL(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A reader is needed to receive the pong; cancelling ctx ends it.
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for {
+			if _, _, err := c.Read(ctx); err != nil {
+				return
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		<-readDone
+		_ = c.CloseNow()
+	}()
+	if err := c.Ping(ctx); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	if n := s.Pings(); n != 1 {
+		t.Fatalf("Pings() = %d, want 1", n)
+	}
 }

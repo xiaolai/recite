@@ -93,7 +93,7 @@ func recordRequest(line []byte) error {
 }
 
 var extraModes = []string{"logged-out", "slow", "crash", "refresh-ok", "refresh-fails", "future-mode",
-	"rpc-error", "unknown-method", "stderr-canary"}
+	"rpc-error", "unknown-method", "stderr-canary", "null-token", "bad-jwt"}
 
 func validMode(m string) bool { return slices.Contains(authModes, m) || slices.Contains(extraModes, m) }
 
@@ -104,7 +104,8 @@ func authMethod(mode string) (string, bool) {
 		return "", false
 	case "future-mode":
 		return futureMode, true
-	case "slow", "refresh-ok", "refresh-fails", "stderr-canary", "rpc-error", "unknown-method", "crash":
+	case "slow", "refresh-ok", "refresh-fails", "stderr-canary", "rpc-error", "unknown-method", "crash",
+		"null-token", "bad-jwt":
 		return "chatgpt", true
 	}
 	return mode, true // one of authModes, checked by validMode
@@ -177,7 +178,11 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 		}
 		switch req.Method {
 		case "initialize":
-			reply(req.ID, map[string]any{"userAgent": "fakecodex/0.162.1"}, nil)
+			version := os.Getenv("FAKECODEX_VERSION")
+			if version == "" {
+				version = "0.162.1"
+			}
+			reply(req.ID, map[string]any{"userAgent": "fakecodex/" + version + " (fake; test)"}, nil)
 		case "getAuthStatus":
 			var p struct {
 				IncludeToken bool `json:"includeToken"`
@@ -213,9 +218,14 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 			res := map[string]any{"authMethod": nil, "authToken": nil, "requiresOpenaiAuth": true}
 			if ok {
 				res["authMethod"] = m
-				if p.IncludeToken {
+				switch {
+				case p.IncludeToken && mode == "null-token":
+					// chatgpt reported, but no token: an unusable sign-in
+				case p.IncludeToken && mode == "bad-jwt":
+					res["authToken"] = "not-a-jwt-canary"
+				case p.IncludeToken:
 					res["authToken"] = token(m, refreshed)
-				} else if leak == "token" {
+				case leak == "token":
 					res["authToken"] = canary() // a Codex that ignores includeToken:false
 				}
 			}
