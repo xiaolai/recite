@@ -75,6 +75,19 @@ manifest_numbers() {
 		awk -F': ?' '!seen[$1]++ {gsub(/"/, ""); printf "%s%s=%s", sep, $1, $2; sep=", "}'
 }
 
+# doctor_numbers counts doctor's check lines by status. Its lines name local paths, so the
+# report, which is attached to the release, carries counts rather than the lines.
+doctor_numbers() {
+	awk '$1 == "ok" || $1 == "warn" || $1 == "fail" { c[$1]++ }
+		END { printf "ok=%d, warn=%d, fail=%d", c["ok"], c["warn"], c["fail"] }' "$1"
+}
+
+# redact replaces the home directory with ~, so no row names the local account.
+redact() {
+	local s="$1"
+	printf '%s' "${s//"$HOME"/\~}"
+}
+
 # step NAME MANIFEST CMD... runs CMD, logs its output and appends a report row.
 step() {
 	local name="$1" manifest="$2"
@@ -86,7 +99,9 @@ step() {
 	"$@" >"$log" 2>&1 || code=$?
 	end="$(date +%s)"
 	local numbers=""
-	if [ -n "$manifest" ]; then
+	if [ "$manifest" = doctor ]; then
+		numbers="$(doctor_numbers "$log")"
+	elif [ -n "$manifest" ]; then
 		numbers="$(manifest_numbers "$manifest")"
 	else
 		numbers="$(grep -Eo '^(ok|FAIL|---) .*' "$log" | tail -n 3 | tr '\n' ' ' | tr '|' '/')"
@@ -97,7 +112,7 @@ step() {
 		tail -n 20 "$log" | sed 's/^/   | /'
 	fi
 	# shellcheck disable=SC2016 # the backticks are Markdown code spans, not substitutions
-	printf '| %d | %s | `%s` | %d | %d | %s |\n' "$n" "$name" "$*" "$code" "$((end - start))" "$numbers" >>"$report"
+	printf '| %d | %s | `%s` | %d | %d | %s |\n' "$n" "$name" "$(redact "$*")" "$code" "$((end - start))" "$(redact "$numbers")" >>"$report"
 }
 
 say() {
@@ -106,7 +121,7 @@ say() {
 	"$bin" say --no-cache --force -o "$out" "$@"
 }
 
-step "doctor --deep" "" "$bin" doctor --deep
+step "doctor --deep" doctor "$bin" doctor --deep
 step "English sample" "${work}/en.wav.json" say "${work}/en.wav" -f "${work}/en.txt"
 step "Chinese sample" "${work}/zh.wav.json" say "${work}/zh.wav" -f "${work}/zh.txt"
 step "Markdown sample" "${work}/md.wav.json" say "${work}/md.wav" -f "${work}/sample.md"
