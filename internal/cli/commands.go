@@ -85,6 +85,7 @@ type SayRequest struct {
 	Format     audio.Format   // --format; "" means from the output's extension
 	SampleRate int            // --sample-rate (AUD-05)
 	Loudness   audio.Loudness // --loudness (AUD-06); "" means the format's default
+	Play       bool           // --play (AUD-08)
 	Force      bool
 	MaxInput   int64
 	Settings   realtime.Settings
@@ -238,6 +239,7 @@ type runFlags struct {
 	gapParagraph, gapSection          string
 	gapSeed                           int64
 	loudness                          string
+	play                              bool
 }
 
 func (f *runFlags) register(fs *flag.FlagSet) {
@@ -259,6 +261,7 @@ func (f *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.gapSection, "gap-section", d.Section.String(), "gap after a section, `DUR` or MIN..MAX")
 	fs.Int64Var(&f.gapSeed, "gap-seed", 0, "`SEED` of the random gaps; the same seed gives the same gaps")
 	fs.StringVar(&f.loudness, "loudness", "", "loudness `PRESET`: podcast, audiobook or none (default podcast for encoded formats, none for wav, pcm and -o -)")
+	fs.BoolVar(&f.play, "play", false, "play the output when done")
 }
 
 // apply validates the flags into req. Every error is a usage error (exit 2).
@@ -305,6 +308,7 @@ func (f *runFlags) apply(req *SayRequest) error {
 			return err
 		}
 	}
+	req.Play = f.play
 	return nil
 }
 

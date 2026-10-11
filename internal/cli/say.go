@@ -393,6 +393,9 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		}
 	}
 	c.written = out
+	if req.Play {
+		defer c.play(ctx, job.target, out)
+	}
 	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out); merr != nil {
 		if err == nil {
 			return merr

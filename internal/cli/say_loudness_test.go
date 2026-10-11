@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -122,5 +124,90 @@ func TestLoudnessAfconvertFallback(t *testing.T) {
 	}
 	if l := c.loudness(SayRequest{}, stdoutTarget, enc); l != audio.LoudnessNone {
 		t.Fatalf("stream: %s", l)
+	}
+}
+
+// fakePlayers installs every player recite knows, each recording its arguments and exiting
+// with status; look finds them and nothing else.
+func fakePlayers(t *testing.T, status int) (look func(string) (string, error), log string) {
+	t.Helper()
+	dir := t.TempDir()
+	log = filepath.Join(dir, "played.log")
+	for _, name := range []string{"afplay", "ffplay", "paplay"} {
+		script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + shellQuote(log) + "\nexit " + string(rune('0'+status)) + "\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	look = func(name string) (string, error) {
+		if slices.Contains([]string{"afplay", "ffplay", "paplay"}, name) {
+			return filepath.Join(dir, name), nil
+		}
+		return "", exec.ErrNotFound
+	}
+	return look, log
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// A missing player is a warning and the run still exits 0 with its output written.
+// accept: AUD-08#1
+func TestSayPlayMissingPlayerWarns(t *testing.T) {
+	m := newMultiEnv(t)
+	m.look = noTools
+	r := m.run(threeParagraphs, "-o", "out.wav", "--play")
+	if r.code != exitcode.OK || !strings.Contains(r.stderr, "no audio player found") {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := os.Stat(m.path("out.wav")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// --play hands the published file to the player as one absolute argument; a failing player
+// is a warning, exit 0; a stream has no file to play.
+func TestSayPlay(t *testing.T) {
+	m := newMultiEnv(t)
+	look, log := fakePlayers(t, 0)
+	m.look = look
+	name := "-odd name.wav"
+	r := m.run(threeParagraphs, "-o", "./"+name, "--play")
+	if r.code != exitcode.OK || strings.Contains(r.stderr, "playback failed") {
+		t.Fatalf("%+v", r)
+	}
+	got, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("the player never ran: %v", err)
+	}
+	args := strings.Split(strings.TrimSuffix(string(got), "\n"), "\n")
+	file := args[len(args)-1]
+	if !filepath.IsAbs(file) || filepath.Base(file) != name {
+		t.Fatalf("player args %q", args)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatalf("the played file does not exist: %v", err)
+	}
+
+	m2 := newMultiEnv(t)
+	m2.look, _ = fakePlayers(t, 3)
+	r = m2.run(threeParagraphs, "-o", "out.wav", "--play")
+	if r.code != exitcode.OK || !strings.Contains(r.stderr, "playback failed") {
+		t.Fatalf("failing player: %+v", r)
+	}
+	r = m2.run(threeParagraphs, "-o", "-", "--play")
+	if r.code != exitcode.OK || !strings.Contains(r.stderr, "no file to play") {
+		t.Fatalf("stream: code %d stderr %q", r.code, r.stderr)
+	}
+}
+
+func TestPlayers(t *testing.T) {
+	if p := players("darwin"); len(p) != 1 || p[0].name != "afplay" {
+		t.Fatalf("darwin %+v", p)
+	}
+	if p := players("linux"); len(p) != 2 || p[0].name != "ffplay" || !slices.Equal(p[0].args, []string{"-nodisp", "-autoexit"}) || p[1].name != "paplay" {
+		t.Fatalf("linux %+v", p)
+	}
+	if p := players("plan9"); p != nil {
+		t.Fatalf("plan9 %+v", p)
 	}
 }

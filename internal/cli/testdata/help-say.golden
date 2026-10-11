@@ -71,6 +71,8 @@ Flags:
     	write audio to PATH, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)
   -output PATH
     	write audio to PATH, or - for stdout (default <file stem>.<format> or speech-<timestamp>.<format>)
+  -play
+    	play the output when done
   -read-alt
     	read the alt text of Markdown images
   -refresh
