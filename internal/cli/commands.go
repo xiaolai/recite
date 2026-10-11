@@ -49,7 +49,7 @@ func (c *CLI) commands() []command {
 		{"doctor", "", "Check the environment and the route", setupDoctor},
 		{"auth", "status|login", "Login state, or sign in through codex", setupAuth},
 		{"usage", "", "Local ledger summary and Codex plan status", stub("usage")},
-		{"cache", "ls|prune|clear", "Manage the take cache", stub("cache")},
+		{"cache", "ls|prune|clear", "Manage the take cache", setupCache},
 		{"config", "show|path", "Effective merged config and its sources", setupConfig},
 		{"version", "", "Version, commit, build date and Go version", setupVersion},
 		{"help", "[COMMAND]", "Show help for recite or a command", setupHelp},

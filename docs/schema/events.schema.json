@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/xiaolai/recite/docs/schema/events.schema.json",
   "title": "recite --json events",
-  "description": "One NDJSON line on stdout per event (design §12.5). The version is raised whenever an event is added or a field changes. Version 1 (M1): auth_error, auth_status, doctor_check, voice. Version 2 (WP-3.8): plan, chunk and done of `say --json`; done is always the last line of `say`.",
-  "version": 2,
+  "description": "One NDJSON line on stdout per event (design §12.5). The version is raised whenever an event is added or a field changes. Version 1 (M1): auth_error, auth_status, doctor_check, voice. Version 2 (WP-3.8): plan, chunk and done of `say --json`; done is always the last line of `say`. Version 3 (WP-4.6): cache and cache_removed.",
+  "version": 3,
   "oneOf": [
     {
       "$ref": "#/$defs/auth_error"
@@ -25,6 +25,12 @@
     },
     {
       "$ref": "#/$defs/done"
+    },
+    {
+      "$ref": "#/$defs/cache"
+    },
+    {
+      "$ref": "#/$defs/cache_removed"
     }
   ],
   "$defs": {
@@ -359,6 +365,93 @@
         "duration_s": [
           "output"
         ]
+      }
+    },
+    "cache": {
+      "description": "`recite cache ls --json` (CLI-08); access times are null for an empty cache.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "dir",
+        "count",
+        "bytes",
+        "oldest_access",
+        "newest_access"
+      ],
+      "properties": {
+        "event": {
+          "const": "cache"
+        },
+        "dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oldest_access": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "newest_access": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "cache_removed": {
+      "description": "`recite cache prune|clear --json` (CLI-08).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "action",
+        "removed",
+        "freed_bytes",
+        "left"
+      ],
+      "properties": {
+        "event": {
+          "const": "cache_removed"
+        },
+        "action": {
+          "enum": [
+            "prune",
+            "clear"
+          ]
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "freed_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "left": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     }
   }
