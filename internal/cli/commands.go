@@ -231,7 +231,7 @@ func (f *textFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.code, "code", f.code, "Markdown code blocks: `MODE` skip, or announce (say \"Code block omitted.\")")
 	fs.BoolVar(&f.marks, "marks", false, "read inline speech marks such as {{spell|API}} (default on for spoken input)")
 	fs.BoolVar(&f.noMarks, "no-marks", false, "read {{…}} as plain text")
-	fs.StringVar(&f.lexiconFile, lexiconFlag, "", "pronunciation lexicon `FILE`, a TOML table of TERM = { say = SPOKEN } or { hint = PRONUNCIATION }; replaces any other lexicon")
+	fs.StringVar(&f.lexiconFile, lexiconFlag, "", "pronunciation lexicon `FILE`, a TOML table of TERM = { say = SPOKEN } or { hint = PRONUNCIATION } (hint is best-effort and unverifiable by STT; prefer say); replaces any other lexicon")
 }
 
 // resolve validates the text flags; actions are the per-code guard actions of [guard].

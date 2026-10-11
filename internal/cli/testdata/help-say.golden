@@ -48,7 +48,7 @@ Flags:
   -keep-rejected DIR
     	save every rejected take and its report in DIR
   -lexicon FILE
-    	pronunciation lexicon FILE, a TOML table of TERM = { say = SPOKEN } or { hint = PRONUNCIATION }; replaces any other lexicon
+    	pronunciation lexicon FILE, a TOML table of TERM = { say = SPOKEN } or { hint = PRONUNCIATION } (hint is best-effort and unverifiable by STT; prefer say); replaces any other lexicon
   -loudness PRESET
     	loudness PRESET: podcast, audiobook or none (default podcast for encoded formats, none for wav, pcm and -o -)
   -manifest PATH

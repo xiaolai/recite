@@ -133,13 +133,22 @@ Text handling (shared with `check`, `prepare`, `render` and `config`):
 | `--normalize MODE` | Spoken-form rewriting (numbers, dates, symbols): `auto` or `off` |
 | `--normalize-disable RULE,…` | Turn off individual spoken-form rules; repeatable |
 | `--date-style STYLE` | Spoken dates: `us`, `uk` or `iso` |
-| `--lexicon FILE` | Pronunciation lexicon, a TOML table of `TERM = { say = "…" }` or `{ hint = "…" }` |
+| `--lexicon FILE` | Pronunciation lexicon, a TOML table of `TERM = { say = "…" }` or `{ hint = "…" }` (`hint` is best-effort; prefer `say`, see below) |
 | `--directives` | Read `[pause 800ms]`, `[section Title]` and a leading `(direction)` per line |
 | `--marks` | Read inline speech marks such as `{{spell\|API}}` (default on for spoken input) |
 | `--no-marks` | Read `{{…}}` as plain text |
 | `--code MODE` | Markdown code blocks: `skip`, or `announce` ("Code block omitted.") |
 | `--read-alt` | Read the alt text of Markdown images |
 | `--chunk-seconds SECONDS` | Target length of a chunk (default 25) |
+
+Two pronunciation and stress controls are best-effort, not verified:
+
+- A lexicon `hint` entry leaves the text unchanged and only asks the model to pronounce the term
+  a certain way. Speech-to-text cannot check a pronunciation, so `hint` is unverifiable by STT
+  and its effect is not guaranteed. Prefer `say`, which rewrites the spoken text and is verified
+  against that rewrite.
+- The `{{emph|words}}` speech mark asks the model to stress the words and leaves the text
+  unchanged. Whether the stress is audible is not verified.
 
 Rendering and verification:
 

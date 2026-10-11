@@ -61,7 +61,9 @@ const q12Seed = 12
 //	RECITE_LIVE=1 go test -tags qualify -run TestQ12EmphasisListening -count=1 -v ./internal/spoken
 //
 // Output: $TMPDIR/recite-live/q12-<evidence ID>/ with clips/, sheet.md and answer-key.md.
-// accept: SPK-12#2
+//
+// Q12 was not run: design D22 descoped `{{emph}}` to best-effort, and SPK-12#2 is now proved
+// by the README wording (internal/cli). This harness stays for a future listening pass.
 func TestQ12EmphasisListening(t *testing.T) {
 	set := realtime.DefaultSettings()
 	spec, err := set.SessionSpec()

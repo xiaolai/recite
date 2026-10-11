@@ -78,7 +78,8 @@ type q11Take struct {
 //
 //	RECITE_LIVE=1 go test -tags qualify -run TestQ11HintTakes -count=1 -v ./internal/spoken
 //
-// accept: SPK-08#3
+// Q11 was not run: design D22 descoped `hint` to best-effort, and SPK-08#3 is now proved by
+// the README and help wording (internal/cli). This harness stays for a future listening pass.
 func TestQ11HintTakes(t *testing.T) {
 	if len(q11Corpus) != 20 {
 		t.Fatalf("corpus has %d entries, want 20", len(q11Corpus))
