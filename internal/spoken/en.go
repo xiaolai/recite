@@ -473,6 +473,7 @@ var units = []unit{
 	{"kg", "kilogram", "kilograms", true}, {"mg", "milligram", "milligrams", true},
 	{"lbs", "pound", "pounds", true}, {"lb", "pound", "pounds", true},
 	{"oz", "ounce", "ounces", true},
+	{"tbsp", "tablespoon", "tablespoons", true}, {"tsp", "teaspoon", "teaspoons", true},
 	{"km", "kilometer", "kilometers", true}, {"cm", "centimeter", "centimeters", true},
 	{"mm", "millimeter", "millimeters", true}, {"nm", "nanometer", "nanometers", true},
 	{"mi", "mile", "miles", false}, {"ft", "foot", "feet", true}, {"yd", "yard", "yards", true},
