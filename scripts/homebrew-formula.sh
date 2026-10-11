@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Renders the Homebrew formula (REL-03) from packaging/homebrew/recite.rb.tmpl and the
-# checksums in dist/SHA256SUMS. Run it after scripts/sign-notarize.sh, so the darwin
-# sums are those of the signed binaries. It only writes dist/recite.rb; publishing the
-# formula to a tap is a separate, manual step.
+# checksums in dist/SHA256SUMS. Run it after scripts/package-release.sh, so the sums are
+# those of the archives that hold the signed binaries. It only writes dist/recite.rb;
+# publishing the formula to a tap is a separate step.
 #
 #   scripts/homebrew-formula.sh VERSION BASE_URL HOMEPAGE
 #
-# VERSION is the release version (a leading "v" is dropped), BASE_URL the https URL the
-# four binaries are downloaded from (no trailing slash), HOMEPAGE the project page.
+# VERSION is the release version (a leading "v" is dropped), BASE_URL the releases
+# download URL that v<VERSION>/recite-<os>-<arch>.tar.gz is appended to (no trailing
+# slash), HOMEPAGE the project page.
 set -euo pipefail
 
 if [ "$#" -ne 3 ]; then
@@ -54,10 +55,10 @@ formula="$(cat "$tmpl")"
 formula="${formula//@VERSION@/$version}"
 formula="${formula//@BASE_URL@/$base_url}"
 formula="${formula//@HOMEPAGE@/$homepage}"
-formula="${formula//@SHA256_DARWIN_ARM64@/$(sum_of recite-darwin-arm64)}"
-formula="${formula//@SHA256_DARWIN_AMD64@/$(sum_of recite-darwin-amd64)}"
-formula="${formula//@SHA256_LINUX_ARM64@/$(sum_of recite-linux-arm64)}"
-formula="${formula//@SHA256_LINUX_AMD64@/$(sum_of recite-linux-amd64)}"
+formula="${formula//@SHA256_DARWIN_ARM64@/$(sum_of recite-darwin-arm64.tar.gz)}"
+formula="${formula//@SHA256_DARWIN_AMD64@/$(sum_of recite-darwin-amd64.tar.gz)}"
+formula="${formula//@SHA256_LINUX_ARM64@/$(sum_of recite-linux-arm64.tar.gz)}"
+formula="${formula//@SHA256_LINUX_AMD64@/$(sum_of recite-linux-amd64.tar.gz)}"
 if grep -Eq '@[A-Z0-9_]+@' <<<"$formula"; then
 	echo "homebrew-formula.sh: unfilled placeholder in the formula" >&2
 	exit 1

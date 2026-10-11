@@ -31,10 +31,12 @@ can also use the built-in `afconvert`).
 
 ## Install
 
-- **Release binaries** for macOS (arm64, x86_64) and Linux (x86_64, arm64) are single static
-  files. Check them against `SHA256SUMS`, make them executable and put them on your `PATH`.
-- **Homebrew**: a formula installs the same binary; `recite version` then reports the
-  released version.
+- **Homebrew** (macOS and Linux): `brew install xiaolai/tap/recite`. `recite version` then
+  reports the released version.
+- **Release archives** for macOS (arm64, x86_64) and Linux (x86_64, arm64) on the
+  [releases page](https://github.com/xiaolai/recite/releases) each hold the single static
+  `recite` binary. Check the archive against `SHA256SUMS`, unpack it and put `recite` on your
+  `PATH`.
 - **From source**: `go install github.com/xiaolai/recite/cmd/recite@latest`, or `make build`
   in a checkout, which writes `bin/recite`.
 

@@ -3,39 +3,36 @@
 class Recite < Formula
   desc "Turn text into verified speech using the local Codex ChatGPT sign-in"
   homepage "@HOMEPAGE@"
+  # A constant, not a `version` stanza: the URLs are built from it, and `brew audit`
+  # rejects a `version` it can already read from the URL.
+  VERSION = "@VERSION@".freeze
   license "ISC"
-  version "@VERSION@"
 
   on_macos do
-    on_arm do
-      url "@BASE_URL@/recite-darwin-arm64"
+    if Hardware::CPU.arm?
+      url "@BASE_URL@/v#{VERSION}/recite-darwin-arm64.tar.gz"
       sha256 "@SHA256_DARWIN_ARM64@"
-    end
-    on_intel do
-      url "@BASE_URL@/recite-darwin-amd64"
+    else
+      url "@BASE_URL@/v#{VERSION}/recite-darwin-amd64.tar.gz"
       sha256 "@SHA256_DARWIN_AMD64@"
     end
   end
 
   on_linux do
-    on_arm do
-      url "@BASE_URL@/recite-linux-arm64"
+    if Hardware::CPU.arm?
+      url "@BASE_URL@/v#{VERSION}/recite-linux-arm64.tar.gz"
       sha256 "@SHA256_LINUX_ARM64@"
-    end
-    on_intel do
-      url "@BASE_URL@/recite-linux-amd64"
+    else
+      url "@BASE_URL@/v#{VERSION}/recite-linux-amd64.tar.gz"
       sha256 "@SHA256_LINUX_AMD64@"
     end
   end
 
   def install
-    # The download is a bare binary named after its platform.
-    binary = Dir["recite-*"]
-    odie "expected one recite-* binary, found #{binary.inspect}" if binary.length != 1
-    bin.install binary.first => "recite"
+    bin.install "recite"
   end
 
   test do
-    assert_match(/^recite v?#{Regexp.escape(version.to_s)}$/, shell_output("#{bin}/recite version"))
+    assert_match(/^recite v?#{Regexp.escape(VERSION)}$/, shell_output("#{bin}/recite version").lines.first.chomp)
   end
 end
