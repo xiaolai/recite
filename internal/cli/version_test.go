@@ -41,7 +41,13 @@ func TestVersionInjected(t *testing.T) {
 	if got := runBin(t, bin, "version"); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	for _, args := range [][]string{{"version", "--json"}, {"--json", "version"}} {
+	// The short forms print the same: the v alias and a leading --version. -v stays verbosity.
+	for _, args := range [][]string{{"v"}, {"--version"}, {"-version"}} {
+		if got := runBin(t, bin, args...); got != want {
+			t.Errorf("%v: got %q, want %q", args, got, want)
+		}
+	}
+	for _, args := range [][]string{{"version", "--json"}, {"--json", "version"}, {"v", "--json"}, {"--version", "--json"}} {
 		var m map[string]string
 		if err := json.Unmarshal([]byte(runBin(t, bin, args...)), &m); err != nil {
 			t.Fatal(err)

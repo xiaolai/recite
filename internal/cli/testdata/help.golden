@@ -3,6 +3,7 @@ recite turns text into verified speech.
 Usage:
   recite [global flags] <command> [flags] [arguments]
   recite [flags] TEXT...       same as: recite say TEXT...
+  recite --version             same as: recite version
 
 Commands:
   say       Text to verified audio file (default command)
@@ -15,7 +16,7 @@ Commands:
   usage     Local ledger summary and Codex plan status
   cache     Manage the take cache
   config    Effective merged config and its sources
-  version   Version, commit, build date and Go version
+  version   Version, commit, build date and Go version (also: v)
   help      Show help for recite or a command
 
 Global flags:

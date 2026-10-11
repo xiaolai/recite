@@ -73,6 +73,10 @@ func New(stdout, stderr io.Writer) *CLI {
 func (c *CLI) Run(args []string) int {
 	c.globals = defaultGlobals()
 	args = expandVerbose(args)
+	// --version leads like the version command; -v stays the verbosity flag.
+	if len(args) > 0 && (args[0] == "--version" || args[0] == "-version") {
+		return c.runCommand(c.mustLookup("version"), args[1:])
+	}
 
 	// Global flags come first. An unknown flag here is a `say` flag
 	// (`recite -f x.md`), so the whole line goes to `say`.

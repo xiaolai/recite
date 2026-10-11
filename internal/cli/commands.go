@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -38,6 +39,21 @@ type command struct {
 	setup   func(fs *flag.FlagSet, c *CLI) func(args []string) int
 }
 
+// commandAliases maps a short name to the command it runs.
+var commandAliases = map[string]string{"v": "version"}
+
+// aliasesOf lists the aliases of the command named name, sorted.
+func aliasesOf(name string) []string {
+	var out []string
+	for a, n := range commandAliases {
+		if n == name {
+			out = append(out, a)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // commands lists every command of design §12.1 in help order.
 func (c *CLI) commands() []command {
 	return []command{
@@ -57,6 +73,9 @@ func (c *CLI) commands() []command {
 }
 
 func (c *CLI) lookup(name string) (command, bool) {
+	if n, ok := commandAliases[name]; ok {
+		name = n
+	}
 	for _, cmd := range c.commands() {
 		if cmd.name == name {
 			return cmd, true

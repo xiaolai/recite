@@ -63,7 +63,7 @@ binary. After one online run, it starts offline too.
 | `usage` | Local ledger summary and Codex plan status |
 | `cache` | Manage the take cache (`ls`, `prune`, `clear`) |
 | `config` | Effective merged config and its sources (`show`, `path`) |
-| `version` | Version, commit, build date and Go version |
+| `version` (also `v`, `--version`) | Version, commit, build date and Go version |
 | `help` | Help for recite or a command |
 
 ### Global flags
@@ -259,7 +259,7 @@ of `say`, so you can see how a command line would resolve, plus:
 
 ### version and help
 
-`recite version` prints the version, commit, build date and Go version (`recite --json version` for JSON).
+`recite version` prints the version, commit, build date and Go version (`recite --json version` for JSON). `recite v` and `recite --version` do the same; `-v` is the verbosity flag, not the version.
 `recite help [command]` prints help.
 
 ## Exit codes

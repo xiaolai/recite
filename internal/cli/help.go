@@ -14,10 +14,15 @@ func (c *CLI) writeHelp(w io.Writer) {
 	b.WriteString("recite turns text into verified speech.\n\n")
 	b.WriteString("Usage:\n")
 	b.WriteString("  recite [global flags] <command> [flags] [arguments]\n")
-	b.WriteString("  recite [flags] TEXT...       same as: recite say TEXT...\n\n")
+	b.WriteString("  recite [flags] TEXT...       same as: recite say TEXT...\n")
+	b.WriteString("  recite --version             same as: recite version\n\n")
 	b.WriteString("Commands:\n")
 	for _, cmd := range c.commands() {
-		fmt.Fprintf(&b, "  %-9s %s\n", cmd.name, cmd.summary)
+		summary := cmd.summary
+		if as := aliasesOf(cmd.name); len(as) > 0 {
+			summary += " (also: " + strings.Join(as, ", ") + ")"
+		}
+		fmt.Fprintf(&b, "  %-9s %s\n", cmd.name, summary)
 	}
 	b.WriteString("\nGlobal flags:\n")
 	b.WriteString(globalDefaults())
