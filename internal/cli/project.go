@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -197,5 +198,54 @@ func projectPath(dir string, t map[string]any, key string) (written, resolved st
 	if !filepath.IsLocal(local) {
 		return "", "", fmt.Errorf("%s %q: want a relative path inside the project's directory", key, s)
 	}
-	return s, filepath.Join(dir, local), nil
+	full := filepath.Join(dir, local)
+	if err := insideOnDisk(dir, full); err != nil {
+		return "", "", fmt.Errorf("%s %q: %w", key, s, err)
+	}
+	return s, full, nil
+}
+
+// insideOnDisk checks that full, once symbolic links are resolved, is still inside dir. The
+// lexical check alone lets a link in the project (notes.md -> ~/.ssh/id_rsa, or out -> /etc)
+// read or write outside it; a downloaded project is untrusted input. Links that stay inside
+// are fine. The part of full that does not exist yet (an output not yet written, a missing
+// input reported by its own output) is resolved through its deepest existing ancestor.
+func insideOnDisk(dir, full string) error {
+	root, err := resolveExisting(dir)
+	if err != nil {
+		return err
+	}
+	got, err := resolveExisting(full)
+	if err != nil {
+		return err
+	}
+	if rel, err := filepath.Rel(root, got); err != nil || !filepath.IsLocal(rel) {
+		return fmt.Errorf("resolves to %s, outside the project's directory", got)
+	}
+	return nil
+}
+
+// resolveExisting is the absolute path p with every symbolic link in its existing prefix
+// resolved; the components that do not exist are appended unchanged.
+func resolveExisting(p string) (string, error) {
+	p, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	var rest []string
+	for {
+		r, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			return filepath.Join(append([]string{r}, rest...)...), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return "", err
+		}
+		rest = append([]string{filepath.Base(p)}, rest...)
+		p = parent
+	}
 }

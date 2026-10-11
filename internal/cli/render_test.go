@@ -284,6 +284,27 @@ func TestRenderRejectsBadProjects(t *testing.T) {
 			}
 		})
 	}
+	// Symbolic links are resolved: a link out of the project is refused like a written "../",
+	// so a downloaded project cannot read a secret into the request or write outside itself.
+	outside := t.TempDir()
+	write(t, filepath.Join(outside, "id_rsa"), "secret")
+	for _, l := range [][2]string{{filepath.Join(outside, "id_rsa"), "notes.md"}, {outside, "out"}, {filepath.Join(dir, "a.txt"), "alias.txt"}} {
+		if err := os.Symlink(l[0], filepath.Join(dir, l[1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, body := range []string{"[[output]]\ninput = \"notes.md\"\npath = \"a.wav\"\n", "[[output]]\ninput = \"a.txt\"\npath = \"out/a.wav\"\n"} {
+		proj := filepath.Join(dir, "p.toml")
+		write(t, proj, body)
+		if r := run("render", proj); r.code != ExitUsage || len(r.says) != 0 || !strings.Contains(r.stderr, "outside the project's directory") {
+			t.Fatalf("%q: code %d, %d says, stderr %q", body, r.code, len(r.says), r.stderr)
+		}
+	}
+	proj := filepath.Join(dir, "p.toml")
+	write(t, proj, "[[output]]\ninput = \"alias.txt\"\npath = \"a.wav\"\n")
+	if r := run("render", "--dry-run", proj); r.code != ExitOK {
+		t.Fatalf("a link inside the project: code %d, stderr %q", r.code, r.stderr)
+	}
 	for _, args := range [][]string{{"render"}, {"render", "a.toml", "b.toml"}, {"render", "-o", "x.wav", "p.toml"}, {"render", filepath.Join(dir, "none.toml")}} {
 		if r := run(args...); r.code != ExitUsage || len(r.says) != 0 {
 			t.Errorf("%v: code %d", args, r.code)
