@@ -414,7 +414,10 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		}
 	}
 	c.written = out
-	if req.Play {
+	switch {
+	case req.Play && req.SplitSections:
+		c.Logger.Warn("--play: --split-sections writes a directory of files, so there is no single file to play", "dir", job.target)
+	case req.Play:
 		defer c.play(ctx, job.target, out)
 	}
 	if sections == nil {

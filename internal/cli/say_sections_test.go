@@ -299,3 +299,18 @@ func TestSaySplitSections(t *testing.T) {
 		}
 	}
 }
+
+// --play with --split-sections warns that there is no single file and starts no player.
+func TestSaySplitSectionsPlayWarns(t *testing.T) {
+	m := newMultiEnv(t)
+	writeBook(t, m)
+	look, log := fakePlayers(t, 0)
+	m.look = look
+	r := m.run("-f", "book.md", "-o", "parts", "--split-sections", "--play")
+	if r.code != exitcode.OK || !strings.Contains(r.stderr, "no single file to play") {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := os.Stat(log); err == nil {
+		t.Fatal("a player ran on the section directory")
+	}
+}
