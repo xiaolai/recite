@@ -39,7 +39,7 @@ func fakeEncoder(t *testing.T) (look func(string) (string, error), args func() [
 		"printf '[Parsed_loudnorm_0]\\n{\\n\"input_i\" : \"-22.00\",\\n\"input_tp\" : \"-6.50\",\\n\"input_lra\" : \"3.20\",\\n" +
 		"\"input_thresh\" : \"-32.10\",\\n\"target_offset\" : \"0.40\"\\n}\\n' >&2\nexit 0\nfi; done\n" +
 		"for a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$FAKE_FFMPEG_LOG\"\n" +
-		"for last in \"$@\"; do :; done\nif [ \"$last\" = pipe:1 ]; then exec cat; fi\nexec cat > \"$last\"\n"
+		"for last in \"$@\"; do :; done\nlast=${last#file:}\nif [ \"$last\" = pipe:1 ]; then exec cat; fi\nexec cat > \"$last\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -142,8 +142,8 @@ func TestSayEncoderArgsWithoutShell(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	got := args()
-	tmp := got[len(got)-1]
-	if filepath.Dir(tmp) != filepath.Dir(name) || !strings.HasPrefix(filepath.Base(tmp), "."+name+".") {
+	tmp, ok := strings.CutPrefix(got[len(got)-1], "file:")
+	if !ok || filepath.Dir(tmp) != filepath.Dir(name) || !strings.HasPrefix(filepath.Base(tmp), "."+name+".") {
 		t.Fatalf("encoder output %q, want a temp file beside %q", tmp, name)
 	}
 	want := audio.FFmpegArgs(audio.Encoding{Format: audio.FormatMP3, Rate: 44100, Tool: audio.ToolFFmpeg}, tmp)

@@ -116,7 +116,7 @@ func TestLoudnessArgs(t *testing.T) {
 	want := "loudnorm=I=-16.00:TP=-1.50:LRA=11.00:measured_I=-21.75:measured_TP=-18.06:measured_LRA=0.00:" +
 		"measured_thresh=-31.75:offset=-0.05:linear=true:print_format=none"
 	i := slices.Index(got, "-af")
-	if i < 0 || got[i+1] != want || got[i+2] != "-ar" || got[i+3] != "24000" || got[len(got)-1] != "out.mp3" {
+	if i < 0 || got[i+1] != want || got[i+2] != "-ar" || got[i+3] != "24000" || got[len(got)-1] != "file:out.mp3" {
 		t.Fatalf("normalize args %q", got)
 	}
 	if slices.Contains(FFmpegArgs(e, "out.mp3"), "-af") {

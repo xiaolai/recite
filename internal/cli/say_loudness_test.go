@@ -57,7 +57,7 @@ func TestSayLoudnessTwoPasses(t *testing.T) {
 		}
 		got := args()
 		e := audio.Encoding{Format: audio.FormatMP3, Rate: audio.SampleRate, Tool: audio.ToolFFmpeg, Loudness: tc.want}
-		want := audio.NormalizeArgs(e, got[len(got)-1], audio.Measurement{I: -22, TP: -6.5, LRA: 3.2, Thresh: -32.1, Offset: 0.4})
+		want := audio.NormalizeArgs(e, strings.TrimPrefix(got[len(got)-1], "file:"), audio.Measurement{I: -22, TP: -6.5, LRA: 3.2, Thresh: -32.1, Offset: 0.4})
 		if !slices.Equal(got, want) {
 			t.Fatalf("%s: encode args\n got %q\nwant %q", tc.want, got, want)
 		}

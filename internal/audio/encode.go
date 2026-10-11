@@ -184,7 +184,7 @@ func ffmpegArgs(e Encoding, meta, out, filter string) []string {
 		"-f", "s16le", "-ar", strconv.Itoa(SampleRate), "-ac", strconv.Itoa(Channels), "-i", "pipe:0"}
 	if meta != "" {
 		// Input options precede their -i; every output option follows the last input.
-		args = append(args, "-f", "ffmetadata", "-i", meta, "-map", "0:a", "-map_metadata", "1", "-map_chapters", "1")
+		args = append(args, "-f", "ffmetadata", "-i", ffmpegPath(meta), "-map", "0:a", "-map_metadata", "1", "-map_chapters", "1")
 	}
 	if filter != "" {
 		// loudnorm resamples to 192 kHz internally, so the output rate is always set.
@@ -215,7 +215,17 @@ func ffmpegArgs(e Encoding, meta, out, filter string) []string {
 		codec, muxer = []string{"-c:a", "flac"}, "flac"
 	}
 	args = append(args, codec...)
-	return append(args, "-f", muxer, "-y", out)
+	return append(args, "-f", muxer, "-y", ffmpegPath(out))
+}
+
+// ffmpegPath is the ffmpeg URL of a file path. ffmpeg reads a "name:" prefix as a protocol,
+// so a relative path through a directory such as "tcp:x" or "http:x" would open a network
+// URL; the file: protocol keeps every path a file. pipe:1 (stdout) is passed as it is.
+func ffmpegPath(p string) string {
+	if p == "pipe:1" {
+		return p
+	}
+	return "file:" + p
 }
 
 // AfconvertArgs is the afconvert argument vector converting the WAV at in to the m4a out.

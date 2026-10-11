@@ -162,9 +162,9 @@ func TestSayM4AChapterMarkers(t *testing.T) {
 	script := "#!/bin/sh\nfor a in \"$@\"; do if [ \"$a\" = null ]; then cat > /dev/null\n" +
 		"printf '{\\n\"input_i\" : \"-22.00\",\\n\"input_tp\" : \"-6.50\",\\n\"input_lra\" : \"3.20\",\\n" +
 		"\"input_thresh\" : \"-32.10\",\\n\"target_offset\" : \"0.40\"\\n}\\n' >&2\nexit 0\nfi; done\n" +
-		"seen=0\nfor a in \"$@\"; do if [ \"$prev\" = -i ]; then seen=$((seen+1)); [ $seen = 2 ] && meta=$a; fi\n" +
+		"seen=0\nfor a in \"$@\"; do if [ \"$prev\" = -i ]; then seen=$((seen+1)); [ $seen = 2 ] && meta=${a#file:}; fi\n" +
 		"if [ \"$prev\" = -af ]; then printf '%s' \"$a\" > \"$FAKE_META.af\"; fi; prev=$a; done\n" +
-		"for last in \"$@\"; do :; done\nif [ -n \"$meta\" ]; then cat \"$meta\" > \"$FAKE_META\"; fi\nexec cat > \"$last\"\n"
+		"for last in \"$@\"; do :; done\nlast=${last#file:}\nif [ -n \"$meta\" ]; then cat \"$meta\" > \"$FAKE_META\"; fi\nexec cat > \"$last\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -116,14 +116,16 @@ func TestFFmpegArgs(t *testing.T) {
 		out  string
 		want string
 	}{
-		{FormatMP3, 24000, "o", "-c:a libmp3lame -b:a 192k -f mp3 -y o"},
-		{FormatM4A, 24000, "o", "-c:a aac -b:a 160k -f ipod -y o"},
+		{FormatMP3, 24000, "o", "-c:a libmp3lame -b:a 192k -f mp3 -y file:o"},
+		{FormatM4A, 24000, "o", "-c:a aac -b:a 160k -f ipod -y file:o"},
 		{FormatM4B, 24000, "pipe:1", "-c:a aac -b:a 160k -movflags +frag_keyframe+empty_moov -f ipod -y pipe:1"},
-		{FormatOpus, 48000, "o", "-ar 48000 -c:a libopus -b:a 64k -f opus -y o"},
-		{FormatOgg, 24000, "o", "-c:a libopus -b:a 64k -f ogg -y o"},
-		{FormatFLAC, 44100, "o", "-ar 44100 -c:a flac -f flac -y o"},
+		{FormatOpus, 48000, "o", "-ar 48000 -c:a libopus -b:a 64k -f opus -y file:o"},
+		{FormatOgg, 24000, "o", "-c:a libopus -b:a 64k -f ogg -y file:o"},
+		{FormatFLAC, 44100, "o", "-ar 44100 -c:a flac -f flac -y file:o"},
 		{FormatWAV, 16000, "pipe:1", "-ar 16000 -c:a pcm_s16le -f wav -y pipe:1"},
-		{FormatPCM, 22050, "o", "-ar 22050 -c:a pcm_s16le -f s16le -y o"},
+		{FormatPCM, 22050, "o", "-ar 22050 -c:a pcm_s16le -f s16le -y file:o"},
+		// A directory named like a protocol stays a file path, never a network URL.
+		{FormatWAV, 24000, "http:x/o", "-c:a pcm_s16le -f wav -y file:http:x/o"},
 	} {
 		got := strings.Join(FFmpegArgs(Encoding{Format: tc.f, Rate: tc.rate, Tool: ToolFFmpeg}, tc.out), " ")
 		if got != head+tc.want {
@@ -147,7 +149,7 @@ func fakeFFmpeg(t *testing.T) (bin, log string) {
 	log = filepath.Join(dir, "args.log")
 	bin = filepath.Join(dir, "ffmpeg")
 	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$FAKE_FFMPEG_LOG\"\n" +
-		"for last in \"$@\"; do :; done\nif [ \"$last\" = pipe:1 ]; then exec cat; fi\nexec cat > \"$last\"\n"
+		"for last in \"$@\"; do :; done\nlast=${last#file:}\nif [ \"$last\" = pipe:1 ]; then exec cat; fi\nexec cat > \"$last\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -255,15 +257,15 @@ func TestStreamWriterFFmpegPipe(t *testing.T) {
 // input's own options and before every output option; the file holds the metadata text.
 func TestEncodeFileWithChapters(t *testing.T) {
 	want := "-hide_banner -loglevel error -nostdin -f s16le -ar 24000 -ac 1 -i pipe:0 " +
-		"-f ffmetadata -i m -map 0:a -map_metadata 1 -map_chapters 1 -ar 48000 -c:a aac -b:a 160k -f ipod -y o"
+		"-f ffmetadata -i file:m -map 0:a -map_metadata 1 -map_chapters 1 -ar 48000 -c:a aac -b:a 160k -f ipod -y file:o"
 	if got := strings.Join(FFmpegChapterArgs(Encoding{Format: FormatM4B, Rate: 48000, Tool: ToolFFmpeg}, "m", "o"), " "); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "ffmpeg")
 	// Copies the ffmetadata input (the argument after the second -i) next to the output.
-	script := "#!/bin/sh\nseen=0\nfor a in \"$@\"; do if [ \"$prev\" = -i ]; then seen=$((seen+1)); [ $seen = 2 ] && meta=$a; fi; prev=$a; done\n" +
-		"for last in \"$@\"; do :; done\ncat \"$meta\" > \"$last.meta\"\nexec cat > \"$last\"\n"
+	script := "#!/bin/sh\nseen=0\nfor a in \"$@\"; do if [ \"$prev\" = -i ]; then seen=$((seen+1)); [ $seen = 2 ] && meta=${a#file:}; fi; prev=$a; done\n" +
+		"for last in \"$@\"; do :; done\nlast=${last#file:}\ncat \"$meta\" > \"$last.meta\"\nexec cat > \"$last\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

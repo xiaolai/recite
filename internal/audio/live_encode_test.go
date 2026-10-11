@@ -205,3 +205,23 @@ func TestLiveStreamReadsInFFprobe(t *testing.T) {
 		}
 	}
 }
+
+// A relative output path through a directory named like an ffmpeg protocol is written as a
+// file: without the file: prefix, ffmpeg opens tcp:x/o.wav as a network URL and fails.
+func TestLiveEncodeProtocolLikeDirectory(t *testing.T) {
+	if os.Getenv("RECITE_LIVE") == "" {
+		t.Skip("set RECITE_LIVE=1 to run against the real tools")
+	}
+	ffmpeg, ffprobe := liveTools(t)
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("tcp:x", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	e := Encoding{Format: FormatWAV, Rate: 16000, Tool: ToolFFmpeg, Bin: ffmpeg}
+	if err := EncodeFile(t.Context(), e, sine(0.5), filepath.Join("tcp:x", "o.wav")); err != nil {
+		t.Fatal(err)
+	}
+	if dur, rate, _ := probe(t, ffprobe, "file:"+filepath.Join("tcp:x", "o.wav")); rate != 16000 || math.Abs(dur-0.5) > 0.05 {
+		t.Fatalf("duration %v at %d Hz", dur, rate)
+	}
+}
