@@ -128,4 +128,15 @@ func TestLiveRefreshIsolatedHome(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), "ChatGPT") {
 		t.Fatalf("codex login status after refresh: %v", err)
 	}
+	// login status only reads auth.json; a model turn proves the server still accepts the
+	// refreshed sign-in. The scratch directory is not a git repo, hence --skip-git-repo-check;
+	// read-only keeps the turn from writing anywhere.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	ex := exec.CommandContext(ctx, c.CodexBin, "exec", "--skip-git-repo-check", "--sandbox", "read-only", `echo ok`)
+	ex.Dir = t.TempDir()
+	ex.Env = append(os.Environ(), "CODEX_HOME="+home)
+	if out, err := ex.CombinedOutput(); err != nil || !strings.Contains(strings.ToLower(string(out)), "ok") {
+		t.Fatalf("codex exec after refresh: %v (%d bytes of output)", err, len(out))
+	}
 }
