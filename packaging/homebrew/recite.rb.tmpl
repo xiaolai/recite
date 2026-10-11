@@ -33,6 +33,6 @@ class Recite < Formula
   end
 
   test do
-    assert_match(/^recite v?#{Regexp.escape(VERSION)}$/, shell_output("#{bin}/recite version").lines.first.chomp)
+    assert_match "recite v#{VERSION}\n", shell_output("#{bin}/recite version")
   end
 end
