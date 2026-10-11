@@ -194,8 +194,8 @@ func singleDigits(groups []string) bool {
 var enDurNames = [...][2]string{durDay: {"day", "days"}, durHour: {"hour", "hours"},
 	durMinute: {"minute", "minutes"}, durSecond: {"second", "seconds"}}
 
-func enCount(n number, u durUnit) string {
-	if n.isOne() {
+func enCount(n number, u durUnit, adj bool) string {
+	if n.isOne() || adj {
 		return "one " + enDurNames[u][0]
 	}
 	return n.words() + " " + enDurNames[u][1]
@@ -206,9 +206,10 @@ func enDuration(s string, i int, _ *Options) (Match, bool) {
 	if !ok {
 		return Match{}, false
 	}
+	adj := adjectival(s, i, end)
 	ws := make([]string, len(parts))
 	for k, p := range parts {
-		ws[k] = enCount(p.n, p.unit)
+		ws[k] = enCount(p.n, p.unit, adj)
 	}
 	return Match{End: end, Spoken: strings.Join(ws, " ")}, true
 }
@@ -222,10 +223,10 @@ func enElapsed(s string, i int, _ *Options) (Match, bool) {
 	}
 	var ws []string
 	if el.hasH && el.h > 0 {
-		ws = append(ws, enCount(number{Int: itoa(el.h)}, durHour))
+		ws = append(ws, enCount(number{Int: itoa(el.h)}, durHour, false))
 	}
 	if el.m > 0 {
-		ws = append(ws, enCount(number{Int: itoa(el.m)}, durMinute))
+		ws = append(ws, enCount(number{Int: itoa(el.m)}, durMinute, false))
 	}
 	ws = append(ws, el.sec.words()+" seconds")
 	return Match{End: el.end, Spoken: strings.Join(ws, " ")}, true

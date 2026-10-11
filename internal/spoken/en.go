@@ -517,7 +517,9 @@ func enUnit(s string, i int, _ *Options) (Match, bool) {
 	}
 	for _, u := range units {
 		k := n.End
-		if u.spaced && k < len(s) && s[k] == ' ' {
+		// "a 12.7-mm shaft": the hyphenated compound modifies a noun.
+		hyphen := k < len(s) && s[k] == '-' && u.abbr != "x" && u.abbr != "°"
+		if hyphen || u.spaced && k < len(s) && s[k] == ' ' {
 			k++
 		}
 		if !strings.HasPrefix(s[k:], u.abbr) {
@@ -528,12 +530,30 @@ func enUnit(s string, i int, _ *Options) (Match, bool) {
 			continue
 		}
 		name := u.many
-		if n.isOne() {
+		if n.isOne() || hyphen || adjectival(s, i, j) {
 			name = u.one
 		}
 		return Match{End: j, Spoken: n.words() + " " + name}, true
 	}
 	return Match{}, false
+}
+
+// singularDeterminers only ever precede a singular noun, so after them a measure is part
+// of a compound modifier: "a 2 TB disk" is "a two terabyte disk". After "the" or with no
+// determiner the measure may be the noun itself ("the 5 kg were lost"), so it stays plural.
+var singularDeterminers = map[string]bool{"a": true, "an": true, "each": true, "every": true, "another": true}
+
+// notNouns are words after a measure that show it is not modifying a noun ("a 2 TB of data").
+var notNouns = map[string]bool{"of": true, "and": true, "or": true, "to": true, "in": true, "at": true,
+	"for": true, "per": true, "from": true, "with": true, "by": true, "on": true, "than": true}
+
+// adjectival reports a measure s[i:j] between a singular determiner and a following word.
+func adjectival(s string, i, j int) bool {
+	if !singularDeterminers[strings.ToLower(prevWord(s, i))] || byteAt(s, j) != ' ' {
+		return false
+	}
+	w := nextWord(s, j)
+	return w != "" && !isDigit(w[0]) && !notNouns[strings.ToLower(w)]
 }
 
 // ordinalSuffixLen is the length of st/nd/rd/th at j when no letter follows.
