@@ -41,6 +41,8 @@ Flags:
     	render N chunks at once, 1 to 6 (default 3)
   -keep-rejected DIR
     	save every rejected take and its report in DIR
+  -loudness PRESET
+    	loudness PRESET: podcast, audiobook or none (default podcast for encoded formats, none for wav, pcm and -o -)
   -manifest PATH
     	write the manifest to PATH (default <output>.json)
   -marks

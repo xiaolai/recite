@@ -82,8 +82,9 @@ type SayRequest struct {
 	File       string
 	Text       []string
 	Output     string
-	Format     audio.Format // --format; "" means from the output's extension
-	SampleRate int          // --sample-rate (AUD-05)
+	Format     audio.Format   // --format; "" means from the output's extension
+	SampleRate int            // --sample-rate (AUD-05)
+	Loudness   audio.Loudness // --loudness (AUD-06); "" means the format's default
 	Force      bool
 	MaxInput   int64
 	Settings   realtime.Settings
@@ -236,6 +237,7 @@ type runFlags struct {
 	gapSentence, gapList              string
 	gapParagraph, gapSection          string
 	gapSeed                           int64
+	loudness                          string
 }
 
 func (f *runFlags) register(fs *flag.FlagSet) {
@@ -256,6 +258,7 @@ func (f *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.gapParagraph, "gap-paragraph", d.Paragraph.String(), "gap after a paragraph, `DUR` or MIN..MAX")
 	fs.StringVar(&f.gapSection, "gap-section", d.Section.String(), "gap after a section, `DUR` or MIN..MAX")
 	fs.Int64Var(&f.gapSeed, "gap-seed", 0, "`SEED` of the random gaps; the same seed gives the same gaps")
+	fs.StringVar(&f.loudness, "loudness", "", "loudness `PRESET`: podcast, audiobook or none (default podcast for encoded formats, none for wav, pcm and -o -)")
 }
 
 // apply validates the flags into req. Every error is a usage error (exit 2).
@@ -297,6 +300,11 @@ func (f *runFlags) apply(req *SayRequest) error {
 	req.Policy = verify.OutputPolicy{AllowUnverified: f.allowUnverified, StrictOutput: f.strictOutput, VerifyOff: mode == verify.ModeOff}
 	req.Gaps = g
 	req.NoCache, req.Refresh = f.noCache, f.refresh
+	if f.loudness != "" {
+		if req.Loudness, err = audio.ParseLoudness(f.loudness); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

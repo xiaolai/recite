@@ -194,7 +194,8 @@ func (c *CLI) outputEncoding(req SayRequest) (string, audio.Encoding, int) {
 		for _, bad := range []struct {
 			on   bool
 			flag string
-		}{{c.globals.JSON, "--json"}, {req.Policy.StrictOutput, "--strict-output"}} {
+		}{{c.globals.JSON, "--json"}, {req.Policy.StrictOutput, "--strict-output"},
+			{req.Loudness != "" && req.Loudness != audio.LoudnessNone, "--loudness " + string(req.Loudness)}} {
 			if bad.on {
 				c.errorf("%s: -o - and %s exclude each other: a stream cannot take bytes back, and stdout carries audio only", req.prefix(), bad.flag)
 				return "", audio.Encoding{}, ExitUsage
@@ -218,11 +219,34 @@ func (c *CLI) outputEncoding(req SayRequest) (string, audio.Encoding, int) {
 		target = defaultOutput(req.File, c.Now(), format.Ext())
 	}
 	enc, err := audio.ChooseEncoding(format, req.SampleRate, target == stdoutTarget, runtime.GOOS, c.LookPath)
+	if err == nil {
+		enc, err = audio.WithLoudness(enc, c.loudness(req, target, enc), c.LookPath)
+	}
 	if err != nil {
 		c.errorf("%s: %v", req.prefix(), err)
 		return "", audio.Encoding{}, ExitUsage
 	}
 	return target, enc, ExitOK
+}
+
+// loudness is the preset of the run (AUD-06): --loudness when given, else none for a stream
+// and the format's default otherwise. The m4a fallback to afconvert cannot normalise, so
+// there the podcast default gives way to none, with a warning; an explicit preset still
+// requires ffmpeg.
+func (c *CLI) loudness(req SayRequest, target string, enc audio.Encoding) audio.Loudness {
+	switch {
+	case req.Loudness != "":
+		return req.Loudness
+	case target == stdoutTarget:
+		return audio.LoudnessNone
+	}
+	l := audio.DefaultLoudness(enc.Format)
+	if l != audio.LoudnessNone && enc.Tool == audio.ToolAfconvert {
+		c.Logger.Warn("loudness not normalised: ffmpeg is not on PATH and afconvert cannot normalise; install ffmpeg, or pass --loudness none",
+			"default", string(l))
+		return audio.LoudnessNone
+	}
+	return l
 }
 
 // sayJob is a planned `say` run: everything decided before the first request.
@@ -363,7 +387,10 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		}
 		status = manifest.StatusComplete
 		out = &manifest.Output{Path: job.target, Format: string(job.enc.Format), DurationS: seconds,
-			SampleRate: job.enc.Rate, Loudness: "none"}
+			SampleRate: job.enc.Rate, Loudness: string(audio.LoudnessNone)}
+		if job.enc.Loudness != "" {
+			out.Loudness = string(job.enc.Loudness)
+		}
 	}
 	c.written = out
 	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out); merr != nil {

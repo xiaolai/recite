@@ -14,6 +14,7 @@ gaps.list             350ms..500ms       default
 gaps.paragraph        550ms..800ms       default
 gaps.section          1.1s..1.5s         default
 gaps.seed             9                  flag (--gap-seed)
+loudness              ""                 default
 guard.policy          fix                default
 guard.control         remove             default
 guard.whitespace      collapse           default

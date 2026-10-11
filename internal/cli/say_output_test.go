@@ -24,8 +24,9 @@ import (
 func noTools(string) (string, error) { return "", exec.ErrNotFound }
 
 // fakeEncoder installs an ffmpeg that records its argument vector, one argument per line, and
-// copies stdin to its last argument (or stdout for pipe:1). It lives in a directory whose
-// name a shell would split and expand.
+// copies stdin to its last argument (or stdout for pipe:1). A loudness analysis pass (output
+// format null) is logged to args.log.measure instead, and prints loudnorm's JSON with an
+// input of -22 LUFS. It lives in a directory whose name a shell would split and expand.
 func fakeEncoder(t *testing.T) (look func(string) (string, error), args func() []string) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), `bin dir 'q" $(touch pwned)`)
@@ -33,7 +34,11 @@ func fakeEncoder(t *testing.T) (look func(string) (string, error), args func() [
 		t.Fatal(err)
 	}
 	log, bin := filepath.Join(dir, "args.log"), filepath.Join(dir, "ffmpeg")
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$FAKE_FFMPEG_LOG\"\n" +
+	script := "#!/bin/sh\nfor a in \"$@\"; do if [ \"$a\" = null ]; then\n" +
+		"for b in \"$@\"; do printf '%s\\n' \"$b\"; done > \"$FAKE_FFMPEG_LOG.measure\"\ncat > /dev/null\n" +
+		"printf '[Parsed_loudnorm_0]\\n{\\n\"input_i\" : \"-22.00\",\\n\"input_tp\" : \"-6.50\",\\n\"input_lra\" : \"3.20\",\\n" +
+		"\"input_thresh\" : \"-32.10\",\\n\"target_offset\" : \"0.40\"\\n}\\n' >&2\nexit 0\nfi; done\n" +
+		"for a in \"$@\"; do printf '%s\\n' \"$a\"; done > \"$FAKE_FFMPEG_LOG\"\n" +
 		"for last in \"$@\"; do :; done\nif [ \"$last\" = pipe:1 ]; then exec cat; fi\nexec cat > \"$last\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -132,7 +137,7 @@ func TestSayEncoderArgsWithoutShell(t *testing.T) {
 	look, args := fakeEncoder(t)
 	m.look = look
 	name := `my "talk" $(touch pwned) & 'x'.mp3`
-	r := m.run(threeParagraphs, "-o", name, "--gap-paragraph", "300ms", "--sample-rate", "44100")
+	r := m.run(threeParagraphs, "-o", name, "--gap-paragraph", "300ms", "--sample-rate", "44100", "--loudness", "none")
 	if r.code != exitcode.OK {
 		t.Fatalf("%+v", r)
 	}
@@ -227,18 +232,20 @@ func TestSayStreamsThroughEncoder(t *testing.T) {
 	}
 }
 
-// Streaming cannot take bytes back: --json and --strict-output with -o - are exit 2 before any
-// network call. --loudness does not exist yet (AUD-06), so it is refused as an unknown flag.
+// Streaming cannot take bytes back: --json, --strict-output and a two-pass --loudness with
+// -o - are exit 2 before any network call, with every encoder available.
 // accept: AUD-07#2
 func TestSayStreamConflictsExit2(t *testing.T) {
 	m := newMultiEnv(t)
+	m.look = func(name string) (string, error) { return "/fake/bin/" + name, nil }
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
 		{[]string{"--json"}, "-o - and --json exclude each other"},
 		{[]string{"--strict-output"}, "-o - and --strict-output exclude each other"},
-		{[]string{"--loudness", "podcast"}, "loudness"},
+		{[]string{"--loudness", "podcast"}, "-o - and --loudness podcast exclude each other"},
+		{[]string{"--loudness", "audiobook", "--format", "mp3"}, "-o - and --loudness audiobook exclude each other"},
 	} {
 		r := m.run(append([]string{"Hi", "-o", "-"}, tc.args...)...)
 		// Under --json stdout is the event stream, so it holds only the done event (CLI-06).

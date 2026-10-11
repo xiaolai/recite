@@ -25,7 +25,6 @@ var reservedKeys = map[string]string{
 	"lexicon":    "pronunciation lexicon, SPK-08, M4",
 	"emotion":    "delivery presets, SPK-07, M4",
 	"style":      "delivery style, SPK-07, M4",
-	"loudness":   "loudness normalisation, AUD-06",
 	"voices":     "dialogue speaker map, TXT-06, M5",
 }
 
@@ -68,6 +67,8 @@ func settingSchema(getenv func(string) string, modelUnchecked bool) *config.Sche
 		{Name: "gaps.paragraph", Default: gaps.Paragraph.String(), Flag: "gap-paragraph", Check: check(audio.ParseGapRange)},
 		{Name: "gaps.section", Default: gaps.Section.String(), Flag: "gap-section", Check: check(audio.ParseGapRange)},
 		{Name: "gaps.seed", Default: "0", Flag: "gap-seed", Check: func(s string) error { _, err := strconv.ParseInt(s, 10, 64); return err }},
+		// No default: the preset follows the output format and -o - (AUD-06, AUD-07).
+		{Name: "loudness", Flag: "loudness", Check: check(audio.ParseLoudness)},
 		{Name: "guard.policy", Default: string(guard.PolicyFix), Flag: "guard", Check: check(guard.ParsePolicy)},
 	}
 	for _, code := range configurableCodes() {

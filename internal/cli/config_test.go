@@ -156,7 +156,8 @@ func TestConfigErrorsExit2(t *testing.T) {
 		{"value", "\n\nspeed = 3\n", `config.toml:3: speed: invalid speed "3"`},
 		{"jobs", "jobs = 9\n", `config.toml:1: jobs: "9": want a whole number from 1 to 6`},
 		{"guard code", "[guard]\ntypo = \"report\"\n", `config.toml:2: unknown key "guard.typo"`},
-		{"reserved", "loudness = \"podcast\"\n", `config.toml:1: key "loudness" is not supported by this version`},
+		{"reserved", "voices = \"x\"\n", `config.toml:1: key "voices" is not supported by this version`},
+		{"loudness", "loudness = \"loud\"\n", `config.toml:1: loudness: --loudness "loud": want one of podcast, audiobook, none`},
 		{"env-only key", "codex_bin = \"/x\"\n", `config.toml:1: unknown key "codex_bin"`},
 	}
 	for _, tc := range cases {

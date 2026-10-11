@@ -118,6 +118,9 @@ type Encoding struct {
 	Rate   int
 	Tool   string // "" = native
 	Bin    string
+	// Loudness is the normalisation preset (AUD-06); "" and none leave the level alone. Any
+	// other preset needs Tool to be ffmpeg (see [WithLoudness]).
+	Loudness Loudness
 }
 
 // Native reports whether recite writes the output itself.
@@ -157,10 +160,21 @@ func ChooseEncoding(f Format, rate int, stream bool, goos string, look func(stri
 
 // FFmpegArgs is the ffmpeg argument vector that reads internal PCM on stdin and writes the
 // output to out: a file path, or "pipe:1" for stdout. It is passed to exec, never to a shell.
-func FFmpegArgs(e Encoding, out string) []string {
+func FFmpegArgs(e Encoding, out string) []string { return ffmpegArgs(e, out, "") }
+
+// NormalizeArgs is [FFmpegArgs] with the second loudness pass applied, from the first pass's
+// measurement m (AUD-06).
+func NormalizeArgs(e Encoding, out string, m Measurement) []string {
+	return ffmpegArgs(e, out, normalizeFilter(e.Loudness, m))
+}
+
+func ffmpegArgs(e Encoding, out, filter string) []string {
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-f", "s16le", "-ar", strconv.Itoa(SampleRate), "-ac", strconv.Itoa(Channels), "-i", "pipe:0"}
-	if e.Rate != SampleRate {
+	if filter != "" {
+		// loudnorm resamples to 192 kHz internally, so the output rate is always set.
+		args = append(args, "-af", filter, "-ar", strconv.Itoa(e.Rate))
+	} else if e.Rate != SampleRate {
 		args = append(args, "-ar", strconv.Itoa(e.Rate))
 	}
 	var codec []string
@@ -216,21 +230,36 @@ func toolError(tool string, err error, stderr *boundedBuffer) error {
 
 // EncodeFile writes p to the file at path through e's encoder, replacing its content; a native
 // encoding is written with [Write] instead. The PCM reaches ffmpeg through stdin; afconvert
-// reads a WAV from a private temp directory.
+// reads a WAV from a private temp directory. A loudness preset runs ffmpeg twice: a measuring
+// pass, then the encode with the measured values (AUD-06). Silence has no loudness to
+// normalise and is encoded as it is.
 func EncodeFile(ctx context.Context, e Encoding, p PCM, path string) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
 	switch e.Tool {
 	case ToolFFmpeg:
+		args := FFmpegArgs(e, path)
+		if _, ok := e.Loudness.Target(); ok {
+			m, err := measure(ctx, e, p)
+			if err != nil {
+				return err
+			}
+			if !m.Silent() {
+				args = NormalizeArgs(e, path, m)
+			}
+		}
 		var stderr boundedBuffer
-		cmd := exec.CommandContext(ctx, e.Bin, FFmpegArgs(e, path)...)
+		cmd := exec.CommandContext(ctx, e.Bin, args...)
 		cmd.Stdin, cmd.Stderr = bytes.NewReader(p), &stderr
 		if err := cmd.Run(); err != nil {
 			return toolError(ToolFFmpeg, err, &stderr)
 		}
 		return nil
 	case ToolAfconvert:
+		if _, ok := e.Loudness.Target(); ok {
+			return errors.New("audio: afconvert cannot normalise loudness")
+		}
 		return afconvert(ctx, e, p, path)
 	}
 	return fmt.Errorf("audio: unknown encoder %q", e.Tool)
@@ -277,6 +306,10 @@ type StreamWriter struct {
 // NewStreamWriter starts a stream in encoding e to dst. Native wav gets a streaming header
 // whose size fields hold the maximum; ffmpeg writes to dst through its stdout.
 func NewStreamWriter(ctx context.Context, e Encoding, dst io.Writer) (*StreamWriter, error) {
+	if _, ok := e.Loudness.Target(); ok {
+		// Two-pass loudness needs the whole output before the first byte (AUD-07).
+		return nil, encoderErrorf("a stream cannot be loudness-normalised: two passes need the whole output")
+	}
 	switch e.Tool {
 	case "":
 		if e.Format == FormatWAV {
