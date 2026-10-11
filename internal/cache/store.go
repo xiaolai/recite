@@ -109,8 +109,24 @@ func (s *Store) base(key string) string { return filepath.Join(s.dir, key[:2], k
 
 // Get returns the entry and raw PCM of key. ok is false on a miss, including an entry that is
 // partial, corrupt, or recorded under another key; err reports only why a present entry was
-// rejected, for the log.
+// rejected, for the log. A hit records the access for pruning.
 func (s *Store) Get(key string) (e Entry, pcm []byte, ok bool, err error) {
+	e, pcm, ok, err = s.load(key)
+	if ok {
+		s.touch(key)
+	}
+	return e, pcm, ok, err
+}
+
+// Peek is Get without recording the access: a plan that only counts hits (--dry-run) must not
+// change what pruning keeps.
+func (s *Store) Peek(key string) (ok bool, err error) {
+	_, _, ok, err = s.load(key)
+	return ok, err
+}
+
+// load reads and validates the entry and audio of key.
+func (s *Store) load(key string) (e Entry, pcm []byte, ok bool, err error) {
 	if !validKey(key) {
 		return Entry{}, nil, false, fmt.Errorf("cache: invalid key %q", key)
 	}
@@ -136,7 +152,6 @@ func (s *Store) Get(key string) (e Entry, pcm []byte, ok bool, err error) {
 	if len(pcm) != e.PCMBytes || hex.EncodeToString(sum[:]) != e.PCMSHA256 {
 		return Entry{}, nil, false, fmt.Errorf("cache: audio %s does not match its entry", key)
 	}
-	s.touch(key)
 	return e, pcm, true, nil
 }
 

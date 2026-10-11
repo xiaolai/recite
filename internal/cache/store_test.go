@@ -176,3 +176,39 @@ func TestDecide(t *testing.T) {
 		t.Errorf("unverified, allowed: %v", d)
 	}
 }
+
+// Peek validates like Get but records no access, so counting hits never changes pruning.
+func TestPeekRecordsNoAccess(t *testing.T) {
+	clock := now
+	st, err := cache.Open(filepath.Join(t.TempDir(), "recite"), func() time.Time { return clock })
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := key(7)
+	if err := st.Put(entry(k), []byte("pcm-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	put, _ := st.Accessed(k)
+	clock = now.Add(time.Hour)
+	if ok, err := st.Peek(k); !ok || err != nil {
+		t.Fatalf("peek hit: %v %v", ok, err)
+	}
+	if at, _ := st.Accessed(k); !at.Equal(put) {
+		t.Fatalf("peek moved the access from %v to %v", put, at)
+	}
+	if _, _, ok, _ := st.Get(k); !ok {
+		t.Fatal("get missed")
+	}
+	if at, _ := st.Accessed(k); !at.Equal(clock) {
+		t.Fatalf("get recorded %v, want %v", at, clock)
+	}
+	if ok, err := st.Peek(key(8)); ok || err != nil {
+		t.Fatalf("peek miss: %v %v", ok, err)
+	}
+	if err := os.WriteFile(filepath.Join(st.Dir(), k[:2], k+".pcm"), []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.Peek(k); ok || err == nil {
+		t.Fatalf("peek accepted tampered audio: %v %v", ok, err)
+	}
+}
