@@ -7,14 +7,18 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/exitcode"
+	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	rtfake "github.com/xiaolai/recite/internal/realtime/fake"
 	"github.com/xiaolai/recite/internal/stt"
@@ -22,16 +26,16 @@ import (
 
 // doctorEnv runs `recite doctor` against the fake Codex and the fake realtime server.
 type doctorEnv struct {
-	t       *testing.T
-	mode    string
-	srv     *rtfake.Server
-	wsURL   string // when set, the WebSocket dials this base URL instead of srv's
-	noCodex bool
-	missing map[string]bool // encoders LookPath does not find
-	env     map[string]string
-	tr      stt.Transcriber      // when set, the --deep check transcribes with it
-	synth   realtime.Synthesizer // when set, replaces the fake realtime server
-	stdout  io.Writer            // when set, doctor writes its report here
+	t         *testing.T
+	mode      string
+	srv       *rtfake.Server
+	wsRefused bool // the WebSocket dial is refused, deterministically, by an injected dialer
+	noCodex   bool
+	missing   map[string]bool // encoders LookPath does not find
+	env       map[string]string
+	tr        stt.Transcriber      // when set, the --deep check transcribes with it
+	synth     realtime.Synthesizer // when set, replaces the fake realtime server
+	stdout    io.Writer            // when set, doctor writes its report here
 }
 
 func newDoctorEnv(t *testing.T, opts ...rtfake.Option) *doctorEnv {
@@ -63,8 +67,8 @@ func (e *doctorEnv) run(args ...string) result {
 		}
 		hc, base := testClient(e.t, e.srv.URL)
 		s := &realtime.Synth{Minter: &realtime.Minter{Client: hc, BaseURL: base, Creds: creds}, Client: hc, BaseURL: base}
-		if e.wsURL != "" {
-			s.Client, s.BaseURL = testClient(e.t, e.wsURL)
+		if e.wsRefused {
+			s.Client = refusingClient(e.t, e.srv.URL)
 		}
 		return s, nil
 	}
@@ -95,17 +99,23 @@ func line(t *testing.T, stdout, check string) string {
 	return ""
 }
 
-// closedURL is a base URL nothing listens on, so a WebSocket dial is refused.
-func closedURL(t *testing.T) string {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+// refusingClient is the production client whose every dial fails with ECONNREFUSED. The
+// refusal is injected rather than produced by a released port, which another listener could
+// claim before the dial.
+func refusingClient(t *testing.T, rawURL string) *http.Client {
+	t.Helper()
+	u, err := url.Parse(rawURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := l.Addr().String()
-	if err := l.Close(); err != nil {
+	tr := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+	}}
+	hc, err := openai.NewClient(openai.WithTestOrigin(u.Host), openai.WithBaseTransport(plainHTTP{tr}))
+	if err != nil {
 		t.Fatal(err)
 	}
-	return "http://" + addr
+	return hc
 }
 
 func TestDoctorAllOK(t *testing.T) {
@@ -148,7 +158,7 @@ func TestDoctorFailureModes(t *testing.T) {
 		{"mint 403", "route", checkFail, "HTTP 403", exitcode.RouteDenied, func(e *doctorEnv) {
 			e.srv = rtfake.NewServer(t, speakScenario(t), rtfake.WithMintError(403))
 		}},
-		{"WebSocket refused", "route", checkFail, "connection refused", exitcode.Failure, func(e *doctorEnv) { e.wsURL = closedURL(t) }},
+		{"WebSocket refused", "route", checkFail, "connection refused", exitcode.Failure, func(e *doctorEnv) { e.wsRefused = true }},
 		// Design §12.4 check 6: the encoders warn only.
 		{"no ffmpeg", "ffmpeg", checkWarn, "not found", exitcode.OK, func(e *doctorEnv) { e.missing["ffmpeg"] = true }},
 	} {

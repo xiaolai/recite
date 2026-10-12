@@ -229,7 +229,7 @@ func chapterMarkers(secs []section, chunks []pipeline.Chunk, spans []audio.Span)
 }
 
 func sampleTime(samples int64) time.Duration {
-	return time.Duration(samples * int64(time.Second) / audio.SampleRate)
+	return audio.SampleDuration(samples, audio.SampleRate)
 }
 
 // cuesOf times the cues of chunks [from, to] in assembly coordinates.
@@ -241,19 +241,56 @@ func cuesOf(chunks []pipeline.Chunk, spans []audio.Span, from, to int) ([]subtit
 	return subtitle.Cues(in, audio.SampleRate)
 }
 
+// publication is what publishAudio put in place: the manifest sections, with Path set on each
+// split file that was published, and whether the single audio file was published. After a
+// failure it still lists what was published before it, so the failed manifest records those
+// files rather than leaving them unaccounted for.
+type publication struct {
+	sections []manifest.Section
+	audio    bool
+}
+
 // publishAudio writes the assembled audio and its extras: one file (with chapter markers when
-// on) or one file per section, and the subtitles of each. It returns the manifest sections.
-// The assembly is the size bytes of PCM in pcm, read in place rather than loaded into memory.
-func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm io.ReaderAt, size int64, spans []audio.Span) ([]manifest.Section, error) {
+// on) or one file per section, and the subtitles of each. The assembly is the size bytes of
+// PCM in pcm, read in place rather than loaded into memory.
+//
+// Every file is staged (written and encoded in full to a temp file) before any is published,
+// so an encoder or subtitle failure publishes nothing. Publishing is then one rename or link
+// per file; if one fails part-way, the files already published stay and are reported in the
+// returned publication. They are not rolled back: under --force a rename has already
+// replaced the previous content, which cannot be restored.
+func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm io.ReaderAt, size int64, spans []audio.Span) (publication, error) {
 	x := job.extras
-	write := func(path string, enc audio.Encoding, off, n int64) error {
-		return publishOutput(path, req.Force, func(f *os.File) error {
+	pub := publication{sections: manifestSections(x.sections)}
+	type item struct {
+		staged  *stagedOutput
+		section int // the split section whose audio this is, or -1
+		audio   bool
+		seconds float64
+	}
+	var items []item
+	defer func() {
+		for _, it := range items {
+			it.staged.discard()
+		}
+	}()
+	stage := func(path string, write func(*os.File) error, it item) error {
+		s, err := stageOutput(path, write)
+		if err != nil {
+			return err
+		}
+		it.staged = s
+		items = append(items, it)
+		return nil
+	}
+	audioAt := func(path string, enc audio.Encoding, off, n int64, it item) error {
+		return stage(path, func(f *os.File) error {
 			src := io.NewSectionReader(pcm, off, n)
 			if enc.Native() {
 				return audio.WriteFrom(f, enc.Format, src, n)
 			}
 			return audio.EncodeFileFrom(ctx, enc, src, n, f.Name())
-		})
+		}, it)
 	}
 	subs := func(path string, from, to int, offset int64) error {
 		if x.subtitles == "" {
@@ -264,41 +301,57 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 			return err
 		}
 		cues = subtitle.Shift(cues, sampleTime(offset))
-		return publishOutput(subtitlePath(path, x.subtitles), req.Force, func(f *os.File) error {
+		return stage(subtitlePath(path, x.subtitles), func(f *os.File) error {
 			return subtitle.Write(f, x.subtitles, cues)
-		})
+		}, item{section: -1})
 	}
-	secs := manifestSections(x.sections)
 	if !x.split {
 		enc := job.enc
 		if x.chapters {
 			enc.Chapters = subtitle.FFMetadata(chapterMarkers(x.sections, job.plan.Chunks, spans))
 		}
-		if err := write(job.target, enc, 0, size); err != nil {
-			return nil, err
+		if err := audioAt(job.target, enc, 0, size, item{section: -1, audio: true}); err != nil {
+			return pub, err
 		}
-		return secs, subs(job.target, 0, len(spans)-1, 0)
+		if err := subs(job.target, 0, len(spans)-1, 0); err != nil {
+			return pub, err
+		}
+	} else {
+		if err := os.Mkdir(job.target, 0o777); err != nil && !errors.Is(err, fs.ErrExist) {
+			return pub, fmt.Errorf("create output directory: %w", err)
+		}
+		for i, path := range x.splitFiles(job.target) {
+			s := x.sections[i]
+			// The first file also holds the text before the first heading; a file ends with its
+			// last chunk, without the gap that follows.
+			from := 0
+			if i > 0 {
+				from = s.first
+			}
+			start, end := spans[from].Start, spans[s.last].End
+			it := item{section: i, seconds: sampleTime(end - start).Seconds()}
+			if err := audioAt(path, job.enc, start*audio.BytesPerSample, (end-start)*audio.BytesPerSample, it); err != nil {
+				return pub, err
+			}
+			if err := subs(path, from, s.last, start); err != nil {
+				return pub, err
+			}
+		}
 	}
-	if err := os.Mkdir(job.target, 0o777); err != nil && !errors.Is(err, fs.ErrExist) {
-		return nil, fmt.Errorf("create output directory: %w", err)
+	for _, it := range items {
+		published, err := it.staged.publish(req.Force)
+		if published {
+			switch {
+			case it.audio:
+				pub.audio = true
+			case it.section >= 0:
+				pub.sections[it.section].Path = it.staged.target
+				c.Logger.Info("wrote section", "path", it.staged.target, "seconds", it.seconds)
+			}
+		}
+		if err != nil {
+			return pub, err
+		}
 	}
-	for i, path := range x.splitFiles(job.target) {
-		s := x.sections[i]
-		// The first file also holds the text before the first heading; a file ends with its
-		// last chunk, without the gap that follows.
-		from := 0
-		if i > 0 {
-			from = s.first
-		}
-		start, end := spans[from].Start, spans[s.last].End
-		if err := write(path, job.enc, start*audio.BytesPerSample, (end-start)*audio.BytesPerSample); err != nil {
-			return nil, err
-		}
-		if err := subs(path, from, s.last, start); err != nil {
-			return nil, err
-		}
-		secs[i].Path = path
-		c.Logger.Info("wrote section", "path", path, "seconds", sampleTime(end-start).Seconds())
-	}
-	return secs, nil
+	return pub, nil
 }

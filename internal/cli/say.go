@@ -306,8 +306,9 @@ func (c *CLI) takeCache(req SayRequest) (*pipeline.TakeCache, error) {
 }
 
 // renderAll renders, verifies and assembles every chunk, then publishes the output when the
-// verdicts allow it (VER-09). An unverified chunk makes exit 5 after the file is written,
-// unless --allow-unverified or --strict-output says otherwise. The manifest is written
+// verdicts allow it (VER-09). With verification off (the default, D19/D23), eligible
+// unverified chunks succeed; with it on, an unverified chunk makes exit 5 after the file is
+// written, unless --allow-unverified or --strict-output says otherwise. The manifest is written
 // whenever the scheduler ran, with partial state after an interrupt or a failure (design §10).
 func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayRequest, job sayJob) error {
 	synth, err := c.NewSynth(creds)
@@ -407,6 +408,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 	}
 	if write {
 		var seconds float64
+		var pub publication
 		perr := asm.Close()
 		switch {
 		case perr != nil:
@@ -415,29 +417,41 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 			c.Logger.Info("streamed output", "seconds", seconds)
 		default:
 			seconds = audio.DurationOf(asm.Written()).Seconds()
-			if sections, perr = c.publishAudio(ctx, req, job, spool, asm.Written(), asm.Spans()); perr == nil {
+			pub, perr = c.publishAudio(ctx, req, job, spool, asm.Written(), asm.Spans())
+			sections = pub.sections
+			if perr == nil {
 				c.Logger.Info("wrote output", "path", job.target, "seconds", seconds)
 			}
 		}
-		if perr != nil {
-			// Rendering is done but nothing was published: the manifest still records the
-			// failed run before the error is returned (design §10).
-			status, sections, err = manifest.StatusFailed, nil, perr
-		} else {
-			status = manifest.StatusComplete
-			out = &manifest.Output{Path: job.target, Format: string(job.enc.Format), DurationS: seconds,
+		output := func() *manifest.Output {
+			o := &manifest.Output{Path: job.target, Format: string(job.enc.Format), DurationS: seconds,
 				SampleRate: job.enc.Rate, Loudness: string(audio.LoudnessNone)}
 			if job.enc.Loudness != "" {
-				out.Loudness = string(job.enc.Loudness)
+				o.Loudness = string(job.enc.Loudness)
 			}
+			return o
+		}
+		if perr != nil {
+			// Rendering is done but publication failed: the manifest still records the failed
+			// run before the error is returned (design §10), with every file that was published
+			// before the failure (a split file's section path, or the single audio file).
+			status, err = manifest.StatusFailed, perr
+			if pub.audio {
+				out = output()
+			}
+		} else {
+			status = manifest.StatusComplete
+			out = output()
 		}
 	}
-	c.written = out
+	if status == manifest.StatusComplete {
+		c.written = out // a failed run's published audio is in its manifest, not played or reported done
+	}
 	switch {
 	case req.Play && req.SplitSections:
 		c.Logger.Warn("--play: --split-sections writes a directory of files, so there is no single file to play", "dir", job.target)
 	case req.Play:
-		defer c.play(ctx, job.target, out)
+		defer c.play(ctx, job.target, c.written)
 	}
 	if sections == nil {
 		sections = manifestSections(job.extras.sections)

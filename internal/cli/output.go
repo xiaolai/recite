@@ -64,16 +64,29 @@ var errTargetAppeared = errors.New("output appeared after the pre-flight check")
 // symlink, which is replaced rather than followed. write gets the open temp file; an
 // external encoder may write to it by name instead.
 func publishOutput(target string, force bool, write func(*os.File) error) error {
-	f, tmp, err := createTemp(target)
+	s, err := stageOutput(target, write)
 	if err != nil {
 		return err
 	}
-	keep := false
-	defer func() {
-		if !keep {
-			_ = os.Remove(tmp) // best effort: the temp name is ours alone
-		}
-	}()
+	_, err = s.publish(force)
+	return err
+}
+
+// stagedOutput is an output written in full to a temp file beside its target, not yet
+// published. A run stages every file before it publishes any, so a write or encoder failure
+// publishes nothing.
+type stagedOutput struct {
+	target, tmp string
+	done        bool // published, or kept at tmp for the user: the temp file is not ours to remove
+}
+
+// stageOutput writes the output to a temp file in the target directory. write gets the open
+// temp file; an external encoder may write to it by name instead.
+func stageOutput(target string, write func(*os.File) error) (*stagedOutput, error) {
+	f, tmp, err := createTemp(target)
+	if err != nil {
+		return nil, err
+	}
 	err = write(f)
 	if err == nil {
 		err = f.Sync()
@@ -82,26 +95,45 @@ func publishOutput(target string, force bool, write func(*os.File) error) error 
 		err = cerr
 	}
 	if err != nil {
-		return fmt.Errorf("write output %s: %w", tmp, err)
+		_ = os.Remove(tmp) // best effort: the temp name is ours alone
+		return nil, fmt.Errorf("write output %s: %w", tmp, err)
 	}
+	return &stagedOutput{target: target, tmp: tmp}, nil
+}
+
+// discard removes the temp file of an output that was not published.
+func (s *stagedOutput) discard() {
+	if !s.done {
+		_ = os.Remove(s.tmp) // best effort: the temp name is ours alone
+	}
+}
+
+// publish moves the staged file to its target. published reports whether target now holds
+// it, which stays true when a later step (removing the link's temp name, syncing the
+// directory) fails.
+func (s *stagedOutput) publish(force bool) (published bool, err error) {
+	defer s.discard()
 	if force {
-		if err := os.Rename(tmp, target); err != nil {
-			return fmt.Errorf("publish output: %w", err)
+		if err := os.Rename(s.tmp, s.target); err != nil {
+			return false, fmt.Errorf("publish output: %w", err)
 		}
-		return syncDir(filepath.Dir(target))
+		s.done = true
+		return true, syncDir(filepath.Dir(s.target))
 	}
-	if err := os.Link(tmp, target); err != nil {
+	if err := os.Link(s.tmp, s.target); err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			keep = true
-			return &usageError{fmt.Sprintf("%s: %s already exists (created during the run); the audio is kept at %s",
-				errTargetAppeared, target, tmp)}
+			s.done = true
+			return false, &usageError{fmt.Sprintf("%s: %s already exists (created during the run); the audio is kept at %s",
+				errTargetAppeared, s.target, s.tmp)}
 		}
-		return fmt.Errorf("publish output: %w", err)
+		return false, fmt.Errorf("publish output: %w", err)
 	}
-	if err := os.Remove(tmp); err != nil {
-		return fmt.Errorf("remove temp output: %w", err)
+	if err := os.Remove(s.tmp); err != nil {
+		s.done = true
+		return true, fmt.Errorf("remove temp output: %w", err)
 	}
-	return syncDir(filepath.Dir(target))
+	s.done = true
+	return true, syncDir(filepath.Dir(s.target))
 }
 
 // createTemp creates a fresh file next to target with O_EXCL, open for reading and writing
@@ -143,32 +175,73 @@ func syncDir(dir string) error {
 }
 
 // distinctOutputs fails when two of a run's output paths name the same file: the later
-// publication would replace the earlier one. Paths are compared cleaned and absolute, and, for
+// publication would replace the earlier one. Paths are compared canonical (see canonicalPath) and, for
 // files that exist, by identity, so a symlink or a hard link to another output also collides.
 // Empty paths (an output that is off) are skipped.
 func distinctOutputs(paths ...string) error {
-	type seen struct {
+	type existing struct {
 		path string
 		fi   os.FileInfo
 	}
-	var prev []seen
+	byPath := make(map[string]bool, len(paths))
+	// Existing files bucketed by size and modification time, which every name of one file
+	// shares, so os.SameFile runs only within a bucket instead of across every pair.
+	type stamp struct {
+		size int64
+		mod  int64
+	}
+	byStamp := make(map[stamp][]existing)
 	for _, p := range paths {
 		if p == "" {
 			continue
 		}
-		abs, err := filepath.Abs(p)
+		canon, err := canonicalPath(p)
 		if err != nil {
 			return fmt.Errorf("resolve output %s: %w", p, err)
 		}
-		fi, _ := os.Stat(abs) // a missing file can only collide by name
-		for _, q := range prev {
-			if q.path == abs || (fi != nil && q.fi != nil && os.SameFile(fi, q.fi)) {
-				return usagef("%s and %s are the same file; give each output its own path", q.path, abs)
+		if byPath[canon] {
+			return usagef("%s is named twice; give each output its own path (both name the same file)", canon)
+		}
+		byPath[canon] = true
+		fi, err := os.Stat(canon)
+		if err != nil {
+			continue // a missing file can only collide by name
+		}
+		k := stamp{fi.Size(), fi.ModTime().UnixNano()}
+		for _, q := range byStamp[k] {
+			if os.SameFile(fi, q.fi) {
+				return usagef("%s and %s are the same file; give each output its own path", q.path, canon)
 			}
 		}
-		prev = append(prev, seen{abs, fi})
+		byStamp[k] = append(byStamp[k], existing{canon, fi})
 	}
 	return nil
+}
+
+// canonicalPath is p made absolute and clean, with its longest existing ancestor resolved
+// through symlinks and the missing rest joined back on, so alias/out.wav and real/out.wav
+// compare equal before either exists. The final element is not resolved: publication replaces
+// a symlink there rather than following it, and an existing one is compared by identity.
+func canonicalPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	dir, rest := filepath.Dir(abs), filepath.Base(abs)
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			return filepath.Join(resolved, rest), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return abs, nil
+		}
+		dir, rest = parent, filepath.Join(filepath.Base(dir), rest)
+	}
 }
 
 // assemblySpool is the temp file `say` assembles the PCM into: beside target (in its parent
