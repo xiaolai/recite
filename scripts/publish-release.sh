@@ -11,8 +11,9 @@
 # Before any network write it refuses unless: the tag exists locally and on xiaolai/recite
 # and both point at HEAD; the tree is clean; dist/ holds a release-check report for exactly
 # this version whose newest run passed (REL-05), checked a build of HEAD, ran one of the
-# release binaries, and records a sha256 for each of the four release binaries that equals
-# that binary's current bytes; and both darwin binaries carry a Developer ID
+# release binaries, and records for each of the four release binaries a sha256 that equals
+# its current bytes and the commit HEAD as the one it was built from; each packaged archive
+# holds exactly the binary checked; and both darwin binaries carry a Developer ID
 # signature with the hardened runtime and a notarisation that Apple Accepted for exactly
 # their current bytes (REL-02).
 # Then it packages the archives, creates the GitHub release, checks every asset downloads
@@ -83,7 +84,9 @@ shopt -u nullglob
 [ -n "$report" ] || fail "no release-check report for ${version} in ${dist}; run RECITE_LIVE=1 scripts/release-check.sh"
 grep -Eq '^Result: PASS( |$)' "$report" || fail "${report} did not pass; fix the failures and run the check again"
 grep -Fxq -- "- Commit: ${head}" "$report" || fail "${report} did not check a build of HEAD ${head}"
-for platform in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64; do
+platforms=(darwin-arm64 darwin-amd64 linux-amd64 linux-arm64)
+checked_shas=() # in the order of platforms: the bytes the report checked, which every archive must hold
+for platform in "${platforms[@]}"; do
 	rb="${dist}/recite-${platform}"
 	recorded="$(sed -n "s/^- Release binary recite-${platform} sha256: \([0-9a-f]\{64\}\)\$/\1/p" "$report")"
 	[ -n "$recorded" ] || fail "${report} records no sha256 for recite-${platform}; run the check again"
@@ -91,6 +94,12 @@ for platform in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64; do
 	# Two recorded lines would not equal one hash, so a doctored report fails here too.
 	[ "$(sha_of "$rb")" = "$recorded" ] ||
 		fail "recite-${platform} is not the binary ${report} checked (sha256 ${recorded}); run the check again"
+	# The commit release-check.sh read from the binary's own build info, which it found
+	# clean and agreeing with the checked binary's `version`.
+	built="$(sed -n "s/^- Release binary recite-${platform} commit: \([0-9a-f]\{40\}\)\$/\1/p" "$report")"
+	[ -n "$built" ] || fail "${report} records no commit for recite-${platform}; run the check again"
+	[ "$built" = "$head" ] || fail "recite-${platform} was built from ${built}, not HEAD ${head}; rebuild it and run the check again"
+	checked_shas+=("$recorded")
 done
 checked_sha="$(sed -n 's/^- Binary sha256: \([0-9a-f]\{64\}\)$/\1/p' "$report")"
 [ -n "$checked_sha" ] || fail "${report} records no binary sha256; run the check again"
@@ -124,11 +133,36 @@ done
 DIST="$dist" "${root}/scripts/package-release.sh"
 stage="$(mktemp -d)"
 trap 'rm -rf -- "$stage"' EXIT
-assets=(recite-darwin-arm64.tar.gz recite-darwin-amd64.tar.gz recite-linux-amd64.tar.gz recite-linux-arm64.tar.gz)
+assets=()
+for platform in "${platforms[@]}"; do
+	assets+=("recite-${platform}.tar.gz")
+done
+
+# check_archives DIR fails unless each archive in DIR holds exactly recite, LICENSE and
+# README.md, and its recite is byte for byte the binary the report checked: the check bound
+# the binaries, and this binds what is uploaded to them. The archives are read, never
+# extracted to disk, so a hostile member name in a downloaded one cannot write anywhere.
+check_archives() {
+	local i a members inner
+	for i in "${!platforms[@]}"; do
+		a="recite-${platforms[$i]}.tar.gz"
+		members="$(tar -tzf "${1}/${a}" | LC_ALL=C sort | tr '\n' ' ')" ||
+			fail "${a} is not a readable gzip tar archive"
+		[ "$members" = "LICENSE README.md recite " ] ||
+			fail "${a} holds ${members:-nothing}, not exactly recite, LICENSE and README.md"
+		inner="$(tar -xzOf "${1}/${a}" recite | shasum -a 256 | awk '{print $1}')" ||
+			fail "cannot read recite from ${a}"
+		[ "$inner" = "${checked_shas[$i]}" ] ||
+			fail "${a} holds a recite that is not the checked recite-${platforms[$i]} (sha256 ${inner}, checked ${checked_shas[$i]})"
+	done
+}
+
 for a in "${assets[@]}"; do
 	cp -p -- "${dist}/${a}" "${stage}/${a}"
 done
-# A release-only SHA256SUMS: dist/SHA256SUMS also lists the bare binaries and zips.
+check_archives "$stage"
+# A release-only SHA256SUMS of exactly the archives staged, and so uploaded: dist/SHA256SUMS
+# also lists the bare binaries.
 (cd "$stage" && shasum -a 256 -- "${assets[@]}" >SHA256SUMS)
 cp -- "$report" "${stage}/release-check-${version}.md"
 
@@ -163,6 +197,12 @@ for a in "${assets[@]}" SHA256SUMS "release-check-${version}.md"; do
 	cmp -- "${stage}/${a}" "${download}/${a}" ||
 		fail "release ${version}'s ${a} differs from this build's; refusing to continue"
 done
+# What is published, read back, is the same set: its SHA256SUMS lists exactly the archives
+# downloaded, and each archive holds the checked binary. A resumed run reaches here only
+# through the same comparisons, so it cannot adopt another build's release.
+[ "$(cd "$download" && shasum -a 256 -- "${assets[@]}")" = "$(cat -- "${download}/SHA256SUMS")" ] ||
+	fail "release ${version}'s SHA256SUMS does not list exactly the hashes of its archives"
+check_archives "$download"
 echo "all release assets download anonymously and match"
 
 # --- Homebrew tap (REL-03).

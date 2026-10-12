@@ -8,10 +8,11 @@
 #   RECITE_LIVE=1 scripts/release-check.sh
 #
 #   DIST        the build directory the report and logs go to (default: dist); it must
-#               hold the four release binaries, whose sha256 the report records
+#               hold the four release binaries, whose sha256 and commit the report records
 #   RECITE_BIN  the binary to check (default: $DIST/recite-<GOOS>-<GOARCH> from make release)
 #
-# Steps: doctor --deep; English, Chinese and Markdown samples; three effort levels; one
+# Steps: the release binaries' provenance (each built from the commit the checked binary
+# reports, in a clean tree); doctor --deep; English, Chinese and Markdown samples; three effort levels; one
 # compressed format (m4a); a transcription round-trip (the live tests that render with the
 # built binary and transcribe the result independently). A sample passes only on its
 # evidence: a manifest parsed as JSON (python3) whose chunk records are all verified and
@@ -83,13 +84,50 @@ redact() {
 # report whose hash or commit is not that of what it publishes.
 bin_sha="$(shasum -a 256 -- "$bin" | awk '{print $1}')"
 version_out="$("$bin" version)"
+run_commit="$(sed -n 's/^commit: //p' <<<"$version_out" | head -n 1)"
 # Every release binary, not only the one run: publish-release.sh refuses to publish any of
-# them whose bytes differ from what this report records.
-release_shas=""
+# them whose bytes or commit differ from what this report records. Only the native binary
+# can be run, so each one's commit is read from the build info the go command embeds
+# (go version -m reads it without executing the binary, for any platform). That is
+# vcs.revision, the checkout's HEAD, not the -X commit build-release.sh injects: -trimpath
+# keeps -ldflags out of the build info, and the injected value is just a string in the
+# binary. vcs.modified=false proves the build had no uncommitted change, and the run
+# binary's own `version` must name the same commit, which ties the two together.
+release_lines=""
+provenance_log=""
 for platform in "${release_platforms[@]}"; do
-	sha="$(shasum -a 256 -- "${dist}/recite-${platform}" | awk '{print $1}')"
-	release_shas+="- Release binary recite-${platform} sha256: ${sha}"$'\n'
+	f="${dist}/recite-${platform}"
+	sha="$(shasum -a 256 -- "$f" | awk '{print $1}')"
+	rev="" problem=""
+	if ! info="$(go version -m "$f" 2>&1)"; then
+		problem="go version -m cannot read recite-${platform}: $(redact "$(tr '\n' ' ' <<<"$info")")"
+	else
+		rev="$(sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p' <<<"$info")"
+		mod="$(sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.modified=//p' <<<"$info")"
+		if [ -z "$rev" ] || [ "$(wc -l <<<"$rev")" -ne 1 ]; then
+			problem="recite-${platform} records no vcs.revision"
+			rev=""
+		elif [ "$mod" != false ]; then
+			problem="recite-${platform} was built from a modified tree (vcs.modified=${mod:-missing})"
+		elif [ "$rev" != "$run_commit" ]; then
+			problem="recite-${platform} was built from ${rev}, not ${run_commit:-an unknown commit}, the commit the checked binary reports"
+		fi
+	fi
+	release_lines+="- Release binary recite-${platform} sha256: ${sha}"$'\n'
+	release_lines+="- Release binary recite-${platform} commit: ${rev:-unknown}"$'\n'
+	if [ -n "$problem" ]; then
+		provenance_log+="FAIL ${problem}"$'\n'
+	fi
 done
+
+# provenance prints the verdict on the release binaries' build info, failing on any problem.
+provenance() {
+	if [ -n "$provenance_log" ]; then
+		printf '%s' "$provenance_log"
+		return 1
+	fi
+	echo "ok all ${#release_platforms[@]} release binaries built from ${run_commit} in a clean tree"
+}
 
 failed=0
 {
@@ -98,9 +136,9 @@ failed=0
 	echo "- Started: ${stamp}"
 	echo "- Binary: \`$(redact "$bin")\`"
 	echo "- Binary sha256: ${bin_sha}"
-	printf '%s' "$release_shas"
+	printf '%s' "$release_lines"
 	echo "- Version: $(head -n 1 <<<"$version_out")"
-	echo "- Commit: $(sed -n 's/^commit: //p' <<<"$version_out" | head -n 1)"
+	echo "- Commit: ${run_commit}"
 	echo
 	echo "| # | Step | Command | Exit | Seconds | Key numbers |"
 	echo "|---|---|---|---|---|---|"
@@ -163,21 +201,54 @@ numbers = ", ".join([
 
 if status != "complete":
     done(numbers, "manifest status is %s, not complete" % ("missing" if status is None else status))
-if chunks is None or chunks <= 0:
+if not isinstance(records, list) or not records or chunks is None or chunks <= 0:
     done(numbers, "manifest has no chunks")
-if not isinstance(records, list):
-    done(numbers, "manifest has no chunk records")
-if len(records) != chunks:
-    done(numbers, "manifest summary counts %d chunks but holds %d chunk records" % (chunks, len(records)))
-if verified != chunks:
-    done(numbers, "verified %s of %d chunks" % (show(verified), chunks))
+
+# Each chunk record must stand on its own: verified, rendered by this run (the samples run
+# with --no-cache), every take it counts logged, the kept take one of them, and at least
+# one STT call, each of which logged a transcription score (manifest.go's fill: a call
+# that fails ends the run, so a complete run logs every call it counts).
+recount = {"chunks": len(records), "verified": 0, "unverified": 0, "no_eligible": 0,
+           "pending": 0, "cached": 0, "renders": 0, "stt_calls": 0}
 for i, r in enumerate(records):
-    state = r.get("state") if isinstance(r, dict) else None
+    if not isinstance(r, dict):
+        done(numbers, "chunk #%d is not a JSON object" % (i + 1))
+    cid = r.get("id") if isinstance(r.get("id"), str) and r.get("id") else "#%d" % (i + 1)
+    state = r.get("state")
     if state != "verified" or r.get("verified") is not True:
-        cid = r.get("id") if isinstance(r, dict) else None
-        done(numbers, "chunk %s is not verified (state %s)" % (cid or "#%d" % (i + 1), show(state)))
-if stt_calls is None or stt_calls <= 0:
-    done(numbers, "manifest records no STT calls")
+        done(numbers, "chunk %s is not verified (state %s)" % (cid, show(state)))
+    if r.get("cached") is not False:
+        done(numbers, "chunk %s was taken from the cache, not rendered and verified by this run" % cid)
+    attempts, final, calls = count(r, "attempts"), count(r, "final_attempt"), count(r, "stt_calls")
+    takes = r.get("attempt_log")
+    if attempts is None or attempts <= 0:
+        done(numbers, "chunk %s has no attempts" % cid)
+    if not isinstance(takes, list) or len(takes) != attempts:
+        done(numbers, "chunk %s counts %d attempts but logs %s takes" % (
+            cid, attempts, len(takes) if isinstance(takes, list) else "no"))
+    if final is None or not 1 <= final <= attempts:
+        done(numbers, "chunk %s keeps take %s of %d" % (cid, show(final), attempts))
+    if calls is None or calls <= 0:
+        done(numbers, "chunk %s has no STT calls" % cid)
+    scores = 0
+    for t in takes:
+        s = t.get("stt_scores") if isinstance(t, dict) else None
+        if not isinstance(s, list):
+            done(numbers, "chunk %s logs a take without transcription scores" % cid)
+        scores += len(s)
+    if scores != calls:
+        done(numbers, "chunk %s counts %d STT calls but its takes log %d transcriptions" % (cid, calls, scores))
+    recount["verified"] += 1
+    recount["renders"] += attempts
+    recount["stt_calls"] += calls
+
+# Every summary count must be the one the chunk records give (manifest.go's count).
+for key in ("chunks", "verified", "unverified", "no_eligible", "pending", "cached", "renders", "stt_calls"):
+    v = count(summary, key)
+    if v is None:
+        done(numbers, "manifest summary has no count for %s" % key)
+    if v != recount[key]:
+        done(numbers, "manifest summary says %s=%d but its chunk records give %d" % (key, v, recount[key]))
 
 if apath.endswith(".wav"):
     try:
@@ -336,6 +407,7 @@ say() {
 	"$bin" say --verify normal --no-cache --force -o "$out" "$@"
 }
 
+step "release binary provenance" "" provenance
 step "doctor --deep" doctor "$bin" doctor --deep
 step "English sample" "${work}/en.wav.json" say "${work}/en.wav" -f "${work}/en.txt"
 step "Chinese sample" "${work}/zh.wav.json" say "${work}/zh.wav" -f "${work}/zh.txt"

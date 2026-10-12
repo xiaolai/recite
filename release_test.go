@@ -45,13 +45,18 @@ func runScript(t *testing.T, fakeBin string, env []string, script string, args .
 	return ee.ExitCode(), out.String()
 }
 
+// semverChain is the SemVer 2.0 specification's precedence example, lowest first.
+var semverChain = []string{"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
+	"1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"}
+
 // accept: REL-03#1
 func TestTapVersionGuard(t *testing.T) {
-	for _, tc := range []struct {
+	type guardCase struct {
 		current, next string
 		want          int
 		msg           string // what the refusal must say
-	}{
+	}
+	cases := []guardCase{
 		{"0.1.0", "0.2.0", 0, ""},
 		{"0.1.9", "0.1.10", 0, ""}, // numeric, not lexical
 		{"", "0.1.0", 0, ""},       // no formula in the tap yet
@@ -65,18 +70,45 @@ func TestTapVersionGuard(t *testing.T) {
 		{"0.2.0", "0.2.0", 1, "already has 0.2.0"},
 		{"0.2.0", "0.1.0", 1, "is not newer than"},
 		{"0.1.10", "0.1.9", 1, "is not newer than"},
+		// NEW is stable only: the tap publishes releases, never prereleases or builds.
 		{"0.1.0", "0.2.0-rc1", 1, "0.2.0-rc1 is not a canonical X.Y.Z release version"},
 		{"", "0.2.0-rc1", 1, "is not a canonical X.Y.Z release version"},
+		{"0.1.0", "0.2.0+build.1", 1, "0.2.0+build.1 is not a canonical X.Y.Z release version"},
 		{"0.1.0", "latest", 1, "is not a canonical X.Y.Z release version"},
 		{"", "01.2.3", 1, "01.2.3 is not a canonical X.Y.Z release version"},
 		{"1.2.3", "1.02.4", 1, "1.02.4 is not a canonical X.Y.Z release version"},
 		{"1.2.3", "1.2.03", 1, "is not a canonical X.Y.Z release version"},
-		{"0oops", "1.2.3", 1, "the tap's 0oops is not a canonical X.Y.Z version"}, // never assumed older
-		{"01.2.3", "1.2.4", 1, "the tap's 01.2.3 is not a canonical X.Y.Z version"},
-		// The tap never holds a prerelease, so one there is an anomaly: fail closed.
-		{"1.2.3-beta", "1.2.4", 1, "the tap's 1.2.3-beta is a prerelease"},
-		{"1.2.3-beta", "1.2.3", 1, "is a prerelease"},
-	} {
+		// CURRENT is any valid SemVer 2.0 version; anything else is never assumed older.
+		{"0oops", "1.2.3", 1, "the tap's 0oops is not a valid SemVer version"},
+		{"01.2.3", "1.2.4", 1, "the tap's 01.2.3 is not a valid SemVer version"},
+		{"1.02.3", "1.2.4", 1, "is not a valid SemVer version"},
+		{"1.2.3-", "1.2.4", 1, "is not a valid SemVer version"},
+		{"1.2.3-01", "1.2.4", 1, "is not a valid SemVer version"}, // numeric identifier, leading zero
+		{"1.2.3-rc.01", "1.2.4", 1, "is not a valid SemVer version"},
+		{"1.2.3-rc..1", "1.2.4", 1, "is not a valid SemVer version"},
+		{"1.2.3-rc_1", "1.2.4", 1, "is not a valid SemVer version"},
+		{"1.2.3+", "1.2.4", 1, "is not a valid SemVer version"},
+		{"1.2.3+a..b", "1.2.4", 1, "is not a valid SemVer version"},
+		// A valid CURRENT prerelease is older than its release and everything after it.
+		{"1.2.3-beta", "1.2.3", 0, ""},
+		{"1.2.3-beta", "1.2.4", 0, ""},
+		{"1.2.3-beta", "1.2.2", 1, "is not newer than"},
+		{"1.2.3-0", "1.2.3", 0, ""},
+		{"1.2.3-rc.1+build.5", "1.2.3", 0, ""},
+		// Build metadata in CURRENT takes no part in precedence.
+		{"1.2.3+build.5", "1.2.4", 0, ""},
+		{"1.2.3+build.5", "1.2.3", 1, "is not newer than"},
+		{"1.2.3+0a.01", "1.2.3", 1, "is not newer than"}, // build identifiers may have leading zeros
+	}
+	for _, v := range semverChain {
+		cases = append(cases, guardCase{v, "0.9.9", 1, "is not newer than"}, guardCase{v, "1.0.1", 0, ""})
+		if v == "1.0.0" {
+			cases = append(cases, guardCase{v, "1.0.0", 1, "already has 1.0.0"})
+		} else {
+			cases = append(cases, guardCase{v, "1.0.0", 0, ""})
+		}
+	}
+	for _, tc := range cases {
 		code, out := runScript(t, t.TempDir(), nil, "scripts/tap-version-guard.sh", tc.current, tc.next)
 		if code != tc.want || !strings.Contains(out, tc.msg) || (tc.want == 0 && out != "") {
 			t.Errorf("guard(%q, %q) exit = %d, want %d with %q: %s", tc.current, tc.next, code, tc.want, tc.msg, out)
@@ -84,6 +116,55 @@ func TestTapVersionGuard(t *testing.T) {
 	}
 	if strings.Contains(readFile(t, "scripts/tap-version-guard.sh"), "sort -V") {
 		t.Error("tap-version-guard.sh still orders versions with sort -V")
+	}
+}
+
+// semverCmp runs the guard's comparator on two valid versions: -1, 0 or 1.
+func semverCmp(t *testing.T, a, b string) string {
+	t.Helper()
+	cmd := exec.Command("bash", "-c", `source scripts/tap-version-guard.sh && semver_cmp "$1" "$2"`, "_", a, b)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("semver_cmp %s %s: %v: %s", a, b, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// The comparator orders every pair of the specification's example as SemVer 2.0 does,
+// including the prerelease orderings a stable NEW never reaches through the guard.
+// accept: REL-03#1
+func TestTapVersionGuardSemverPrecedence(t *testing.T) {
+	for i, a := range semverChain {
+		for j, b := range semverChain {
+			want := "0"
+			if i < j {
+				want = "-1"
+			} else if i > j {
+				want = "1"
+			}
+			if got := semverCmp(t, a, b); got != want {
+				t.Errorf("semver_cmp(%s, %s) = %s, want %s", a, b, got, want)
+			}
+		}
+	}
+	for _, tc := range []struct{ a, b, want string }{
+		{"1.0.0-99999999999999999999", "1.0.0-100000000000000000000", "-1"}, // numeric, any length
+		{"1.0.0-9", "1.0.0-10", "-1"},
+		{"1.0.0-1", "1.0.0-a", "-1"},   // numeric before alphanumeric
+		{"1.0.0-Z", "1.0.0-a", "-1"},   // ASCII order, not the locale's
+		{"1.0.0-a", "1.0.0-a-b", "-1"}, // a hyphen is part of an alphanumeric identifier
+		{"1.0.0-a.1", "1.0.0-a.1.0", "-1"},
+		{"1.0.0-rc.1+b1", "1.0.0-rc.1+b2", "0"}, // build metadata is ignored
+		{"1.0.0+b1", "1.0.0", "0"},
+		{"2.0.0-alpha", "1.99.99", "1"},
+	} {
+		if got := semverCmp(t, tc.a, tc.b); got != tc.want {
+			t.Errorf("semver_cmp(%s, %s) = %s, want %s", tc.a, tc.b, got, tc.want)
+		}
+		rev := map[string]string{"-1": "1", "0": "0", "1": "-1"}[tc.want]
+		if got := semverCmp(t, tc.b, tc.a); got != rev {
+			t.Errorf("semver_cmp(%s, %s) = %s, want %s", tc.b, tc.a, got, rev)
+		}
 	}
 }
 
@@ -508,7 +589,7 @@ func releaseCheckFakes(t *testing.T, failOn, sayMode, goFail string) (bin, dist,
 	bin, dist = t.TempDir(), t.TempDir()
 	recite = filepath.Join(t.TempDir(), "recite")
 	goLog = filepath.Join(t.TempDir(), "go.log")
-	writeExec(t, filepath.Dir(recite), "recite", `if [ "$1" = version ]; then echo "recite v9.9.9"; echo "commit: abc"; exit 0; fi
+	writeExec(t, filepath.Dir(recite), "recite", `if [ "$1" = version ]; then echo "recite v9.9.9"; echo "commit: `+releaseRev+`"; exit 0; fi
 if [ "$1" = "$FAKE_FAIL_ON" ]; then echo "fake failure" >&2; exit 4; fi
 if [ "$1" = doctor ]; then echo "ok    auth"; exit 0; fi
 if [ "$1" = say ]; then
@@ -537,28 +618,63 @@ if [ "$1" = say ]; then
 		printf "$m4a" >"$out"
 		if [ "$FAKE_SAY" = zerodur ]; then printf 'ZERO' >>"$out"; fi ;;
 	esac
-	status=complete chunks=3 verified=3 records=3 stt=3
+	# The summary fields, then the chunk records; a mode breaks one of them (chunk c2's for
+	# the per-chunk modes).
+	status=complete chunks=3 verified=3 unverified=0 noelig=0 pending=0 cached=0 renders=3 stt=3 records=3
 	case "$FAKE_SAY" in
 	nomanifest) exit 0 ;;
 	malformed) printf '{"status":"complete","summary":{"chunks":3,' >"${out}.json"; exit 0 ;;
 	unverified) verified=2 ;;
-	nochunks) chunks=0 verified=0 records=0 ;;
+	nochunks) chunks=0 verified=0 renders=0 stt=0 records=0 ;;
 	failed) status=failed ;;
 	mismatch) records=2 ;;
 	nostt) stt=0 ;;
+	sumunverified) unverified=1 ;;
+	sumnoeligible) noelig=1 ;;
+	sumpending) pending=1 ;;
+	sumcached) cached=1 ;;
+	sumrenders) renders=4 ;;
+	notacount) verified='"3"' ;;
+	chunkstt0) stt=2 ;;
+	sttmismatch) stt=4 ;;
+	cachedchunk) cached=1 renders=2 ;;
+	attempts0) renders=2 ;;
 	esac
 	recs=""
 	for ((i = 1; i <= records; i++)); do
-		state=verified ok=true
-		if [ "$FAKE_SAY" = unverifiedrecord ] && [ "$i" = 2 ]; then state=unverified ok=false; fi
-		recs="${recs}${recs:+,}{\"id\":\"c${i}\",\"state\":\"${state}\",\"verified\":${ok},\"stt_calls\":1}"
+		state=verified ok=true from_cache=false attempts=1 final=1 calls=1
+		takes='{"n":1,"status":"completed","eligible":true,"stt_scores":[0.98],"score":0.98,"rejection":null}'
+		if [ "$i" = 2 ]; then
+			case "$FAKE_SAY" in
+			unverifiedrecord) state=unverified ok=false ;;
+			chunkstt0) calls=0 takes='{"n":1,"status":"completed","eligible":true,"stt_scores":[],"score":0,"rejection":null}' ;;
+			sttmismatch) calls=2 ;;
+			cachedchunk) from_cache=true ;;
+			attempts0) attempts=0 final=0 takes='' ;;
+			attemptlog) takes='' ;;
+			finalbad) final=2 ;;
+			esac
+		fi
+		recs="${recs}${recs:+,}{\"id\":\"c${i}\",\"state\":\"${state}\",\"verified\":${ok},\"cached\":${from_cache},\"attempts\":${attempts},\"final_attempt\":${final},\"stt_calls\":${calls},\"attempt_log\":[${takes}]}"
 	done
-	printf '{"status":"%s","output":{"duration_s":1.5},"summary":{"chunks":%d,"verified":%d,"unverified":0,"renders":3,"stt_calls":%d},"chunks":[%s]}\n' \
-		"$status" "$chunks" "$verified" "$stt" "$recs" >"${out}.json"
+	printf '{"status":"%s","output":{"duration_s":1.5},"summary":{"chunks":%d,"verified":%s,"unverified":%d,"no_eligible":%d,"pending":%d,"cached":%d,"renders":%d,"stt_calls":%d},"chunks":[%s]}\n' \
+		"$status" "$chunks" "$verified" "$unverified" "$noelig" "$pending" "$cached" "$renders" "$stt" "$recs" >"${out}.json"
 fi
 exit 0
 `)
-	writeExec(t, bin, "go", `{ printf 'RECITE_BIN=%s' "${RECITE_BIN:-}"; printf '\x1f%s' "$@"; printf '\n'; } >>"$FAKE_GO_LOG"
+	// go version -m reads a fake release binary's "rev=R modified=M" as the build info the
+	// real one prints for a Go binary, and refuses any other file as the real one does.
+	writeExec(t, bin, "go", `if [ "$1 $2" = "version -m" ]; then
+	body="$(cat -- "$3")"
+	case "$body" in binary*) ;; *) echo "$3: not executable file" >&2; exit 1 ;; esac
+	rev="$(sed -n 's/.* rev=\([^ ]*\).*/\1/p' <<<"$body")"
+	mod="$(sed -n 's/.* modified=\([^ ]*\).*/\1/p' <<<"$body")"
+	printf '%s: go1.27.2\n\tpath\tgithub.com/xiaolai/recite/cmd/recite\n\tbuild\t-trimpath=true\n\tbuild\tvcs=git\n' "$3"
+	if [ -n "$rev" ]; then printf '\tbuild\tvcs.revision=%s\n' "$rev"; fi
+	if [ -n "$mod" ]; then printf '\tbuild\tvcs.modified=%s\n' "$mod"; fi
+	exit 0
+fi
+{ printf 'RECITE_BIN=%s' "${RECITE_BIN:-}"; printf '\x1f%s' "$@"; printf '\n'; } >>"$FAKE_GO_LOG"
 if [ -n "$FAKE_GO_FAIL" ] && [[ " $* " == *"$FAKE_GO_FAIL"* ]]; then echo "--- FAIL: fake"; exit 1; fi
 echo "ok  fake $*"
 `)
@@ -569,13 +685,29 @@ mp4) printf 'codec_name=aac\nformat_name=mov,mp4,m4a,3gp,3g2,mj2\nduration=%s\n'
 esac
 `)
 	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
-		writeFile(t, filepath.Join(dist, "recite-"+platform), "binary "+platform, 0o755)
+		writeFile(t, filepath.Join(dist, "recite-"+platform), fakeReleaseBinary(platform, releaseRev, "false"), 0o755)
 	}
 	t.Setenv("FAKE_FAIL_ON", failOn)
 	t.Setenv("FAKE_SAY", sayMode)
 	t.Setenv("FAKE_GO_FAIL", goFail)
 	t.Setenv("FAKE_GO_LOG", goLog)
 	return bin, dist, recite, goLog
+}
+
+// releaseRev is the commit the fake release binaries were built from.
+const releaseRev = "abcdef0123456789abcdef0123456789abcdef01"
+
+// fakeReleaseBinary is a fake release binary whose build info, as the fake go version -m
+// reads it, names revision rev and vcs.modified modified ("" leaves either out).
+func fakeReleaseBinary(platform, rev, modified string) string {
+	s := "binary " + platform
+	if rev != "" {
+		s += " rev=" + rev
+	}
+	if modified != "" {
+		s += " modified=" + modified
+	}
+	return s + "\n"
 }
 
 // fakeProbeHead starts a fake audio prober: it takes the last argument as the file (dropping
@@ -626,7 +758,7 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 	report := latestReport(t, dist)
 	for _, want := range []string{
 		"- Version: recite v9.9.9\n",
-		"- Commit: abc\n",
+		"- Commit: " + releaseRev + "\n",
 		"- Binary sha256: " + sha256File(t, recite) + "\n",
 		"- Binary: `~/",
 		"Logs: `~/",
@@ -641,9 +773,13 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 	// publish-release.sh binds the release to every binary this check saw, not only the one
 	// it ran.
 	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
-		want := "- Release binary recite-" + platform + " sha256: " + sha256File(t, filepath.Join(dist, "recite-"+platform)) + "\n"
-		if !strings.Contains(report, want) {
-			t.Errorf("passing report missing %q:\n%s", want, report)
+		for _, want := range []string{
+			"- Release binary recite-" + platform + " sha256: " + sha256File(t, filepath.Join(dist, "recite-"+platform)) + "\n",
+			"- Release binary recite-" + platform + " commit: " + releaseRev + "\n",
+		} {
+			if !strings.Contains(report, want) {
+				t.Errorf("passing report missing %q:\n%s", want, report)
+			}
 		}
 	}
 	if strings.Contains(report, home) {
@@ -668,12 +804,26 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 		{"no audio", "", "noaudio", "", "no audio"},
 		{"no manifest", "", "nomanifest", "", "no manifest"},
 		{"malformed manifest", "", "malformed", "", "manifest is not valid JSON"},
-		{"unverified chunk", "", "unverified", "", "verified 2 of 3 chunks"},
 		{"no chunks", "", "nochunks", "", "manifest has no chunks"},
 		{"failed run", "", "failed", "", "manifest status is failed, not complete"},
-		{"fewer records than the summary", "", "mismatch", "", "manifest summary counts 3 chunks but holds 2 chunk records"},
 		{"an unverified chunk record", "", "unverifiedrecord", "", "chunk c2 is not verified (state unverified)"},
-		{"no STT calls", "", "nostt", "", "manifest records no STT calls"},
+		// Every summary count must be the one its chunk records give.
+		{"fewer records than the summary", "", "mismatch", "", "manifest summary says chunks=3 but its chunk records give 2"},
+		{"summary verified contradicts the records", "", "unverified", "", "manifest summary says verified=2 but its chunk records give 3"},
+		{"summary unverified contradicts the records", "", "sumunverified", "", "manifest summary says unverified=1 but its chunk records give 0"},
+		{"summary no_eligible contradicts the records", "", "sumnoeligible", "", "manifest summary says no_eligible=1 but its chunk records give 0"},
+		{"summary pending contradicts the records", "", "sumpending", "", "manifest summary says pending=1 but its chunk records give 0"},
+		{"summary cached contradicts the records", "", "sumcached", "", "manifest summary says cached=1 but its chunk records give 0"},
+		{"summary renders contradicts the records", "", "sumrenders", "", "manifest summary says renders=4 but its chunk records give 3"},
+		{"summary STT calls contradict the records", "", "nostt", "", "manifest summary says stt_calls=0 but its chunk records give 3"},
+		{"a summary count that is not a number", "", "notacount", "", "manifest summary has no count for verified"},
+		// Every chunk record must hold up on its own: rendered and transcribed by this run.
+		{"a chunk without STT calls", "", "chunkstt0", "", "chunk c2 has no STT calls"},
+		{"chunk STT calls contradict its takes", "", "sttmismatch", "", "chunk c2 counts 2 STT calls but its takes log 1 transcriptions"},
+		{"a cached chunk", "", "cachedchunk", "", "chunk c2 was taken from the cache, not rendered and verified by this run"},
+		{"a chunk without attempts", "", "attempts0", "", "chunk c2 has no attempts"},
+		{"chunk attempts contradict its takes", "", "attemptlog", "", "chunk c2 counts 1 attempts but logs 0 takes"},
+		{"a kept take that does not exist", "", "finalbad", "", "chunk c2 keeps take 2 of 1"},
 		{"truncated WAV", "", "truncwav", "", "RIFF size 40 does not match the file's 46 bytes"},
 		{"WAV bytes named m4a", "", "mislabel", "", "en.m4a is not an mp4 container (ffprobe: wav)"},
 		{"m4a without audio", "", "zerodur", "", "en.m4a has no positive duration (ffprobe: N/A)"},
@@ -701,6 +851,32 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 	env = []string{"RECITE_LIVE=1", "DIST=" + dist, "RECITE_BIN=" + recite}
 	if code, out := runScript(t, bin, env, "scripts/release-check.sh"); code != 2 || !strings.Contains(out, "recite-linux-arm64 is missing") {
 		t.Errorf("missing release binary: exit %d, want 2: %s", code, out)
+	}
+
+	// Every release binary must have been built, from a clean tree, of the commit the binary
+	// the check runs reports; its build info is read without executing it.
+	other := strings.Repeat("1", 40)
+	for _, tc := range []struct {
+		name, platform, content, want string
+	}{
+		{"a binary of another commit", "linux-arm64", fakeReleaseBinary("linux-arm64", other, "false"),
+			"recite-linux-arm64 was built from " + other + ", not " + releaseRev},
+		{"a binary of a modified tree", "darwin-amd64", fakeReleaseBinary("darwin-amd64", releaseRev, "true"),
+			"recite-darwin-amd64 was built from a modified tree"},
+		{"a binary without a revision", "linux-amd64", fakeReleaseBinary("linux-amd64", "", "false"),
+			"recite-linux-amd64 records no vcs.revision"},
+		{"a binary without vcs.modified", "linux-amd64", fakeReleaseBinary("linux-amd64", releaseRev, ""),
+			"recite-linux-amd64 was built from a modified tree"},
+		{"not a Go binary", "darwin-arm64", "#!/bin/sh\n", "go version -m cannot read recite-darwin-arm64"},
+	} {
+		bin, dist, recite, _ := releaseCheckFakes(t, "", "", "")
+		writeFile(t, filepath.Join(dist, "recite-"+tc.platform), tc.content, 0o755)
+		env := []string{"RECITE_LIVE=1", "DIST=" + dist, "RECITE_BIN=" + recite}
+		code, out := runScript(t, bin, env, "scripts/release-check.sh")
+		report := latestReport(t, dist)
+		if code != 1 || !strings.Contains(out, tc.want) || !strings.Contains(report, "\nResult: FAIL (") {
+			t.Errorf("%s: exit %d, want 1 with %q and a FAIL report: %s\n%s", tc.name, code, tc.want, out, report)
+		}
 	}
 }
 
@@ -761,6 +937,7 @@ func passReport(t *testing.T, dist string) string {
 	r := "# recite release check\n\n- Binary sha256: " + sha256File(t, filepath.Join(dist, "recite-darwin-arm64")) + "\n"
 	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
 		r += "- Release binary recite-" + platform + " sha256: " + sha256File(t, filepath.Join(dist, "recite-"+platform)) + "\n"
+		r += "- Release binary recite-" + platform + " commit: " + publishHead + "\n"
 	}
 	return r + "- Version: recite v9.9.9\n- Commit: " + publishHead + "\n\nResult: PASS (10 steps)\n"
 }
@@ -880,6 +1057,28 @@ func TestPublishReleaseRefusesWithoutPassingCheck(t *testing.T) {
 		{"report without a linux-arm64 hash", func(t *testing.T, p publishEnv) {
 			replaceIn(t, filepath.Join(p.dist, report), "- Release binary recite-linux-arm64 sha256: ", "- Release binary recite-linux-arm64: ")
 		}, "records no sha256 for recite-linux-arm64"},
+		{"a binary built from another commit", func(t *testing.T, p publishEnv) {
+			replaceIn(t, filepath.Join(p.dist, report), "- Release binary recite-linux-amd64 commit: "+publishHead,
+				"- Release binary recite-linux-amd64 commit: "+strings.Repeat("1", 40))
+		}, "recite-linux-amd64 was built from " + strings.Repeat("1", 40) + ", not HEAD " + publishHead},
+		{"report without a darwin-amd64 commit", func(t *testing.T, p publishEnv) {
+			replaceIn(t, filepath.Join(p.dist, report), "- Release binary recite-darwin-amd64 commit: ", "- Release binary recite-darwin-amd64: ")
+		}, "records no commit for recite-darwin-amd64"},
+		{"an archive whose binary is not the checked one", func(t *testing.T, p publishEnv) {
+			// Packaging swaps linux-amd64's binary for other bytes just before tar reads it.
+			realTar, err := exec.LookPath("tar")
+			must(t, err)
+			t.Setenv("REAL_TAR", realTar)
+			writeExec(t, p.bin, "tar", `dir="" prev="" create=""
+for a in "$@"; do
+	if [ "$prev" = -C ]; then dir="$a"; fi
+	case "$a" in -cf) create=1 ;; esac
+	prev="$a"
+done
+if [ -n "$create" ] && [ "${dir##*/}" = linux-amd64 ]; then printf 'swapped' >"$dir/recite"; fi
+exec "$REAL_TAR" "$@"
+`)
+		}, "recite-linux-amd64.tar.gz holds a recite that is not the checked recite-linux-amd64"},
 		{"dirty tree", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_GIT_STATUS", " M README.md\n") },
 			"the working tree is not clean"},
 		{"git status fails", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_GIT_STATUS_EXIT", "128") },
@@ -993,6 +1192,19 @@ func TestPublishReleaseResumes(t *testing.T) {
 		t.Errorf("unreadable tap version: continued:\n%q", calls)
 	}
 
+	// A published SHA256SUMS that is not this build's stops the run before the tap.
+	sums := filepath.Join(p.release, "SHA256SUMS")
+	goodSums := readFile(t, sums)
+	writeFile(t, sums, strings.Repeat("0", 64)+"  recite-linux-amd64.tar.gz\n", 0o644)
+	must(t, os.Remove(p.log))
+	if code, out := p.run(t); code == 0 || !strings.Contains(out, "SHA256SUMS differs from this build's") {
+		t.Errorf("differing SHA256SUMS: exit %d: %s", code, out)
+	}
+	if calls := readLog(t, p.log); strings.Contains(calls, "release\x1fcreate") || strings.Contains(calls, "repo\x1fclone") {
+		t.Errorf("differing SHA256SUMS: continued or replaced:\n%q", calls)
+	}
+	writeFile(t, sums, goodSums, 0o644)
+
 	// A published asset that differs from this build stops the run before the tap.
 	writeFile(t, filepath.Join(p.release, "recite-linux-amd64.tar.gz"), "something else", 0o644)
 	must(t, os.Remove(p.log))
@@ -1001,6 +1213,31 @@ func TestPublishReleaseResumes(t *testing.T) {
 	}
 	if calls := readLog(t, p.log); strings.Contains(calls, "release\x1fcreate") || strings.Contains(calls, "repo\x1fclone") {
 		t.Errorf("differing asset: continued or replaced:\n%q", calls)
+	}
+}
+
+// A tap formula whose VERSION constant is a prerelease of this version is read whole and
+// replaced by the release; one that is a later prerelease is not.
+// accept: REL-03#1
+func TestPublishReleaseReadsPrereleaseTapVersion(t *testing.T) {
+	for _, tc := range []struct {
+		tapVersion string
+		pushed     bool
+		want       string
+	}{
+		{"9.9.9-rc.1", true, "tap updated to 9.9.9"},
+		{"9.9.9-rc.1+build.7", true, "tap updated to 9.9.9"},
+		{"10.0.0-alpha", false, "the tap has 10.0.0-alpha; refusing to replace it with 9.9.9"},
+	} {
+		p := publishFakes(t)
+		tapFormula := filepath.Join(t.TempDir(), "recite.rb")
+		writeFile(t, tapFormula, "class Recite < Formula\n  VERSION = \""+tc.tapVersion+"\"\n  version VERSION\nend\n", 0o644)
+		t.Setenv("FAKE_FORMULA", tapFormula)
+		code, out := p.run(t)
+		pushed := strings.Contains(readLog(t, p.log), "\x1fpush\x1forigin\x1fHEAD:main\n")
+		if (code == 0) != tc.pushed || pushed != tc.pushed || !strings.Contains(out, tc.want) {
+			t.Errorf("tap at %s: exit %d, pushed %v, want pushed %v with %q: %s", tc.tapVersion, code, pushed, tc.pushed, tc.want, out)
+		}
 	}
 }
 
