@@ -174,22 +174,29 @@ func syncDir(dir string) error {
 	return nil
 }
 
+// fileID is a file's identity on its file system, shared by all its names.
+type fileID struct{ dev, ino uint64 }
+
+// sameFile is os.SameFile; a variable so a test can prove the identity map makes it unused.
+var sameFile = os.SameFile
+
 // distinctOutputs fails when two of a run's output paths name the same file: the later
 // publication would replace the earlier one. Paths are compared canonical (see canonicalPath) and, for
 // files that exist, by identity, so a symlink or a hard link to another output also collides.
-// Empty paths (an output that is off) are skipped.
+// Each path costs map lookups only: existing files are keyed by device and inode. Where the
+// platform exposes no identity, os.SameFile runs among files sharing size and modification
+// time, which every name of one file shares. Empty paths (an output that is off) are skipped.
 func distinctOutputs(paths ...string) error {
 	type existing struct {
 		path string
 		fi   os.FileInfo
 	}
-	byPath := make(map[string]bool, len(paths))
-	// Existing files bucketed by size and modification time, which every name of one file
-	// shares, so os.SameFile runs only within a bucket instead of across every pair.
 	type stamp struct {
 		size int64
 		mod  int64
 	}
+	byPath := make(map[string]bool, len(paths))
+	byID := make(map[fileID]string)
 	byStamp := make(map[stamp][]existing)
 	for _, p := range paths {
 		if p == "" {
@@ -207,9 +214,16 @@ func distinctOutputs(paths ...string) error {
 		if err != nil {
 			continue // a missing file can only collide by name
 		}
+		if id, ok := fileIdentity(fi); ok {
+			if q, dup := byID[id]; dup {
+				return usagef("%s and %s are the same file; give each output its own path", q, canon)
+			}
+			byID[id] = canon
+			continue
+		}
 		k := stamp{fi.Size(), fi.ModTime().UnixNano()}
 		for _, q := range byStamp[k] {
-			if os.SameFile(fi, q.fi) {
+			if sameFile(fi, q.fi) {
 				return usagef("%s and %s are the same file; give each output its own path", q.path, canon)
 			}
 		}
