@@ -13,6 +13,14 @@ import (
 
 const rate = 24000
 
+// Cue times past the range of samples*time.Second stay positive and exact.
+func TestCueTimeLongTimeline(t *testing.T) {
+	const hours = 108
+	if got := at(hours*3600*rate, rate); got != hours*time.Hour {
+		t.Fatalf("at(%d h) = %v", hours, got)
+	}
+}
+
 // parsedCue is a cue read back from a file.
 type parsedCue struct {
 	Start, End time.Duration

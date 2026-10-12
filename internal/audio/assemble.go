@@ -143,7 +143,9 @@ func (g Gaps) rangeOf(c GapClass) (GapRange, bool) {
 
 // samplesOf rounds d to the nearest whole sample.
 func samplesOf(d time.Duration) int {
-	return int((int64(d)*SampleRate + int64(time.Second)/2) / int64(time.Second))
+	// Whole seconds and the remainder separately: d*SampleRate overflows past about 106 hours.
+	sec, rem := int64(d/time.Second), int64(d%time.Second)
+	return int(sec*SampleRate + (rem*SampleRate+int64(time.Second)/2)/int64(time.Second))
 }
 
 // DrawGap draws a gap of r in samples, uniformly over the whole samples of the range, from a

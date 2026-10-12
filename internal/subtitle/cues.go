@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/text"
 )
 
@@ -84,7 +85,7 @@ func Cues(chunks []Chunk, rate int) ([]Cue, error) {
 func textSentences(s string) []string { return text.Sentences(s) }
 
 func at(samples int64, rate int) time.Duration {
-	return time.Duration(samples * int64(time.Second) / int64(rate))
+	return audio.SampleDuration(samples, rate)
 }
 
 // wrap breaks s into lines within the line limit: at spaces for word-spaced text, between any

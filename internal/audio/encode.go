@@ -308,8 +308,27 @@ type pcmSource struct {
 	n   int64
 }
 
-// reader reads the PCM from its start; every pass gets its own.
-func (p pcmSource) reader() io.Reader { return io.NewSectionReader(p.src, 0, p.n) }
+// reader reads the PCM from its start; every pass gets its own. A source shorter than n
+// fails the read with io.ErrUnexpectedEOF instead of ending early, so no pass can encode
+// truncated audio and report success.
+func (p pcmSource) reader() io.Reader {
+	return &exactReader{r: io.NewSectionReader(p.src, 0, p.n), left: p.n}
+}
+
+// exactReader turns an EOF before left bytes have been read into io.ErrUnexpectedEOF.
+type exactReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (e *exactReader) Read(b []byte) (int, error) {
+	n, err := e.r.Read(b)
+	e.left -= int64(n)
+	if err == io.EOF && e.left > 0 {
+		return n, fmt.Errorf("audio: PCM source ended %d bytes short: %w", e.left, io.ErrUnexpectedEOF)
+	}
+	return n, err
+}
 
 func encodeFFmpeg(ctx context.Context, e Encoding, p pcmSource, meta, path, filter string) error {
 	var stderr boundedBuffer

@@ -27,7 +27,15 @@ func (p PCM) Duration() time.Duration { return DurationOf(int64(len(p))) }
 
 // DurationOf is the playing time of n bytes of PCM.
 func DurationOf(n int64) time.Duration {
-	return time.Duration(n * int64(time.Second) / BytesPerSecond)
+	return SampleDuration(n/BytesPerSample, SampleRate)
+}
+
+// SampleDuration is the playing time of samples at rate, truncated to the nanosecond. It
+// divides before it multiplies: samples*time.Second overflows int64 past about 106 hours at
+// 24 kHz (53 hours of bytes), while the quotient and remainder stay in range.
+func SampleDuration(samples int64, rate int) time.Duration {
+	r := int64(rate)
+	return time.Duration(samples/r)*time.Second + time.Duration(samples%r*int64(time.Second)/r)
 }
 
 // checkSize rejects a length holding a partial sample.
@@ -44,6 +52,8 @@ func (p PCM) Validate() error { return checkSize(int64(len(p))) }
 const (
 	wavHeaderSize = 44
 	formatPCM     = 1
+	// maxFmtChunk bounds the fmt chunk read: PCM needs 16 bytes, WAVE_FORMAT_EXTENSIBLE 40.
+	maxFmtChunk = 1024
 	// MaxWAVData is the largest data chunk a WAV header can describe: the RIFF
 	// size field (36 + data) is 32 bits.
 	MaxWAVData = 1<<32 - 1 - (wavHeaderSize - 8)
@@ -124,10 +134,10 @@ func ReadWAV(r io.Reader) (PCM, error) {
 		id, size := string(ch[0:4]), le.Uint32(ch[4:])
 		switch id {
 		case "fmt ":
-			if size < 16 {
+			if size < 16 || size > maxFmtChunk {
 				return nil, fmt.Errorf("audio: fmt chunk of %d bytes", size)
 			}
-			b := make([]byte, size+size%2)
+			b := make([]byte, uint64(size)+uint64(size%2))
 			if _, err := io.ReadFull(r, b); err != nil {
 				return nil, fmt.Errorf("audio: read fmt chunk: %w", err)
 			}
@@ -140,10 +150,17 @@ func ReadWAV(r io.Reader) (PCM, error) {
 			if !gotFmt {
 				return nil, errors.New("audio: WAV data chunk before fmt chunk")
 			}
-			p := make(PCM, size)
-			if _, err := io.ReadFull(r, p); err != nil {
+			// Read through a buffer that grows with the input, never to the declared size up
+			// front: a short file declaring 4 GiB must fail on its missing bytes, not allocate.
+			var buf bytes.Buffer
+			got, err := io.Copy(&buf, io.LimitReader(r, int64(size)))
+			if err != nil {
 				return nil, fmt.Errorf("audio: read WAV data: %w", err)
 			}
+			if got != int64(size) {
+				return nil, fmt.Errorf("audio: read WAV data: %d of %d declared bytes: %w", got, size, io.ErrUnexpectedEOF)
+			}
+			p := PCM(buf.Bytes())
 			return p, p.Validate()
 		default:
 			if _, err := io.CopyN(io.Discard, r, int64(size)+int64(size%2)); err != nil {
