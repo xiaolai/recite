@@ -77,7 +77,9 @@ func setupDoctor(fs *flag.FlagSet, c *CLI) func([]string) int {
 			if ch.Fix != "" {
 				line += fmt.Sprintf("%-4s  %-9s fix: %s\n", "", "", ch.Fix)
 			}
-			_, _ = io.WriteString(c.Stdout, logx.Scrub(line))
+			if _, err := io.WriteString(c.Stdout, logx.Scrub(line)); err != nil {
+				return c.writeResult(err)
+			}
 		}
 		// The most severe failing check decides the exit code (CLI-05, design §12.3 order).
 		return exitcode.Worst(codes...)
@@ -211,12 +213,20 @@ func routeFix(err error) string {
 // deepCheck is check 5: render the doctor sentence and transcribe it over HTTP.
 func (c *CLI) deepCheck(ctx context.Context, creds *auth.Credentials, sess realtime.SpeechSession) doctorCheck {
 	start := time.Now()
+	estimate := realtime.EstimateDuration(doctorSentence, realtime.DefaultSpeed)
 	take, err := sess.Render(ctx, realtime.RenderRequest{ChunkID: "doctor", Text: doctorSentence,
-		Effort: realtime.DefaultEffort, Attempt: 1, Estimate: time.Second})
+		Effort: realtime.DefaultEffort, Attempt: 1, Estimate: estimate})
 	if err != nil {
 		return failCheck("deep", "render failed: "+errMessage(err), routeFix(err), openai.ExitCode(err))
 	}
 	rendered := time.Since(start)
+	// The audio guards (status, empty, duration) need no STT: a take they reject is a speech
+	// failure in every verification mode. The said guard is not judged here (Spoken is the
+	// model's own transcript), as the doctor checks the audio, not the wording.
+	if _, rej := verify.PreSTT(verify.Chunk{ID: "doctor", Spoken: take.Said, Estimate: estimate}, take, false); rej != nil {
+		return failCheck("deep", fmt.Sprintf("the rendered take was rejected (%s): %s", rej.Reason, rej.Detail),
+			"run doctor --deep again; a repeat failure is worth reporting", exitcode.VerifyFailed)
+	}
 	// With verification off (the default, D23) say never transcribes, so an STT problem is
 	// reported as a warning that does not fail doctor.
 	sttOptional := c.verifyMode() == verify.ModeOff

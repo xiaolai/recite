@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ type doctorEnv struct {
 	env     map[string]string
 	tr      stt.Transcriber      // when set, the --deep check transcribes with it
 	synth   realtime.Synthesizer // when set, replaces the fake realtime server
+	stdout  io.Writer            // when set, doctor writes its report here
 }
 
 func newDoctorEnv(t *testing.T, opts ...rtfake.Option) *doctorEnv {
@@ -44,6 +46,9 @@ func (e *doctorEnv) run(args ...string) result {
 	e.t.Setenv("FAKECODEX_TOKEN_EXP", fmt.Sprint(cliNow.Add(2*time.Hour).Unix()))
 	var out, errb bytes.Buffer
 	c := New(&out, &errb)
+	if e.stdout != nil {
+		c.Stdout = e.stdout
+	}
 	c.Getenv = func(k string) string { return e.env[k] }
 	c.Now = func() time.Time { return cliNow }
 	c.LookPath = func(name string) (string, error) {
@@ -247,5 +252,41 @@ func TestDoctorDeepSTTDownWarnsWhenVerifyOff(t *testing.T) {
 	r = e.run("--deep", "--config", writeConfig(t, "[verify]\nmode = \"normal\"\n"))
 	if l := line(t, r.stdout, "deep"); !strings.HasPrefix(l, checkFail) || r.code == exitcode.OK {
 		t.Fatalf("verify normal: code %d, deep line %q", r.code, l)
+	}
+}
+
+// A take that is not usable audio fails doctor --deep in every verification mode: the status,
+// empty and duration guards run before anything counts as an optional STT problem.
+func TestDoctorDeepRejectsBadTake(t *testing.T) {
+	for name, o := range map[string]rtfake.Outcome{
+		"incomplete": {Echo: true, Duration: time.Second, Status: realtime.StatusIncomplete},
+		"failed":     {Echo: true, Duration: time.Second, Status: realtime.StatusFailed},
+		"empty":      {Echo: true, Duration: 0},
+		"too long":   {Echo: true, Duration: 10 * time.Second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newDoctorEnv(t)
+			e.tr = downSTT{} // an STT failure must not be what decides the line
+			e.synth = rtfake.NewScriptedSynthesizer().On("doctor", o)
+			r := e.run("--deep")
+			l := line(t, r.stdout, "deep")
+			if !strings.HasPrefix(l, checkFail) || r.code == exitcode.OK || strings.Contains(l, "transcription") {
+				t.Fatalf("code %d, deep line %q", r.code, l)
+			}
+		})
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+// A report doctor could not write is a failure, not a clean exit.
+func TestDoctorReportsWriteFailure(t *testing.T) {
+	e := newDoctorEnv(t)
+	e.stdout = failingWriter{}
+	r := e.run()
+	if r.code == exitcode.OK || !strings.Contains(r.stderr, "disk full") {
+		t.Fatalf("code %d, stderr %q", r.code, r.stderr)
 	}
 }
