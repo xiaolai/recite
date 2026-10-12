@@ -2,6 +2,7 @@ package audio
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -22,17 +23,23 @@ const (
 type PCM []byte
 
 // Duration is the playing time of p.
-func (p PCM) Duration() time.Duration {
-	return time.Duration(int64(len(p)) * int64(time.Second) / BytesPerSecond)
+func (p PCM) Duration() time.Duration { return DurationOf(int64(len(p))) }
+
+// DurationOf is the playing time of n bytes of PCM.
+func DurationOf(n int64) time.Duration {
+	return time.Duration(n * int64(time.Second) / BytesPerSecond)
 }
 
-// Validate rejects a buffer holding a partial sample.
-func (p PCM) Validate() error {
-	if len(p)%BytesPerSample != 0 {
-		return fmt.Errorf("audio: PCM length %d is not a whole number of %d-byte samples", len(p), BytesPerSample)
+// checkSize rejects a length holding a partial sample.
+func checkSize(n int64) error {
+	if n < 0 || n%BytesPerSample != 0 {
+		return fmt.Errorf("audio: PCM length %d is not a whole number of %d-byte samples", n, BytesPerSample)
 	}
 	return nil
 }
+
+// Validate rejects a buffer holding a partial sample.
+func (p PCM) Validate() error { return checkSize(int64(len(p))) }
 
 const (
 	wavHeaderSize = 44
@@ -57,17 +64,23 @@ func CheckWAVSize(dataLen uint64) error {
 // WriteWAV writes p as a RIFF/WAVE PCM file. The size is checked before any byte
 // is written, so an oversized buffer never yields a corrupt header.
 func WriteWAV(w io.Writer, p PCM) error {
-	if err := p.Validate(); err != nil {
+	return WriteWAVFrom(w, bytes.NewReader(p), int64(len(p)))
+}
+
+// WriteWAVFrom is [WriteWAV] of the n bytes of PCM read from r, so audio held in a file is
+// written without loading it into memory.
+func WriteWAVFrom(w io.Writer, r io.Reader, n int64) error {
+	if err := checkSize(n); err != nil {
 		return err
 	}
-	if err := CheckWAVSize(uint64(len(p))); err != nil {
+	if err := CheckWAVSize(uint64(n)); err != nil {
 		return err
 	}
 	bw := bufio.NewWriter(w)
-	if err := writeWAVHeader(bw, uint32(wavHeaderSize-8+len(p)), uint32(len(p))); err != nil {
+	if err := writeWAVHeader(bw, uint32(wavHeaderSize-8+n), uint32(n)); err != nil {
 		return err
 	}
-	if _, err := bw.Write(p); err != nil {
+	if _, err := io.CopyN(bw, r, n); err != nil {
 		return fmt.Errorf("audio: write WAV data: %w", err)
 	}
 	if err := bw.Flush(); err != nil {
@@ -78,10 +91,14 @@ func WriteWAV(w io.Writer, p PCM) error {
 
 // WritePCM writes p as raw s16le samples (.pcm).
 func WritePCM(w io.Writer, p PCM) error {
-	if err := p.Validate(); err != nil {
+	return writePCMFrom(w, bytes.NewReader(p), int64(len(p)))
+}
+
+func writePCMFrom(w io.Writer, r io.Reader, n int64) error {
+	if err := checkSize(n); err != nil {
 		return err
 	}
-	if _, err := w.Write(p); err != nil {
+	if _, err := io.CopyN(w, r, n); err != nil {
 		return fmt.Errorf("audio: write PCM: %w", err)
 	}
 	return nil
@@ -139,11 +156,16 @@ func ReadWAV(r io.Reader) (PCM, error) {
 // Write encodes p in a native format (wav or pcm at the internal rate). Encoded formats go
 // through an [Encoding].
 func Write(w io.Writer, f Format, p PCM) error {
+	return WriteFrom(w, f, bytes.NewReader(p), int64(len(p)))
+}
+
+// WriteFrom is [Write] of the n bytes of PCM read from r.
+func WriteFrom(w io.Writer, f Format, r io.Reader, n int64) error {
 	switch f {
 	case FormatWAV:
-		return WriteWAV(w, p)
+		return WriteWAVFrom(w, r, n)
 	case FormatPCM:
-		return WritePCM(w, p)
+		return writePCMFrom(w, r, n)
 	}
 	return fmt.Errorf("audio: %q is not a native format", f)
 }

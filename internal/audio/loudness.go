@@ -170,8 +170,8 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 }
 
 // measure runs the first pass over p.
-func measure(ctx context.Context, e Encoding, p PCM) (Measurement, error) {
-	return runMeasure(ctx, e.Bin, MeasureArgs(e.Loudness), bytes.NewReader(p))
+func measure(ctx context.Context, e Encoding, p pcmSource) (Measurement, error) {
+	return runMeasure(ctx, e.Bin, MeasureArgs(e.Loudness), p.reader())
 }
 
 // measureFile analyses the encoded file at path.

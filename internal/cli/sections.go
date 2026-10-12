@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -159,6 +160,22 @@ func (x extras) splitFiles(dir string) []string {
 	return out
 }
 
+// outputs are the files a run publishes besides its manifest: the audio (one file, or one per
+// section under target as a directory) and the subtitles of each.
+func (x extras) outputs(target string) []string {
+	files := []string{target}
+	if x.split {
+		files = x.splitFiles(target)
+	}
+	out := append([]string(nil), files...)
+	if x.subtitles != "" {
+		for _, p := range files {
+			out = append(out, subtitlePath(p, x.subtitles))
+		}
+	}
+	return out
+}
+
 // preflightExtras fails before the network when a subtitle or split file exists and --force is
 // absent, or when the split directory is not a directory.
 func (x extras) preflight(target string, force bool) error {
@@ -226,14 +243,16 @@ func cuesOf(chunks []pipeline.Chunk, spans []audio.Span, from, to int) ([]subtit
 
 // publishAudio writes the assembled audio and its extras: one file (with chapter markers when
 // on) or one file per section, and the subtitles of each. It returns the manifest sections.
-func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm audio.PCM, spans []audio.Span) ([]manifest.Section, error) {
+// The assembly is the size bytes of PCM in pcm, read in place rather than loaded into memory.
+func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm io.ReaderAt, size int64, spans []audio.Span) ([]manifest.Section, error) {
 	x := job.extras
-	write := func(path string, enc audio.Encoding, p audio.PCM) error {
+	write := func(path string, enc audio.Encoding, off, n int64) error {
 		return publishOutput(path, req.Force, func(f *os.File) error {
+			src := io.NewSectionReader(pcm, off, n)
 			if enc.Native() {
-				return audio.Write(f, enc.Format, p)
+				return audio.WriteFrom(f, enc.Format, src, n)
 			}
-			return audio.EncodeFile(ctx, enc, p, f.Name())
+			return audio.EncodeFileFrom(ctx, enc, src, n, f.Name())
 		})
 	}
 	subs := func(path string, from, to int, offset int64) error {
@@ -255,7 +274,7 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 		if x.chapters {
 			enc.Chapters = subtitle.FFMetadata(chapterMarkers(x.sections, job.plan.Chunks, spans))
 		}
-		if err := write(job.target, enc, pcm); err != nil {
+		if err := write(job.target, enc, 0, size); err != nil {
 			return nil, err
 		}
 		return secs, subs(job.target, 0, len(spans)-1, 0)
@@ -272,7 +291,7 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 			from = s.first
 		}
 		start, end := spans[from].Start, spans[s.last].End
-		if err := write(path, job.enc, pcm[start*audio.BytesPerSample:end*audio.BytesPerSample]); err != nil {
+		if err := write(path, job.enc, start*audio.BytesPerSample, (end-start)*audio.BytesPerSample); err != nil {
 			return nil, err
 		}
 		if err := subs(path, from, s.last, start); err != nil {

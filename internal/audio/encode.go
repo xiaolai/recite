@@ -260,9 +260,17 @@ func toolError(tool string, err error, stderr *boundedBuffer) error {
 // pass, then the encode with the measured values (AUD-06). Silence has no loudness to
 // normalise and is encoded as it is.
 func EncodeFile(ctx context.Context, e Encoding, p PCM, path string) error {
-	if err := p.Validate(); err != nil {
+	return EncodeFileFrom(ctx, e, bytes.NewReader(p), int64(len(p)), path)
+}
+
+// EncodeFileFrom is [EncodeFile] of the n bytes of PCM at the start of src, so audio held in a
+// file reaches the encoder without being loaded into memory. Each encoder pass reads src from
+// the start.
+func EncodeFileFrom(ctx context.Context, e Encoding, src io.ReaderAt, n int64, path string) error {
+	if err := checkSize(n); err != nil {
 		return err
 	}
+	p := pcmSource{src, n}
 	if e.Chapters != "" && (e.Tool != ToolFFmpeg || !ChapterFormat(e.Format)) {
 		return fmt.Errorf("audio: chapters need ffmpeg and m4a or m4b, not %s through %q", e.Format, e.Tool)
 	}
@@ -294,10 +302,19 @@ func EncodeFile(ctx context.Context, e Encoding, p PCM, path string) error {
 	return fmt.Errorf("audio: unknown encoder %q", e.Tool)
 }
 
-func encodeFFmpeg(ctx context.Context, e Encoding, p PCM, meta, path, filter string) error {
+// pcmSource is n bytes of PCM at the start of a ReaderAt.
+type pcmSource struct {
+	src io.ReaderAt
+	n   int64
+}
+
+// reader reads the PCM from its start; every pass gets its own.
+func (p pcmSource) reader() io.Reader { return io.NewSectionReader(p.src, 0, p.n) }
+
+func encodeFFmpeg(ctx context.Context, e Encoding, p pcmSource, meta, path, filter string) error {
 	var stderr boundedBuffer
 	cmd := exec.CommandContext(ctx, e.Bin, ffmpegArgs(e, meta, path, filter)...)
-	cmd.Stdin, cmd.Stderr = bytes.NewReader(p), &stderr
+	cmd.Stdin, cmd.Stderr = p.reader(), &stderr
 	if err := cmd.Run(); err != nil {
 		return toolError(ToolFFmpeg, err, &stderr)
 	}
@@ -315,7 +332,7 @@ const (
 // the PCM. Each pass that overshoots lowers loudnorm's ceiling by the measured overshoot plus
 // peakStep and encodes again, so the file gives up only the headroom its codec needed. A file
 // still over the ceiling after maxPeakPasses is an error, never published.
-func encodeUnderCeiling(ctx context.Context, e Encoding, p PCM, meta, path string, target LoudnessTarget, m Measurement) error {
+func encodeUnderCeiling(ctx context.Context, e Encoding, p pcmSource, meta, path string, target LoudnessTarget, m Measurement) error {
 	aim := target
 	for pass := 1; ; pass++ {
 		if err := encodeFFmpeg(ctx, e, p, meta, path, normalizeFilter(aim, m)); err != nil {
@@ -355,7 +372,7 @@ func chapterFile(text string) (string, func(), error) {
 	return path, cleanup, nil
 }
 
-func afconvert(ctx context.Context, e Encoding, p PCM, path string) error {
+func afconvert(ctx context.Context, e Encoding, p pcmSource, path string) error {
 	dir, err := os.MkdirTemp("", "recite-afconvert-")
 	if err != nil {
 		return fmt.Errorf("audio: afconvert temp dir: %w", err)
@@ -366,7 +383,7 @@ func afconvert(ctx context.Context, e Encoding, p PCM, path string) error {
 	if err != nil {
 		return fmt.Errorf("audio: afconvert input: %w", err)
 	}
-	werr := WriteWAV(f, p)
+	werr := WriteWAVFrom(f, p.reader(), p.n)
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -176,6 +175,11 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 	if err != nil {
 		return sayJob{}, c.reportFailure(err)
 	}
+	if !stream {
+		if err := distinctOutputs(append(x.outputs(target), mpath)...); err != nil {
+			return sayJob{}, c.reportFailure(err)
+		}
+	}
 	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc, extras: x,
 		manifest: mpath, replaceManifest: mreplace}
 	if job.cache, err = c.takeCache(req); err == nil {
@@ -325,9 +329,9 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		tr = t
 		rec.watch(tr)
 	}
-	var pcm bytes.Buffer
-	var sink io.Writer = &pcm
+	var sink io.Writer
 	var stream *audio.StreamWriter
+	var spool *os.File
 	if job.target == stdoutTarget {
 		// Each ordered prefix goes to stdout as soon as it is assembled (AUD-07).
 		if stream, err = audio.NewStreamWriter(ctx, job.enc, c.Stdout); err != nil {
@@ -335,6 +339,17 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		}
 		defer func() { _ = stream.Close() }() // ends the stream on every path; Close is idempotent
 		sink = stream
+	} else {
+		// The assembly goes to a temp file beside the output, not to memory: hours of PCM would
+		// otherwise be held whole until publication. It is read back to publish, then removed.
+		if spool, err = assemblySpool(job.target); err != nil {
+			return err
+		}
+		defer func() {
+			_ = spool.Close()
+			_ = os.Remove(spool.Name()) // best effort: the temp name is ours alone
+		}()
+		sink = spool
 	}
 	asm := audio.NewAssembler(sink, job.gaps)
 	var estTotal float64
@@ -391,26 +406,30 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		}
 	}
 	if write {
-		if err := asm.Close(); err != nil {
-			return err
-		}
 		var seconds float64
-		if stream != nil {
+		perr := asm.Close()
+		switch {
+		case perr != nil:
+		case stream != nil:
 			seconds = float64(asm.Written()) / audio.BytesPerSecond
 			c.Logger.Info("streamed output", "seconds", seconds)
-		} else {
-			audioOut := audio.PCM(pcm.Bytes())
-			seconds = audioOut.Duration().Seconds()
-			if sections, err = c.publishAudio(ctx, req, job, audioOut, asm.Spans()); err != nil {
-				return err
+		default:
+			seconds = audio.DurationOf(asm.Written()).Seconds()
+			if sections, perr = c.publishAudio(ctx, req, job, spool, asm.Written(), asm.Spans()); perr == nil {
+				c.Logger.Info("wrote output", "path", job.target, "seconds", seconds)
 			}
-			c.Logger.Info("wrote output", "path", job.target, "seconds", seconds)
 		}
-		status = manifest.StatusComplete
-		out = &manifest.Output{Path: job.target, Format: string(job.enc.Format), DurationS: seconds,
-			SampleRate: job.enc.Rate, Loudness: string(audio.LoudnessNone)}
-		if job.enc.Loudness != "" {
-			out.Loudness = string(job.enc.Loudness)
+		if perr != nil {
+			// Rendering is done but nothing was published: the manifest still records the
+			// failed run before the error is returned (design §10).
+			status, sections, err = manifest.StatusFailed, nil, perr
+		} else {
+			status = manifest.StatusComplete
+			out = &manifest.Output{Path: job.target, Format: string(job.enc.Format), DurationS: seconds,
+				SampleRate: job.enc.Rate, Loudness: string(audio.LoudnessNone)}
+			if job.enc.Loudness != "" {
+				out.Loudness = string(job.enc.Loudness)
+			}
 		}
 	}
 	c.written = out

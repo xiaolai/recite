@@ -104,7 +104,8 @@ func publishOutput(target string, force bool, write func(*os.File) error) error 
 	return syncDir(filepath.Dir(target))
 }
 
-// createTemp creates a fresh file next to target with O_EXCL. Its mode follows
+// createTemp creates a fresh file next to target with O_EXCL, open for reading and writing
+// (the assembly is written to one and read back to publish it). Its mode follows
 // the umask, as outputs are not private files (design §14.2).
 func createTemp(target string) (*os.File, string, error) {
 	dir, base := filepath.Split(target)
@@ -114,7 +115,7 @@ func createTemp(target string) (*os.File, string, error) {
 			return nil, "", fmt.Errorf("temp name: %w", err)
 		}
 		tmp := filepath.Join(dir, "."+base+"."+hex.EncodeToString(r[:])+".tmp")
-		f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
 		if err == nil {
 			return f, tmp, nil
 		}
@@ -139,4 +140,44 @@ func syncDir(dir string) error {
 		return fmt.Errorf("sync output directory: %w", err)
 	}
 	return nil
+}
+
+// distinctOutputs fails when two of a run's output paths name the same file: the later
+// publication would replace the earlier one. Paths are compared cleaned and absolute, and, for
+// files that exist, by identity, so a symlink or a hard link to another output also collides.
+// Empty paths (an output that is off) are skipped.
+func distinctOutputs(paths ...string) error {
+	type seen struct {
+		path string
+		fi   os.FileInfo
+	}
+	var prev []seen
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return fmt.Errorf("resolve output %s: %w", p, err)
+		}
+		fi, _ := os.Stat(abs) // a missing file can only collide by name
+		for _, q := range prev {
+			if q.path == abs || (fi != nil && q.fi != nil && os.SameFile(fi, q.fi)) {
+				return usagef("%s and %s are the same file; give each output its own path", q.path, abs)
+			}
+		}
+		prev = append(prev, seen{abs, fi})
+	}
+	return nil
+}
+
+// assemblySpool is the temp file `say` assembles the PCM into: beside target (in its parent
+// directory under --split-sections), on the output's file system. The caller closes and
+// removes it.
+func assemblySpool(target string) (*os.File, error) {
+	f, _, err := createTemp(filepath.Clean(target) + ".pcm")
+	if err != nil {
+		return nil, fmt.Errorf("assembly: %w", err)
+	}
+	return f, nil
 }
