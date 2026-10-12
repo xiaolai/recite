@@ -179,6 +179,12 @@ func TestWilson(t *testing.T) {
 	}
 	for _, c := range cases {
 		lo, hi := calibrate.Wilson(c.k, c.n)
+		// A NaN fails every comparison, so the tolerance check below would pass it.
+		for _, v := range []float64{lo, hi} {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				t.Fatalf("Wilson(%d, %d) = %v–%v, want finite bounds", c.k, c.n, lo, hi)
+			}
+		}
 		if math.Abs(lo-c.lo) > 1e-4 || math.Abs(hi-c.hi) > 1e-4 {
 			t.Fatalf("Wilson(%d, %d) = %.4f–%.4f, want %.4f–%.4f", c.k, c.n, lo, hi, c.lo, c.hi)
 		}
@@ -486,6 +492,62 @@ func TestWriteReportMachineLabelled(t *testing.T) {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("a machine-labelled report contains %q:\n%s", unwanted, out)
 		}
+	}
+}
+
+// failingEvaluation has one false accept of 2 clips labelled corrupted and one false reject of
+// 2 clips labelled good, so both criteria fail.
+func failingEvaluation(t *testing.T) calibrate.Evaluation {
+	t.Helper()
+	held := []calibrate.Record{
+		rec("s01", calibrate.Good, true, 1), rec("s02", calibrate.Good, false, 0.9),
+		rec("s03", calibrate.NameChange, true, 0.97), rec("s04", calibrate.WordSwap, false, 0.8),
+	}
+	labels := map[string]calibrate.Label{
+		"s01": calibrate.LabelGood, "s02": calibrate.LabelGood, "s03": calibrate.LabelCorrupted, "s04": calibrate.LabelCorrupted,
+	}
+	ev, err := calibrate.Evaluate(held, labels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ev
+}
+
+// A failing held-out evaluation is reported as FAIL with the counts behind it, for human and
+// machine labels alike; the verdict is never an unconditional PASS.
+func TestWriteReportFailingEvaluation(t *testing.T) {
+	const fail = "FAIL: 1 false accepts of 2 clips labelled corrupted (want 0); 1 false rejects of 2 clips labelled good (want at most 5%)**"
+	for _, c := range []struct {
+		name, labeller, verdict string
+	}{
+		{"human", "", "**Held-out verdict: " + fail},
+		{"machine", "whisper.cpp large-v3-turbo", "**Held-out verdict (machine-labelled): " + fail},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var b bytes.Buffer
+			err := calibrate.WriteReport(&b, calibrate.Report{
+				Date: time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC), Source: "test corpus", Seed: 7, Mode: verify.ModeNormal,
+				Thresholds: verify.ModeNormal.Thresholds(), HeldOut: failingEvaluation(t), Labeller: c.labeller,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := b.String()
+			for _, want := range []string{
+				c.verdict,
+				"| False accepts (of clips labelled corrupted) | 1 of 2 | 50.0% | 0.09–0.91 |",
+				"| False rejects (of clips labelled good) | 1 of 2 | 50.0% | 0.09–0.91 |",
+				"| s03 | name-change | corrupted | accepted | 0.9700 |",
+				"| s02 | good | good | rejected | 0.9000 |",
+			} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("report lacks %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "PASS") {
+				t.Fatalf("a failing evaluation is reported as PASS:\n%s", out)
+			}
+		})
 	}
 }
 
