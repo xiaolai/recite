@@ -325,7 +325,7 @@ func (e *exactReader) Read(b []byte) (int, error) {
 	n, err := e.r.Read(b)
 	e.left -= int64(n)
 	if err == io.EOF && e.left > 0 {
-		return n, fmt.Errorf("audio: PCM source ended %d bytes short: %w", e.left, io.ErrUnexpectedEOF)
+		return n, fmt.Errorf("audio: PCM ended %d bytes short of its declared length: %w", e.left, io.ErrUnexpectedEOF)
 	}
 	return n, err
 }

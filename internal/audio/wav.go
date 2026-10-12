@@ -114,9 +114,46 @@ func writePCMFrom(w io.Writer, r io.Reader, n int64) error {
 	return nil
 }
 
-// ReadWAV reads a RIFF/WAVE file in the internal format. Other formats (non-PCM,
-// other rates, channels or depths) are rejected rather than converted.
-func ReadWAV(r io.Reader) (PCM, error) {
+// MaxReadWAV is the most PCM [ReadWAV] buffers in memory: 256 MiB, about 93 minutes of the
+// internal format. Larger audio is read with [OpenWAV], which streams the data chunk.
+const MaxReadWAV = 256 << 20
+
+// ErrWAVReadCap is returned by [ReadWAV] for a data chunk larger than [MaxReadWAV].
+var ErrWAVReadCap = errors.New("audio: WAV data is larger than ReadWAV buffers; stream it with OpenWAV")
+
+// WAVStream is an opened WAV file: its data chunk size, and a reader limited to that chunk.
+// Reading Data past the bytes present fails with io.ErrUnexpectedEOF rather than ending early.
+type WAVStream struct {
+	Size int64
+	Data io.Reader
+}
+
+// ReadWAV reads a whole RIFF/WAVE file in the internal format into memory, refusing a data
+// chunk larger than [MaxReadWAV] before reading it. Other formats (non-PCM, other rates,
+// channels or depths) are rejected rather than converted.
+func ReadWAV(r io.Reader) (PCM, error) { return readWAVMax(r, MaxReadWAV) }
+
+func readWAVMax(r io.Reader, limit int64) (PCM, error) {
+	w, err := OpenWAV(r)
+	if err != nil {
+		return nil, err
+	}
+	if w.Size > limit {
+		return nil, fmt.Errorf("%w: %d bytes declared, limit %d", ErrWAVReadCap, w.Size, limit)
+	}
+	// Read through a buffer that grows with the input, never to the declared size up
+	// front: a short file declaring the cap must fail on its missing bytes, not allocate.
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, w.Data); err != nil {
+		return nil, fmt.Errorf("audio: read WAV data: %w", err)
+	}
+	return PCM(buf.Bytes()), nil
+}
+
+// OpenWAV parses a RIFF/WAVE header in the internal format up to the start of the data
+// chunk, reading nothing of the data itself, so audio of any size is streamed. Other formats
+// are rejected rather than converted.
+func OpenWAV(r io.Reader) (*WAVStream, error) {
 	var hdr [12]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return nil, fmt.Errorf("audio: read RIFF header: %w", err)
@@ -150,18 +187,10 @@ func ReadWAV(r io.Reader) (PCM, error) {
 			if !gotFmt {
 				return nil, errors.New("audio: WAV data chunk before fmt chunk")
 			}
-			// Read through a buffer that grows with the input, never to the declared size up
-			// front: a short file declaring 4 GiB must fail on its missing bytes, not allocate.
-			var buf bytes.Buffer
-			got, err := io.Copy(&buf, io.LimitReader(r, int64(size)))
-			if err != nil {
-				return nil, fmt.Errorf("audio: read WAV data: %w", err)
+			if err := checkSize(int64(size)); err != nil {
+				return nil, err
 			}
-			if got != int64(size) {
-				return nil, fmt.Errorf("audio: read WAV data: %d of %d declared bytes: %w", got, size, io.ErrUnexpectedEOF)
-			}
-			p := PCM(buf.Bytes())
-			return p, p.Validate()
+			return &WAVStream{Size: int64(size), Data: &exactReader{r: io.LimitReader(r, int64(size)), left: int64(size)}}, nil
 		default:
 			if _, err := io.CopyN(io.Discard, r, int64(size)+int64(size%2)); err != nil {
 				return nil, fmt.Errorf("audio: skip %q chunk: %w", id, err)
