@@ -56,7 +56,7 @@ func liveVerified(t *testing.T, s *realtime.Synth, set realtime.Settings, text s
 		Spec: spec,
 	}
 	res, err := pipeline.Run(context.Background(), pipeline.Config{
-		Jobs: 1, Verify: verify.DefaultOptions(), Synth: s, Transcriber: tr,
+		Jobs: 1, Verify: verify.OptionsFor(verify.ModeNormal), Synth: s, Transcriber: tr,
 		Deliver: func(int, verify.ChunkResult) error { return nil },
 	}, []pipeline.Task{task})
 	if err != nil {

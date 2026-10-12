@@ -89,7 +89,7 @@ func TestQ10EffortExperiment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := verify.DefaultOptions()
+	opts := verify.OptionsFor(verify.ModeNormal)
 	opts.MaxAttempts, opts.RequestExtraAttempts = 1, 0
 
 	// Chunk-major order: every shard compares all efforts on its chunks, so the takes of one

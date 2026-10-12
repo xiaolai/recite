@@ -55,10 +55,11 @@ func Tasks(samples []Sample, spec realtime.SessionSpec, spokenForm func(string) 
 }
 
 // Options are the verification options of a calibration run: the given mode and trimming,
-// one take per sample, and the said guard bypassed so every take reaches STT.
+// one take per sample, and the said guard bypassed so every take reaches STT. The harness
+// measures the STT verifier, so an unset or off mode (the CLI default, D23) means normal.
 func Options(base verify.Options) verify.Options {
 	o := base
-	if o.Mode == "" {
+	if o.Mode == "" || o.Mode == verify.ModeOff {
 		o.Mode = verify.ModeNormal
 	}
 	o.MaxAttempts, o.RequestExtraAttempts, o.BypassSaid = 1, 0, true

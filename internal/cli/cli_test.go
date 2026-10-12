@@ -103,7 +103,8 @@ func sayDefaults(r *SayRequest) {
 	r.Gaps = audio.DefaultGaps()
 	r.SampleRate = audio.SampleRate
 	r.Jobs, r.SessionChunks = pipeline.DefaultJobs, realtime.DefaultSessionChunks
-	r.Verify = verify.DefaultOptions()
+	r.Verify = verify.DefaultOptions() // verification off (D23)
+	r.Policy.VerifyOff = true
 	r.CacheDir = defaultCacheDir(os.Getenv) // the process environment, which run passes on
 }
 

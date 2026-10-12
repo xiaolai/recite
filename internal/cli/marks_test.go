@@ -213,7 +213,7 @@ func TestLangMarkSTTHintInMultipartBody(t *testing.T) {
 			hc, base := testClient(t, hs.URL)
 			return &stt.HTTP{Client: hc, BaseURL: base, Creds: creds}
 		}
-		r := e.run(tc.in, "--marks", "-o", "a.wav")
+		r := e.run(tc.in, "--marks", "-o", "a.wav", "--verify", "normal")
 		hs.Close()
 		if r.code != exitcode.OK {
 			t.Fatalf("%s: %+v", tc.in, r)

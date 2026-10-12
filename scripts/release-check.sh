@@ -121,10 +121,14 @@ step() {
 	printf '| %d | %s | `%s` | %d | %d | %s |\n' "$n" "$name" "$(redact "$*")" "$code" "$((end - start))" "$(redact "$numbers")" >>"$report"
 }
 
+# Every sample opts in to STT verification: off is the default (D23), but the release check
+# exists to exercise the verifier, and the verified and stt_calls counts of its manifests are
+# what the report records. doctor --deep only warns on an STT problem under the default off
+# mode, so these samples are the steps that fail when STT is down.
 say() {
 	local out="$1"
 	shift
-	"$bin" say --no-cache --force -o "$out" "$@"
+	"$bin" say --verify normal --no-cache --force -o "$out" "$@"
 }
 
 step "doctor --deep" doctor "$bin" doctor --deep

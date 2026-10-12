@@ -126,7 +126,7 @@ func TestPreSTTGuardsRerenderWithoutSTT(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synth := synthWith(c, tc.out)
 			tr := sttWith(sttfake.Text(c.Spoken))
-			r := run(t, c, verify.DefaultOptions(), synth, tr)
+			r := run(t, c, verify.OptionsFor(verify.ModeNormal), synth, tr)
 			wantResult(t, r, verify.StateVerified, 2, 1, tc.reason, "")
 			if synth.Attempts(id) != 2 || r.Final != 2 {
 				t.Fatalf("rendered %d times, kept attempt %d", synth.Attempts(id), r.Final)
@@ -146,7 +146,7 @@ func TestPreSTTGuardsRerenderWithoutSTT(t *testing.T) {
 func TestVerifyOffRunsGuardsOnly(t *testing.T) {
 	c := chunk("今天天气很好。")
 	c.Language = text.Language{Code: "zh", Source: text.SourceFlag, Certain: true}
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.Mode = verify.ModeOff
 	r := run(t, c, o, synthWith(c, rtfake.Pass(50*time.Millisecond)), noSTT{t})
 	wantResult(t, r, verify.StateUnverified, 2, 0, verify.ReasonEmpty, "")
@@ -168,7 +168,7 @@ func TestStatusCarriedAndIncompleteRejected(t *testing.T) {
 	if _, rej := verify.PreSTT(c, take, false); rej == nil || rej.Reason != verify.ReasonStatus {
 		t.Fatalf("incomplete take with 2 s of audio: %+v, want status rejection", rej)
 	}
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.MaxAttempts = 1
 	r := run(t, c, o, synthWith(c, rtfake.Outcome{Echo: true, Duration: 2 * time.Second, Status: realtime.StatusIncomplete}), noSTT{t})
 	if r.Attempts[0].Status != realtime.StatusIncomplete || r.State != verify.StateNoEligible {
@@ -246,7 +246,7 @@ func TestSaidGuardAcceptsExpandedUnit(t *testing.T) {
 func TestLanguageGuardRejectsWrongLanguage(t *testing.T) {
 	c := chunk("今天天气很好，我们去公园散步吧。")
 	c.Language = text.Language{Code: "zh", Source: text.SourceFlag, Certain: true}
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.MaxAttempts = 1
 	tr := sttWith(sttfake.Text(c.Spoken, "en"))
 	r := run(t, c, o, synthWith(c), tr)
@@ -260,7 +260,7 @@ func TestLanguageGuardSkipsWhenNoLanguageReported(t *testing.T) {
 	c := chunk("今天天气很好，我们去公园散步吧。")
 	c.Language = text.Language{Code: "zh", Source: text.SourceFlag, Certain: true}
 	// The realtime gpt-live-transcribe fallback reports no language.
-	r := run(t, c, verify.DefaultOptions(), synthWith(c), sttWith(sttfake.Text(c.Spoken)))
+	r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c), sttWith(sttfake.Text(c.Spoken)))
 	wantResult(t, r, verify.StateVerified, 1, 1, "")
 	if verify.LanguageGuard(c.Language, stt.Transcript{Languages: []stt.DetectedLanguage{{Code: ""}}}) != nil {
 		t.Fatal("an empty language code was judged")
@@ -277,7 +277,7 @@ func TestUncertainLanguageNotRejected(t *testing.T) {
 		t.Fatalf("language %+v, want en, not certain", c.Language)
 	}
 	tr := sttWith(sttfake.Text(c.Spoken, "fr"))
-	r := run(t, c, verify.DefaultOptions(), synthWith(c), tr)
+	r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c), tr)
 	wantResult(t, r, verify.StateVerified, 1, 1, "")
 	if h := tr.Calls()[0].Hint.Languages; len(h) != 0 {
 		t.Fatalf("hint %v, want none", h)
@@ -291,7 +291,7 @@ func TestEdgeInsertionGuard(t *testing.T) {
 	body := strings.Join(append(filler, filler[:41]...), " ") // 100 words
 	for _, heard := range []string{"Sure, here it is. " + body, body + " Hope that helps!" + " " + "Bye"} {
 		c := chunk(body)
-		o := verify.DefaultOptions()
+		o := verify.OptionsFor(verify.ModeNormal)
 		o.MaxAttempts = 1
 		r := run(t, c, o, synthWith(c), sttWith(sttfake.Text(heard)))
 		wantResult(t, r, verify.StateUnverified, 1, 1, verify.ReasonEdgeInsertion)
@@ -300,7 +300,7 @@ func TestEdgeInsertionGuard(t *testing.T) {
 		}
 	}
 	c := chunk(body)
-	r := run(t, c, verify.DefaultOptions(), synthWith(c), sttWith(sttfake.Text("The "+body)))
+	r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c), sttWith(sttfake.Text("The "+body)))
 	wantResult(t, r, verify.StateVerified, 1, 1, "")
 }
 
@@ -316,14 +316,14 @@ func TestProtectedNumber(t *testing.T) {
 		}
 	}
 	// Digits from the recogniser are the same number.
-	r := run(t, c, verify.DefaultOptions(), synthWith(c), sttWith(sttfake.Text(strings.Join(filler[:58], " ")+" 42.")))
+	r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c), sttWith(sttfake.Text(strings.Join(filler[:58], " ")+" 42.")))
 	wantResult(t, r, verify.StateVerified, 1, 1, "")
 }
 
 // accept: VER-06#3
 func TestProtectedName(t *testing.T) {
 	c := chunk(strings.Join(filler, " ") + " Okafor.")
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.MaxAttempts = 1
 	r := run(t, c, o, synthWith(c), sttWith(sttfake.Text(strings.Join(filler, " ")+" Okafur.")))
 	wantResult(t, r, verify.StateUnverified, 1, 1, verify.ReasonProtected)
@@ -333,7 +333,7 @@ func TestProtectedLexiconAndMarkSpans(t *testing.T) {
 	base := strings.Join(filler[:58], " ")
 	c := chunk(base + " kubectl apply.")
 	c.Lexicon = []string{"kubectl"}
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.MaxAttempts = 1
 	r := run(t, c, o, synthWith(c), sttWith(sttfake.Text(base+" cube cuddle apply.")))
 	wantResult(t, r, verify.StateUnverified, 1, 1, verify.ReasonProtected)
@@ -385,7 +385,7 @@ func TestContentWordGuard(t *testing.T) {
 			for _, h := range tc.heard {
 				outs = append(outs, sttfake.Text(h))
 			}
-			o := verify.DefaultOptions()
+			o := verify.OptionsFor(verify.ModeNormal)
 			o.MaxAttempts = 1
 			r := run(t, tc.c, o, synthWith(tc.c), sttWith(outs...))
 			if r.State != tc.state || r.STTCalls != tc.calls {
@@ -447,7 +447,7 @@ func TestAdjudicationPaths(t *testing.T) {
 			for _, h := range tc.heard {
 				outs = append(outs, text(h))
 			}
-			r := run(t, c, verify.DefaultOptions(), synthWith(c, tc.takes...), sttWith(outs...))
+			r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c, tc.takes...), sttWith(outs...))
 			wantResult(t, r, tc.state, tc.attempts, tc.calls)
 			if r.Final != tc.final {
 				t.Fatalf("kept attempt %d, want %d", r.Final, tc.final)
@@ -475,7 +475,7 @@ func TestRequestLikeExtraAttempt(t *testing.T) {
 		c := chunk(pathRef)
 		c.RequestLike = flagged
 		synth := synthWith(c)
-		r := run(t, c, verify.DefaultOptions(), synth, sttWith(sttfake.Text(pathLow), sttfake.Text(pathLow), sttfake.Text(pathLow), sttfake.Text(pathLow)))
+		r := run(t, c, verify.OptionsFor(verify.ModeNormal), synth, sttWith(sttfake.Text(pathLow), sttfake.Text(pathLow), sttfake.Text(pathLow), sttfake.Text(pathLow)))
 		want := verify.DefaultMaxAttempts
 		if flagged {
 			want++
@@ -552,7 +552,7 @@ func TestOutcomeTableVerifyOff(t *testing.T) {
 
 func TestLowConfidenceSpans(t *testing.T) {
 	c := chunk(pathRef)
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.MaxAttempts = 1
 	heard := pathLow
 	tr := sttfake.NewScriptedTranscriber()
@@ -585,7 +585,7 @@ func TestAdjudicateRejectsBadOptions(t *testing.T) {
 		}
 	}
 	c.Estimate = 0
-	if _, err := verify.Adjudicate(context.Background(), c, verify.DefaultOptions(), nil, noSTT{t}); err == nil {
+	if _, err := verify.Adjudicate(context.Background(), c, verify.OptionsFor(verify.ModeNormal), nil, noSTT{t}); err == nil {
 		t.Error("chunk without an estimate accepted")
 	}
 }
@@ -595,7 +595,7 @@ func TestAdjudicateRejectsBadOptions(t *testing.T) {
 func TestTranscriberGetsTheUnpaddedTake(t *testing.T) {
 	c := chunk(sixty("approved"))
 	tr := sttWith(sttfake.Text(c.Spoken))
-	r := run(t, c, verify.DefaultOptions(), synthWith(c), tr)
+	r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c), tr)
 	calls := tr.Calls()
 	if r.State != verify.StateVerified || len(calls) != 1 {
 		t.Fatalf("state %s with %d STT calls", r.State, len(calls))
@@ -626,7 +626,7 @@ func TestTranscriptInWrittenFormMatchesSpokenReference(t *testing.T) {
 		{"The team scored 3–5 points per game in the 1990s.", "The team scored three to five points per game in the 1990s."},
 	} {
 		c := spokenChunk(t, tc.display)
-		r := run(t, c, verify.DefaultOptions(), synthWith(c), sttWith(sttfake.Text(tc.heard)))
+		r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c), sttWith(sttfake.Text(tc.heard)))
 		if r.State != verify.StateVerified || r.Score < 0.95 {
 			t.Errorf("%q heard as %q: %s, score %.3f %v", c.Spoken, tc.heard, r.State, r.Score, reasons(r))
 		}
@@ -636,7 +636,7 @@ func TestTranscriptInWrittenFormMatchesSpokenReference(t *testing.T) {
 func TestWrongNumberInWrittenFormIsStillRejected(t *testing.T) {
 	c := spokenChunk(t, "In 2026 the fee rose from ¥3,000 to ¥3,500.")
 	heard := "In 2025, the fee rose from 3,000 yen to 3,500 yen."
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.MaxAttempts = 1
 	r := run(t, c, o, synthWith(c), sttWith(sttfake.Text(heard)))
 	wantResult(t, r, verify.StateUnverified, 1, 1, verify.ReasonProtected)
@@ -655,7 +655,7 @@ func TestWrongNumberInWrittenFormIsStillRejected(t *testing.T) {
 // matches it.
 func TestDigitReferenceMatchesWordTranscript(t *testing.T) {
 	c := chunk("In 2026 the fee rose to 3,500 yen.")
-	r := run(t, c, verify.DefaultOptions(), synthWith(c), sttWith(sttfake.Text("In twenty twenty-six the fee rose to three thousand five hundred yen.")))
+	r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c), sttWith(sttfake.Text("In twenty twenty-six the fee rose to three thousand five hundred yen.")))
 	if r.State != verify.StateVerified {
 		t.Fatalf("%s, score %.3f %v", r.State, r.Score, reasons(r))
 	}
@@ -669,12 +669,12 @@ func TestBypassSaidReachesSTT(t *testing.T) {
 	take := realtime.Take{PCM: rtfake.TaggedPCM(id, 1, c.Estimate), Said: said, Status: realtime.StatusCompleted}
 	ctx := context.Background()
 
-	a, calls, err := verify.Check(ctx, c, verify.DefaultOptions(), 1, take, noSTT{t})
+	a, calls, err := verify.Check(ctx, c, verify.OptionsFor(verify.ModeNormal), 1, take, noSTT{t})
 	if err != nil || calls != 0 || a.Rejection == nil || a.Rejection.Reason != verify.ReasonSaid || a.SaidMismatch {
 		t.Fatalf("default: %+v, %d calls, %v; want a said rejection without STT", a.Rejection, calls, err)
 	}
 
-	o := verify.DefaultOptions()
+	o := verify.OptionsFor(verify.ModeNormal)
 	o.BypassSaid = true
 	a, calls, err = verify.Check(ctx, c, o, 1, take, sttWith(sttfake.Text(said)))
 	if err != nil || calls == 0 || !a.Eligible || !a.SaidMismatch || len(a.Transcriptions) == 0 {

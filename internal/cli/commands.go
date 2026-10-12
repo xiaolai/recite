@@ -57,7 +57,7 @@ func aliasesOf(name string) []string {
 // commands lists every command of design §12.1 in help order.
 func (c *CLI) commands() []command {
 	return []command{
-		{"say", "[TEXT...]", "Text to verified audio file (default command)", setupSay},
+		{"say", "[TEXT...]", "Text to audio file (default command)", setupSay},
 		{"render", "PROJECT.toml", "Render a batch or project into many outputs", setupRender},
 		{"check", "FILE", "Text guard, spoken form and chunk plan, no network", setupCheck},
 		{"prepare", "FILE", "Write the editable spoken-form script", setupPrepare},
@@ -273,7 +273,7 @@ func (f *runFlags) register(fs *flag.FlagSet) {
 	fs.IntVar(&f.jobs, "jobs", pipeline.DefaultJobs, fmt.Sprintf("render `N` chunks at once, 1 to %d", pipeline.MaxJobs))
 	fs.IntVar(&f.verifyJobs, "verify-jobs", 0, "verify `N` takes at once (default 2 × --jobs)")
 	fs.IntVar(&f.sessionChunks, "session-chunks", realtime.DefaultSessionChunks, "renders per speech session before it is replaced, `N`")
-	fs.StringVar(&f.verify, "verify", string(verify.ModeNormal), "verification `MODE`: strict, normal or off")
+	fs.StringVar(&f.verify, "verify", string(verify.ModeOff), "STT verification `MODE`: off, normal or strict (off: keep the first take that passes the transcript and audio guards)")
 	fs.IntVar(&f.maxAttempts, "max-attempts", verify.DefaultMaxAttempts, "renders per chunk, `N`")
 	fs.IntVar(&f.requestExtraAttempts, "request-extra-attempts", verify.DefaultRequestExtraAttempts, "extra renders for a request-like chunk, `N`")
 	fs.BoolVar(&f.noTrim, "no-trim", false, "keep the leading and trailing silence of each take")

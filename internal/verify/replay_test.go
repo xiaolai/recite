@@ -47,7 +47,7 @@ func TestCalibrationReplay(t *testing.T) {
 			for _, h := range tc.Heard {
 				outs = append(outs, sttfake.Text(h))
 			}
-			o := verify.DefaultOptions()
+			o := verify.OptionsFor(verify.ModeNormal)
 			o.MaxAttempts = 1
 			r := run(t, c, o, synthWith(c), sttWith(outs...))
 			if string(r.State) != tc.Want {

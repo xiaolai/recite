@@ -70,7 +70,7 @@ func TestQ12EmphasisListening(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := verify.DefaultOptions()
+	opts := verify.OptionsFor(verify.ModeNormal)
 	var tasks []pipeline.Task
 	for i, s := range q12Sentences {
 		if !strings.Contains(s.text, s.stress) {

@@ -283,6 +283,7 @@ func TestOpenAIAPIKeyNotRecognised(t *testing.T) {
 }
 
 // accept: CLI-10#1
+// accept: VER-09#2
 func TestConfigShowGolden(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", "/xdg-cache") // fixed, so the golden's columns do not depend on the temp path

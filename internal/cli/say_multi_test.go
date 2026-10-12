@@ -243,7 +243,7 @@ func expectedOutput(tasks []pipeline.Task, attempt int, gap int) []byte {
 // accept: CLI-02#1
 func TestSayMultiChunkVerifiesAndAssembles(t *testing.T) {
 	m := newMultiEnv(t)
-	r := m.run(threeParagraphs, "-o", "out.wav", "--gap-paragraph", "500ms")
+	r := m.run(threeParagraphs, "-o", "out.wav", "--verify", "normal", "--gap-paragraph", "500ms")
 	if r.code != exitcode.OK {
 		t.Fatalf("code %d stderr %q", r.code, r.stderr)
 	}
@@ -307,13 +307,40 @@ func TestSaySchedulerAndVerifyFlagsReachConfig(t *testing.T) {
 	}
 }
 
+// The default verify mode is off (D23): with no setting, say runs without STT and the policy
+// marks the run verify-off; --verify normal, or verify.mode in the config file, opts in.
+// accept: VER-09#2
+func TestSayDefaultVerifyModeIsOff(t *testing.T) {
+	m := newMultiEnv(t)
+	if r := m.run(threeParagraphs, "-o", "a.wav"); r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	if cfg := m.lastCfg(); cfg.Verify.Mode != verify.ModeOff || cfg.Verify != verify.DefaultOptions() {
+		t.Fatalf("default verify %+v, want mode off", cfg.Verify)
+	}
+	if n := m.tr.Calls(); n != 0 {
+		t.Fatalf("%d transcriptions with verification off", n)
+	}
+	for _, args := range [][]string{
+		{"--verify", "normal"},
+		{"--config", writeConfig(t, "[verify]\nmode = \"normal\"\n")},
+	} {
+		if r := m.run(append([]string{threeParagraphs, "-o", "b.wav", "--force"}, args...)...); r.code != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+		if mode := m.lastCfg().Verify.Mode; mode != verify.ModeNormal {
+			t.Fatalf("%v: mode %s, want normal", args, mode)
+		}
+	}
+}
+
 // --max-attempts bounds the renders of a chunk that never verifies; --verify strict raises the
 // acceptance threshold; --verify off never transcribes.
 // accept: CLI-02#1
 func TestSayVerifyFlagsReachAdjudication(t *testing.T) {
 	m := newMultiEnv(t)
 	m.tr.mishear("c0001", "something else entirely")
-	r := m.run("One short sentence to say.", "-o", "a.wav", "--max-attempts", "2")
+	r := m.run("One short sentence to say.", "-o", "a.wav", "--verify", "normal", "--max-attempts", "2")
 	if r.code != exitcode.VerifyFailed || m.synth.Attempts("c0001") != 2 || !strings.Contains(r.stderr, "chunk c0001 unverified after 2 attempt(s)") {
 		t.Fatalf("code %d, %d renders, stderr %q", r.code, m.synth.Attempts("c0001"), r.stderr)
 	}
@@ -325,7 +352,7 @@ func TestSayVerifyFlagsReachAdjudication(t *testing.T) {
 	heard := strings.Replace(sentence, " the ", " a ", 1)
 	m = newMultiEnv(t)
 	m.tr.mishear("c0001", heard)
-	if r := m.run(sentence, "-o", "n.wav"); r.code != 0 || m.synth.Attempts("c0001") != 1 {
+	if r := m.run(sentence, "-o", "n.wav", "--verify", "normal"); r.code != 0 || m.synth.Attempts("c0001") != 1 {
 		t.Fatalf("normal: code %d, %d renders, stderr %q", r.code, m.synth.Attempts("c0001"), r.stderr)
 	}
 	m = newMultiEnv(t)
@@ -347,7 +374,7 @@ func TestSayVerifyFlagsReachAdjudication(t *testing.T) {
 func TestSayRequestLikeChunkGetsExtraAttempts(t *testing.T) {
 	m := newMultiEnv(t)
 	m.tr.mishear("c0001", "no")
-	r := m.run("Can you tell me a joke?", "-o", "a.wav", "--max-attempts", "2", "--request-extra-attempts", "2")
+	r := m.run("Can you tell me a joke?", "-o", "a.wav", "--verify", "normal", "--max-attempts", "2", "--request-extra-attempts", "2")
 	if r.code != exitcode.VerifyFailed || m.synth.Attempts("c0001") != 4 {
 		t.Fatalf("code %d, %d renders, stderr %q", r.code, m.synth.Attempts("c0001"), r.stderr)
 	}
@@ -371,7 +398,7 @@ func TestSayOutputPolicyFlags(t *testing.T) {
 	} {
 		m := newMultiEnv(t)
 		m.tr.mishear("c0002", "nothing like it")
-		r := m.run(append([]string{threeParagraphs, "-o", "out.wav", "--max-attempts", "1"}, tc.flags...)...)
+		r := m.run(append([]string{threeParagraphs, "-o", "out.wav", "--verify", "normal", "--max-attempts", "1"}, tc.flags...)...)
 		_, err := os.Stat(m.path("out.wav"))
 		if r.code != tc.code || (err == nil) != tc.file {
 			t.Errorf("%v: code %d, file %v, stderr %q", tc.flags, r.code, err == nil, r.stderr)

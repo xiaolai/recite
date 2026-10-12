@@ -56,7 +56,7 @@ func TestEvidenceIDCoversCorpusSettingsAndRevision(t *testing.T) {
 		}
 		return ts
 	}
-	opts := verify.DefaultOptions()
+	opts := verify.OptionsFor(verify.ModeNormal)
 	spec := realtime.SessionSpec{Model: "gpt-realtime-2.1", Voice: "marin", Speed: 1}
 	base := evidenceID(tasks("one", "two"), opts, spec, "r1")
 	if again := evidenceID(tasks("one", "two"), opts, spec, "r1"); again != base {

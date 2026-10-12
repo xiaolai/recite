@@ -439,7 +439,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		return verdictError(res, code, write)
 	}
 	if req.Verify.Mode == verify.ModeOff {
-		c.errorf("recite: verification is off (--verify off): %d chunk(s) written unverified", len(res.Chunks))
+		c.errorf("recite: verification is off: %d chunk(s) written unverified; --verify normal checks them with STT", len(res.Chunks))
 	}
 	return nil
 }

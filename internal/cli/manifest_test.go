@@ -105,7 +105,7 @@ const unrelated = "Completely unrelated words were heard instead of the paragrap
 func TestManifestValidatesAgainstSchema(t *testing.T) {
 	sch := manifestSchema(t)
 	m := newMultiEnv(t)
-	if r := m.run(threeParagraphs, "-o", "ok.wav"); r.code != exitcode.OK {
+	if r := m.run(threeParagraphs, "-o", "ok.wav", "--verify", "normal"); r.code != exitcode.OK {
 		t.Fatalf("ok: %+v", r)
 	}
 	if got := validManifest(t, sch, m.path("ok.wav.json")); got.Status != manifest.StatusComplete || got.Summary.Verified != 3 ||
@@ -116,14 +116,14 @@ func TestManifestValidatesAgainstSchema(t *testing.T) {
 	// A resampled output records its own rate, which the schema must accept (AUD-05).
 	look, _ := fakeEncoder(t)
 	m.look = look
-	if r := m.run(threeParagraphs, "-o", "rs.wav", "--sample-rate", "16000"); r.code != exitcode.OK {
+	if r := m.run(threeParagraphs, "-o", "rs.wav", "--verify", "normal", "--sample-rate", "16000"); r.code != exitcode.OK {
 		t.Fatalf("resampled: %+v", r)
 	}
 	if got := validManifest(t, sch, m.path("rs.wav.json")); got.Output == nil || got.Output.SampleRate != 16000 {
 		t.Fatalf("resampled manifest output: %+v", got.Output)
 	}
 	// An encoded output records its format, which the schema must accept too (AUD-04).
-	if r := m.run(threeParagraphs, "-o", "enc.mp3", "--loudness", "none"); r.code != exitcode.OK {
+	if r := m.run(threeParagraphs, "-o", "enc.mp3", "--verify", "normal", "--loudness", "none"); r.code != exitcode.OK {
 		t.Fatalf("mp3: %+v", r)
 	}
 	if got := validManifest(t, sch, m.path("enc.mp3.json")); got.Output == nil || got.Output.Format != "mp3" {
@@ -132,14 +132,14 @@ func TestManifestValidatesAgainstSchema(t *testing.T) {
 	m.look = nil
 
 	m.tr.mishear("c0002", unrelated)
-	if r := m.run(threeParagraphs, "-o", "unv.wav", "--max-attempts", "2"); r.code != exitcode.VerifyFailed {
+	if r := m.run(threeParagraphs, "-o", "unv.wav", "--verify", "normal", "--max-attempts", "2"); r.code != exitcode.VerifyFailed {
 		t.Fatalf("unverified: %+v", r)
 	}
 	got := validManifest(t, sch, m.path("unv.wav.json"))
 	if got.Status != manifest.StatusComplete || got.Summary.Unverified != 1 || got.Chunks[1].State != "unverified" || got.Chunks[1].Verified {
 		t.Fatalf("unverified manifest: %+v", got.Summary)
 	}
-	if r := m.run(threeParagraphs, "-o", "strict.wav", "--max-attempts", "1", "--strict-output"); r.code != exitcode.VerifyFailed {
+	if r := m.run(threeParagraphs, "-o", "strict.wav", "--verify", "normal", "--max-attempts", "1", "--strict-output"); r.code != exitcode.VerifyFailed {
 		t.Fatalf("strict: %+v", r)
 	}
 	if got := validManifest(t, sch, m.path("strict.wav.json")); got.Status != manifest.StatusNoOutput || got.Output != nil {
@@ -161,7 +161,7 @@ func TestManifestValidatesAgainstSchema(t *testing.T) {
 	m.tr.mu.Lock()
 	delete(m.tr.said, "c0002")
 	m.tr.mu.Unlock()
-	if r := m.run(threeParagraphs, "-o", "none.wav", "--no-manifest"); r.code != exitcode.OK {
+	if r := m.run(threeParagraphs, "-o", "none.wav", "--verify", "normal", "--no-manifest"); r.code != exitcode.OK {
 		t.Fatalf("--no-manifest: %+v", r)
 	}
 	if _, err := os.Stat(m.path("none.wav.json")); !os.IsNotExist(err) {
@@ -171,7 +171,7 @@ func TestManifestValidatesAgainstSchema(t *testing.T) {
 		t.Fatalf("both flags: %+v", r)
 	}
 	// An existing manifest of a finished run is not replaced without --force.
-	if r := m.run(threeParagraphs, "-o", "fresh.wav", "--manifest", "ok.wav.json"); r.code != exitcode.Usage || !strings.Contains(r.stderr, "already exists") {
+	if r := m.run(threeParagraphs, "-o", "fresh.wav", "--verify", "normal", "--manifest", "ok.wav.json"); r.code != exitcode.Usage || !strings.Contains(r.stderr, "already exists") {
 		t.Fatalf("existing manifest: %+v", r)
 	}
 }
@@ -248,7 +248,7 @@ func checkTimeline(t *testing.T, m manifest.Manifest, wav audio.PCM, tasks []pip
 func TestManifestTimelineEqualsAssembly(t *testing.T) {
 	m := newMultiEnv(t)
 	m.tr.mishearAttempt("c0002", 1, unrelated) // c0002 keeps its second take
-	r := m.run(fiveParagraphs, "-o", "out.wav", "--gap-paragraph", "300ms..900ms", "--gap-seed", "7")
+	r := m.run(fiveParagraphs, "-o", "out.wav", "--verify", "normal", "--gap-paragraph", "300ms..900ms", "--gap-seed", "7")
 	if r.code != exitcode.OK {
 		t.Fatalf("%+v", r)
 	}
@@ -312,7 +312,7 @@ func TestManifestRecordsAttemptsAndFallback(t *testing.T) {
 		return &stt.Chain{Primary: deniedTranscriber{}, Fallback: tr}
 	}
 	m.tr.mishearAttempt("c0002", 1, unrelated)
-	if r := m.run(threeParagraphs, "-o", "out.wav"); r.code != exitcode.OK {
+	if r := m.run(threeParagraphs, "-o", "out.wav", "--verify", "normal"); r.code != exitcode.OK {
 		t.Fatalf("%+v", r)
 	}
 	got := validManifest(t, sch, m.path("out.wav.json"))
@@ -336,7 +336,7 @@ func TestManifestRecordsAttemptsAndFallback(t *testing.T) {
 
 	// Without a fallback the record says so.
 	m.wrapTr = nil
-	if r := m.run(threeParagraphs, "-o", "plain.wav"); r.code != exitcode.OK {
+	if r := m.run(threeParagraphs, "-o", "plain.wav", "--verify", "normal"); r.code != exitcode.OK {
 		t.Fatalf("%+v", r)
 	}
 	if got := validManifest(t, sch, m.path("plain.wav.json")); got.Verifier.Fallback != nil || got.Verifier.Route != "http" {
@@ -352,7 +352,7 @@ func TestKeepRejectedWritesTwoPairs(t *testing.T) {
 	m.tr.mishearAttempt("c0001", 1, unrelated)
 	m.tr.mishearAttempt("c0003", 1, "The third paragraph ends the story.")
 	keep := m.path("rejected")
-	if r := m.run(threeParagraphs, "-o", "out.wav", "--keep-rejected", keep); r.code != exitcode.OK {
+	if r := m.run(threeParagraphs, "-o", "out.wav", "--verify", "normal", "--keep-rejected", keep); r.code != exitcode.OK {
 		t.Fatalf("%+v", r)
 	}
 	ents, err := os.ReadDir(keep)
@@ -395,7 +395,7 @@ func TestKeepRejectedWritesTwoPairs(t *testing.T) {
 		t.Fatal(err)
 	}
 	renders := len(m.synth.Calls())
-	if r := m.run(threeParagraphs, "-o", "x.wav", "--keep-rejected", m.path("link")); r.code != exitcode.Usage || len(m.synth.Calls()) != renders {
+	if r := m.run(threeParagraphs, "-o", "x.wav", "--verify", "normal", "--keep-rejected", m.path("link")); r.code != exitcode.Usage || len(m.synth.Calls()) != renders {
 		t.Fatalf("symlinked --keep-rejected: %+v", r)
 	}
 }
@@ -429,7 +429,7 @@ func TestRunArtifactsCarryNoSecrets(t *testing.T) {
 	state, debug, keep := e.path("state"), e.path("debug"), e.path("rejected")
 	e.env = map[string]string{"XDG_STATE_HOME": state}
 	e.tr = &firstMishear{echo: echoTranscriber{e.said}}
-	r := e.run("Hello from recite.", "-o", "h.wav", "-vv", "--debug-dir", debug, "--keep-rejected", keep, "--jobs", "1", "--session-chunks", "1")
+	r := e.run("Hello from recite.", "-o", "h.wav", "--verify", "normal", "-vv", "--debug-dir", debug, "--keep-rejected", keep, "--jobs", "1", "--session-chunks", "1")
 	if r.code != exitcode.OK {
 		t.Fatalf("code %d stderr %s", r.code, r.stderr)
 	}

@@ -1,8 +1,9 @@
 # recite
 
-recite is a Go CLI that turns text into verified speech using the local Codex ChatGPT sign-in.
-Every chunk of audio is transcribed again and compared with the text; a take that does not
-match is rendered again, so the file you get says what you wrote.
+recite is a Go CLI that turns text into speech using the local Codex ChatGPT sign-in.
+Each take is checked by the model's own transcript and by audio guards (empty, length, status);
+a take that fails is rendered again. Independent speech-to-text verification is opt-in
+(`--verify normal` or `strict`) and is known to reject rare names and miss some word swaps.
 
 > **Important notice: read before use.**
 >
@@ -55,7 +56,7 @@ binary. After one online run, it starts offline too.
 
 | Command | What it does |
 |---|---|
-| `say` | Text to a verified audio file (the default command) |
+| `say` | Text to an audio file (the default command) |
 | `render` | Render a batch or project file into many outputs |
 | `check` | Text guard, spoken form and chunk plan; no network |
 | `prepare` | Write the editable spoken-form script |
@@ -157,7 +158,7 @@ Rendering and verification:
 | `--jobs N` | Render N chunks at once, 1 to 6 (default 3) |
 | `--verify-jobs N` | Verify N takes at once (default 2 × `--jobs`) |
 | `--session-chunks N` | Renders per speech session before it is replaced (default 50) |
-| `--verify MODE` | `strict`, `normal` or `off` (default `normal`) |
+| `--verify MODE` | `off`, `normal` or `strict` (default `off`; see below) |
 | `--max-attempts N` | Renders per chunk (default 3) |
 | `--request-extra-attempts N` | Extra renders for a chunk that reads like a request to the model (default 1) |
 | `--allow-unverified` | Exit 0 even when a chunk stays unverified |
@@ -170,6 +171,16 @@ Rendering and verification:
 | `--gap-seed SEED` | Seed of the random gaps; the same seed gives the same gaps |
 | `--no-cache` | Neither read nor write the take cache |
 | `--refresh` | Render every chunk anew; the takes still go to the cache |
+
+Verification modes. By default (`--verify off`) each take is checked by the model's own
+transcript and the audio guards, and the first take that passes them is kept and marked
+unverified in the manifest; nothing is sent to speech-to-text. `--verify normal` and `strict`
+also transcribe every take with a separate speech-to-text model and compare it with the text.
+That check is opt-in because calibration showed its limits: it respells rare names
+(Albery → Albury, 许晚晴 → 许婉晴) and so rejects good takes, most often in Chinese, and it
+sometimes writes back the original sentence over a spoken word swap, so it misses some swaps.
+The numbers are in `dev-docs/calibration-20261012*.md` and the decision is D23 in
+`dev-docs/design.md`.
 
 ### render
 
@@ -321,7 +332,7 @@ A malformed environment variable is always an error, even when a flag overrides 
 ## The cache
 
 Every take is stored with its verification record in a content-addressed cache, keyed by
-everything that affects the audio. Rendering the same text again reuses verified takes, which
+everything that affects the audio. Rendering the same text again reuses the stored takes, which
 costs no rendering usage; editing one paragraph re-renders only the chunks that changed. When
 the verification rules have changed since a take was stored, it is verified again rather than
 trusted.

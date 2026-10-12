@@ -66,7 +66,7 @@ func settingSchema(getenv func(string) string, modelUnchecked bool) *config.Sche
 		// key holds the table.
 		{Name: lexiconKey, FrontMatter: true, Table: encodeLexicon, Check: check(spoken.ParseLexiconText)},
 		{Name: "jobs", Default: strconv.Itoa(pipeline.DefaultJobs), Flag: "jobs", Env: "RECITE_JOBS", Check: intIn(1, pipeline.MaxJobs)},
-		{Name: "verify.mode", Default: string(verify.ModeNormal), Flag: "verify", Check: check(verify.ParseMode)},
+		{Name: "verify.mode", Default: string(verify.ModeOff), Flag: "verify", Check: check(verify.ParseMode)},
 		{Name: "verify.max_attempts", Default: strconv.Itoa(verify.DefaultMaxAttempts), Flag: "max-attempts", Check: intIn(1, 1<<20)},
 		{Name: "gaps.sentence", Default: gaps.Sentence.String(), Flag: "gap-sentence", Check: check(audio.ParseGapRange)},
 		{Name: "gaps.list", Default: gaps.List.String(), Flag: "gap-list", Check: check(audio.ParseGapRange)},

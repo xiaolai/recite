@@ -84,7 +84,7 @@ func TestQualifyDeliveryPresets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := verify.DefaultOptions()
+	opts := verify.OptionsFor(verify.ModeNormal)
 	type key struct {
 		preset        string
 		passage, take int

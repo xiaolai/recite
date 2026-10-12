@@ -107,9 +107,13 @@ type Options struct {
 	BypassSaid bool
 }
 
-// DefaultOptions are the CLI defaults.
-func DefaultOptions() Options {
-	return Options{Mode: ModeNormal, MaxAttempts: DefaultMaxAttempts, RequestExtraAttempts: DefaultRequestExtraAttempts}
+// DefaultOptions are the CLI defaults. Verification is off by default (design D23): STT
+// verification is opt-in with ModeNormal or ModeStrict.
+func DefaultOptions() Options { return OptionsFor(ModeOff) }
+
+// OptionsFor are the default options with verification mode m.
+func OptionsFor(m Mode) Options {
+	return Options{Mode: m, MaxAttempts: DefaultMaxAttempts, RequestExtraAttempts: DefaultRequestExtraAttempts}
 }
 
 // Render produces one take of the chunk; attempt is 1-based.

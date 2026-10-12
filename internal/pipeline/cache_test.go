@@ -131,7 +131,7 @@ func runCache(t *testing.T, ts []pipeline.Task, synth *rtfake.ScriptedSynthesize
 	asm := audio.NewAssembler(&buf, gaps)
 	c := cached{takes: make([][]byte, len(ts))}
 	cfg := pipeline.Config{
-		Jobs: 2, Verify: verify.DefaultOptions(), Synth: synth, Transcriber: h,
+		Jobs: 2, Verify: verify.OptionsFor(verify.ModeNormal), Synth: synth, Transcriber: h,
 		Retry: openai.NewRetrier(1, noSleep), Cache: tc,
 		Deliver: func(i int, r verify.ChunkResult) error {
 			c.takes[i] = append([]byte(nil), r.PCM...)
@@ -207,7 +207,7 @@ func BenchmarkCacheReuse100Chunks(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := func(synth realtime.Synthesizer) pipeline.Config {
-		return pipeline.Config{Verify: verify.DefaultOptions(), Synth: synth, Transcriber: newEcho(ts),
+		return pipeline.Config{Verify: verify.OptionsFor(verify.ModeNormal), Synth: synth, Transcriber: newEcho(ts),
 			Retry: openai.NewRetrier(1, noSleep), Cache: &pipeline.TakeCache{Store: st},
 			Deliver: func(int, verify.ChunkResult) error { return nil }}
 	}

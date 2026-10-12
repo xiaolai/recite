@@ -128,7 +128,7 @@ func peakRun(b *testing.B, input string) {
 	tr := newEcho(tasks)
 	asm := audio.NewAssembler(io.Discard, gaps)
 	cfg := pipeline.Config{
-		Jobs: 3, Verify: verify.DefaultOptions(), Synth: estSynth{}, Transcriber: tr,
+		Jobs: 3, Verify: verify.OptionsFor(verify.ModeNormal), Synth: estSynth{}, Transcriber: tr,
 		Retry:   openai.NewRetrier(1, noSleep),
 		Deliver: func(i int, r verify.ChunkResult) error { return asm.Add(i, r.PCM) },
 	}

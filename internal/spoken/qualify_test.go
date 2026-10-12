@@ -86,7 +86,7 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, minFirst i
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := verify.DefaultOptions()
+	opts := verify.OptionsFor(verify.ModeNormal)
 	tasks := make([]pipeline.Task, 0, len(corpus))
 	for i, c := range corpus {
 		tasks = append(tasks, corpusTask(t, fmt.Sprintf("c%04d", i+1), c, spec))

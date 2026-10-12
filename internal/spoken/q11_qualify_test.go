@@ -89,7 +89,7 @@ func TestQ11HintTakes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := verify.DefaultOptions()
+	opts := verify.OptionsFor(verify.ModeNormal)
 	opts.MaxAttempts, opts.RequestExtraAttempts = 1, 0
 
 	type key struct{ entry, take int }

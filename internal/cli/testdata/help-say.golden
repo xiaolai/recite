@@ -1,6 +1,6 @@
 Usage: recite say [flags] [TEXT...]
 
-Text to verified audio file (default command)
+Text to audio file (default command)
 
 Flags:
   -allow-unverified
@@ -104,7 +104,7 @@ Flags:
   -subtitles FMT
     	write subtitles FMT (srt or vtt) next to the output
   -verify MODE
-    	verification MODE: strict, normal or off (default "normal")
+    	STT verification MODE: off, normal or strict (off: keep the first take that passes the transcript and audio guards) (default "off")
   -verify-jobs N
     	verify N takes at once (default 2 × --jobs)
   -voice VOICE

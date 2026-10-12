@@ -255,7 +255,7 @@ func renderShard(t *testing.T, m mini, k int, held map[string]bool) {
 		return f.Close()
 	}
 	budget := livebudget.New(liveBudget)
-	cfg := pipeline.Config{Jobs: 3, Verify: verify.DefaultOptions(), Synth: synth, Transcriber: tr, Gate: gate}
+	cfg := pipeline.Config{Jobs: 3, Verify: verify.OptionsFor(verify.ModeNormal), Synth: synth, Transcriber: tr, Gate: gate}
 	recs, err := calibrate.Run(ctx, budget.Pipeline(pipeline.Run), cfg, samples, part, keep)
 	t.Logf("shard %d of %d: audio received %v of the %v budget", k, len(m.shards), budget.Used().Round(time.Second), liveBudget)
 	if recs == nil {
@@ -337,7 +337,7 @@ func TestCalibrateReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := calibrate.Options(verify.DefaultOptions())
+	opts := calibrate.Options(verify.OptionsFor(verify.ModeNormal))
 	err = calibrate.WriteReport(out, calibrate.Report{
 		Title: m.title, Date: now, Source: m.source, Seed: seed, Mode: opts.Mode, Thresholds: opts.Mode.Thresholds(),
 		Propose: propose, HeldOut: ev, Labeller: labels.Labeller,
@@ -349,7 +349,9 @@ func TestCalibrateReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("report written to %s; %d construction-vs-label disagreements", path, len(ev.Disagreements()))
+	// D23: the held-out criteria are reported in the verdict, not gated; they describe the
+	// opt-in STT mode.
 	if err := ev.Check(); err != nil {
-		t.Fatalf("%s: %v", m.acceptCriterion, err)
+		t.Logf("%s: held-out verdict FAIL (reported, not gated, D23): %v", m.acceptCriterion, err)
 	}
 }

@@ -70,7 +70,7 @@ func BenchmarkLiveThroughput(b *testing.B) {
 	}
 	// Two attempts keep the worst case (estimate × 2.2 × 2) under one invocation's budget; the
 	// benchmark measures throughput, not retries. The budget spans every loop iteration.
-	opts := verify.DefaultOptions()
+	opts := verify.OptionsFor(verify.ModeNormal)
 	opts.MaxAttempts = 2
 	var est time.Duration
 	for _, t := range tasks {

@@ -109,7 +109,7 @@ func TestSaySIGINTKeepsVerifiedTakesInCache(t *testing.T) {
 		return ctx.Err()
 	}
 	text := threeParagraphs + "\n\nA fourth paragraph.\n\nA fifth paragraph."
-	r := m.run(text, "-o", "out.wav", "--jobs", "1")
+	r := m.run(text, "-o", "out.wav", "--verify", "normal", "--jobs", "1")
 	if r.code != exitcode.Interrupted {
 		t.Fatalf("exit %d, want 130: %s", r.code, r.stderr)
 	}

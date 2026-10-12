@@ -11,7 +11,7 @@ style                 ""                 default
 lang                  ""                 default
 lexicon               ""                 default
 jobs                  2                  user ($DIR/recite/config.toml:2)
-verify.mode           normal             default
+verify.mode           off                default
 verify.max_attempts   3                  default
 gaps.sentence         200ms..350ms       default
 gaps.list             350ms..500ms       default

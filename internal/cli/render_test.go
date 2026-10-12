@@ -79,7 +79,7 @@ func exists(path string) bool {
 // accept: CLI-13#1
 func TestRenderContinuesPastFailuresAndReportsMostSevere(t *testing.T) {
 	e := renderEnv(t)
-	r := e.command("render", "book.toml", "--max-attempts", "1", "--jobs", "1")
+	r := e.command("render", "--verify", "normal", "book.toml", "--max-attempts", "1", "--jobs", "1")
 	if r.code != exitcode.VerifyFailed {
 		t.Fatalf("code %d, want %d\nstdout %s\nstderr %s", r.code, exitcode.VerifyFailed, r.stdout, r.stderr)
 	}
@@ -113,7 +113,7 @@ func TestRenderContinuesPastFailuresAndReportsMostSevere(t *testing.T) {
 // accept: RUN-07#1
 func TestRenderFailFast(t *testing.T) {
 	e := renderEnv(t)
-	r := e.command("render", "--fail-fast", "book.toml", "--max-attempts", "1", "--json")
+	r := e.command("render", "--verify", "normal", "--fail-fast", "book.toml", "--max-attempts", "1", "--json")
 	if r.code != exitcode.VerifyFailed {
 		t.Fatalf("code %d\nstderr %s", r.code, r.stderr)
 	}
@@ -156,7 +156,7 @@ func renderEvents(t *testing.T, r result) map[string]any {
 // Under --json each output is a say stream ending in done, and the render event is last.
 func TestRenderJSON(t *testing.T) {
 	e := renderEnv(t)
-	r := e.command("render", "book.toml", "--max-attempts", "1", "--json")
+	r := e.command("render", "--verify", "normal", "book.toml", "--max-attempts", "1", "--json")
 	ev := renderEvents(t, r)
 	if ev["exit"] != 5.0 || len(ev["outputs"].([]any)) != 4 {
 		t.Fatalf("render event %v", ev)

@@ -36,7 +36,7 @@ func writeLexicon(t *testing.T, body string) string {
 func TestSayLexiconSayVerifiedAgainstRewrite(t *testing.T) {
 	lex := writeLexicon(t, testLexicon)
 	m := newMultiEnv(t)
-	r := m.run("Query the SQL table, not MySQL.", "--lexicon", lex, "-o", "out.wav", "--jobs", "1")
+	r := m.run("Query the SQL table, not MySQL.", "--lexicon", lex, "-o", "out.wav", "--verify", "normal", "--jobs", "1")
 	if r.code != exitcode.OK {
 		t.Fatalf("code %d stderr %q", r.code, r.stderr)
 	}
@@ -59,14 +59,14 @@ func TestSayLexiconSayVerifiedAgainstRewrite(t *testing.T) {
 	// STT writes the term back: the take is correct and verifies.
 	m = newMultiEnv(t)
 	m.tr.mishear("c0001", "Query the sql table, not MySQL.")
-	if r := m.run("Query the SQL table, not MySQL.", "--lexicon", lex, "-o", "back.wav", "--jobs", "1", "--max-attempts", "1"); r.code != exitcode.OK {
+	if r := m.run("Query the SQL table, not MySQL.", "--lexicon", lex, "-o", "back.wav", "--verify", "normal", "--jobs", "1", "--max-attempts", "1"); r.code != exitcode.OK {
 		t.Fatalf("a transcript spelling the term failed: %+v", r)
 	}
 
 	// Another word is still a wrong take.
 	m = newMultiEnv(t)
 	m.tr.mishear("c0001", "Query the sickle table, not MySQL.")
-	r = m.run("Query the SQL table, not MySQL.", "--lexicon", lex, "-o", "bad.wav", "--jobs", "1", "--max-attempts", "1")
+	r = m.run("Query the SQL table, not MySQL.", "--lexicon", lex, "-o", "bad.wav", "--verify", "normal", "--jobs", "1", "--max-attempts", "1")
 	if r.code == exitcode.OK {
 		t.Fatalf("a wrong word verified: %+v", r)
 	}

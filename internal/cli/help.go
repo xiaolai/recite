@@ -11,7 +11,7 @@ import (
 
 func (c *CLI) writeHelp(w io.Writer) {
 	var b strings.Builder
-	b.WriteString("recite turns text into verified speech.\n\n")
+	b.WriteString("recite turns text into speech and checks each take.\n\n")
 	b.WriteString("Usage:\n")
 	b.WriteString("  recite [global flags] <command> [flags] [arguments]\n")
 	b.WriteString("  recite [flags] TEXT...       same as: recite say TEXT...\n")

@@ -60,7 +60,7 @@ func states(evs []map[string]any) []string {
 func TestSayJSONEventsValidateAndEndWithDone(t *testing.T) {
 	m := newMultiEnv(t)
 	m.env = map[string]string{"RECITE_CACHE_DIR": m.path("cache")}
-	r := m.run(threeParagraphs, "-o", "a.wav", "--json")
+	r := m.run(threeParagraphs, "-o", "a.wav", "--verify", "normal", "--json")
 	if r.code != exitcode.OK {
 		t.Fatalf("code %d stderr %q", r.code, r.stderr)
 	}
@@ -77,7 +77,7 @@ func TestSayJSONEventsValidateAndEndWithDone(t *testing.T) {
 	}
 
 	// Second run: every chunk from the cache.
-	r = m.run(threeParagraphs, "-o", "b.wav", "--json")
+	r = m.run(threeParagraphs, "-o", "b.wav", "--verify", "normal", "--json")
 	evs = events(t, r)
 	if evs[0]["cached"] != 3.0 || evs[1]["cached"] != true || len(states(evs)) != 3 {
 		t.Fatalf("cached run events %v", evs)
@@ -86,7 +86,7 @@ func TestSayJSONEventsValidateAndEndWithDone(t *testing.T) {
 	// A misheard first take: rendered, rejected with its reason, rendered, verified.
 	m = newMultiEnv(t)
 	m.tr.mishearAttempt("c0001", 1, "something else entirely")
-	r = m.run("One short sentence to say.", "-o", "x.wav", "--json")
+	r = m.run("One short sentence to say.", "-o", "x.wav", "--verify", "normal", "--json")
 	evs = events(t, r)
 	want = []string{"c0001 rendered", "c0001 rejected", "c0001 rendered", "c0001 verified"}
 	if got := states(evs); strings.Join(got, ",") != strings.Join(want, ",") {
@@ -96,7 +96,7 @@ func TestSayJSONEventsValidateAndEndWithDone(t *testing.T) {
 	// Unverified after every attempt: exit 5, still ending in done.
 	m = newMultiEnv(t)
 	m.tr.mishear("c0001", "something else entirely")
-	r = m.run("One short sentence to say.", "-o", "y.wav", "--max-attempts", "1", "--json")
+	r = m.run("One short sentence to say.", "-o", "y.wav", "--verify", "normal", "--max-attempts", "1", "--json")
 	if r.code != exitcode.VerifyFailed {
 		t.Fatalf("code %d", r.code)
 	}
@@ -138,7 +138,7 @@ func TestProgressNoANSIOffTTYOrNoColor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newMultiEnv(t)
 			m.stderrTTY, m.env = tc.tty, tc.env
-			r := m.run(append([]string{threeParagraphs, "-o", "a.wav"}, tc.args...)...)
+			r := m.run(append([]string{threeParagraphs, "-o", "a.wav", "--verify", "normal"}, tc.args...)...)
 			if r.code != exitcode.OK {
 				t.Fatalf("code %d stderr %q", r.code, r.stderr)
 			}
@@ -194,7 +194,7 @@ func TestDryRunNeedsNoCodexNorNetwork(t *testing.T) {
 	m := newMultiEnv(t)
 	m.env = map[string]string{"RECITE_CACHE_DIR": m.path("cache"), "PATH": "", "HTTPS_PROXY": "http://127.0.0.1:1"}
 	noCodex := []string{"--codex-bin", m.path("no-codex"), "--auth-source", "codex"}
-	r := m.run(append([]string{threeParagraphs, "--dry-run", "--jobs", "2"}, noCodex...)...)
+	r := m.run(append([]string{threeParagraphs, "--dry-run", "--verify", "normal", "--jobs", "2"}, noCodex...)...)
 	if r.code != exitcode.OK {
 		t.Fatalf("code %d stderr %q", r.code, r.stderr)
 	}
@@ -211,7 +211,7 @@ func TestDryRunNeedsNoCodexNorNetwork(t *testing.T) {
 		t.Fatalf("the dry run wrote %v", ents)
 	}
 
-	r = m.run(append([]string{threeParagraphs, "--dry-run", "--json"}, noCodex...)...)
+	r = m.run(append([]string{threeParagraphs, "--dry-run", "--json", "--verify", "normal"}, noCodex...)...)
 	evs := events(t, r)
 	if len(evs) != 2 || evs[0]["event"] != "plan" || evs[0]["dry_run"] != true || evs[0]["chunks"] != 3.0 {
 		t.Fatalf("events %v", evs)

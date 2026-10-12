@@ -229,7 +229,7 @@ func harness(t *testing.T) ([]calibrate.Sample, []pipeline.Task, pipeline.Config
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := pipeline.Config{Jobs: 2, Verify: verify.DefaultOptions(), Synth: synth{}, Retry: openai.NewRetrier(1, noSleep)}
+	cfg := pipeline.Config{Jobs: 2, Verify: verify.OptionsFor(verify.ModeNormal), Synth: synth{}, Retry: openai.NewRetrier(1, noSleep)}
 	return s, tasks, cfg
 }
 

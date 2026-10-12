@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/realtime"
 	rtfake "github.com/xiaolai/recite/internal/realtime/fake"
+	"github.com/xiaolai/recite/internal/stt"
 )
 
 // doctorEnv runs `recite doctor` against the fake Codex and the fake realtime server.
@@ -26,6 +28,8 @@ type doctorEnv struct {
 	noCodex bool
 	missing map[string]bool // encoders LookPath does not find
 	env     map[string]string
+	tr      stt.Transcriber      // when set, the --deep check transcribes with it
+	synth   realtime.Synthesizer // when set, replaces the fake realtime server
 }
 
 func newDoctorEnv(t *testing.T, opts ...rtfake.Option) *doctorEnv {
@@ -49,12 +53,20 @@ func (e *doctorEnv) run(args ...string) result {
 		return "/usr/bin/" + name, nil
 	}
 	c.NewSynth = func(creds *auth.Credentials) (realtime.Synthesizer, error) {
+		if e.synth != nil {
+			return e.synth, nil
+		}
 		hc, base := testClient(e.t, e.srv.URL)
 		s := &realtime.Synth{Minter: &realtime.Minter{Client: hc, BaseURL: base, Creds: creds}, Client: hc, BaseURL: base}
 		if e.wsURL != "" {
 			s.Client, s.BaseURL = testClient(e.t, e.wsURL)
 		}
 		return s, nil
+	}
+	if e.tr != nil {
+		c.NewTranscriber = func(*auth.Credentials) (stt.Transcriber, func() error, error) {
+			return e.tr, func() error { return nil }, nil
+		}
 	}
 	full := []string{"--codex-bin", fakeCodex, "--codex-home", e.t.TempDir(), "--auth-source", "codex"}
 	if e.noCodex {
@@ -205,5 +217,35 @@ func TestDoctorSkipsRouteWhenNotSignedIn(t *testing.T) {
 		if l := line(t, r.stdout, check); !strings.HasPrefix(l, checkWarn) || !strings.Contains(l, "not checked") {
 			t.Fatalf("%s: %q", check, l)
 		}
+	}
+}
+
+// downSTT is a transcriber whose service is unreachable.
+type downSTT struct{}
+
+func (downSTT) Transcribe(context.Context, []byte, stt.Hint) (stt.Transcript, error) {
+	return stt.Transcript{}, errors.New("stt unreachable")
+}
+
+// With verification off (the default, D23) say never transcribes, so an unreachable STT in
+// doctor --deep warns and exits 0; with verify.mode normal it still fails.
+// accept: CLI-05#3
+func TestDoctorDeepSTTDownWarnsWhenVerifyOff(t *testing.T) {
+	e := newDoctorEnv(t)
+	e.tr = downSTT{}
+	e.synth = rtfake.NewScriptedSynthesizer().On("doctor", rtfake.Pass(time.Second))
+	r := e.run("--deep")
+	if l := line(t, r.stdout, "deep"); !strings.HasPrefix(l, checkWarn) || !strings.Contains(l, "transcription failed") {
+		t.Fatalf("deep line %q:\n%s", l, r.stdout)
+	}
+	if r.code != exitcode.OK {
+		t.Fatalf("code %d, want 0:\n%s", r.code, r.stdout)
+	}
+	e = newDoctorEnv(t)
+	e.tr = downSTT{}
+	e.synth = rtfake.NewScriptedSynthesizer().On("doctor", rtfake.Pass(time.Second))
+	r = e.run("--deep", "--config", writeConfig(t, "[verify]\nmode = \"normal\"\n"))
+	if l := line(t, r.stdout, "deep"); !strings.HasPrefix(l, checkFail) || r.code == exitcode.OK {
+		t.Fatalf("verify normal: code %d, deep line %q", r.code, l)
 	}
 }

@@ -1,4 +1,4 @@
-recite turns text into verified speech.
+recite turns text into speech and checks each take.
 
 Usage:
   recite [global flags] <command> [flags] [arguments]
@@ -6,7 +6,7 @@ Usage:
   recite --version             same as: recite version
 
 Commands:
-  say       Text to verified audio file (default command)
+  say       Text to audio file (default command)
   render    Render a batch or project into many outputs
   check     Text guard, spoken form and chunk plan, no network
   prepare   Write the editable spoken-form script

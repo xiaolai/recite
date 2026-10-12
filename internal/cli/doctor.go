@@ -217,22 +217,45 @@ func (c *CLI) deepCheck(ctx context.Context, creds *auth.Credentials, sess realt
 		return failCheck("deep", "render failed: "+errMessage(err), routeFix(err), openai.ExitCode(err))
 	}
 	rendered := time.Since(start)
+	// With verification off (the default, D23) say never transcribes, so an STT problem is
+	// reported as a warning that does not fail doctor.
+	sttOptional := c.verifyMode() == verify.ModeOff
+	sttProblem := func(detail, fix string, code int) doctorCheck {
+		if sttOptional {
+			return warnCheck("deep", detail+" (STT is used only by --verify normal or strict)", fix)
+		}
+		return failCheck("deep", detail, fix, code)
+	}
 	tr, closeTr, err := c.NewTranscriber(creds)
 	if err != nil {
-		return failCheck("deep", err.Error(), "", exitcode.Internal)
+		return sttProblem(err.Error(), "", exitcode.Internal)
 	}
 	defer func() { _ = closeTr() }()
 	t, err := tr.Transcribe(ctx, take.PCM, stt.Hint{Languages: []string{"en"}})
 	if err != nil {
-		return failCheck("deep", "transcription failed: "+errMessage(err), routeFix(err), openai.ExitCode(err))
+		return sttProblem("transcription failed: "+errMessage(err), routeFix(err), openai.ExitCode(err))
 	}
 	res := verify.Score(doctorSentence, t.Text, verify.ScriptMetric(doctorSentence))
 	detail := fmt.Sprintf("score %.3f, render %s, transcription %s", res.Score,
 		rendered.Round(time.Millisecond), (time.Since(start) - rendered).Round(time.Millisecond))
 	if res.Errors > 0 {
-		return failCheck("deep", detail+": heard "+fmt.Sprintf("%q", t.Text), "run doctor --deep again; a repeat failure is worth reporting", exitcode.VerifyFailed)
+		return sttProblem(detail+": heard "+fmt.Sprintf("%q", t.Text), "run doctor --deep again; a repeat failure is worth reporting", exitcode.VerifyFailed)
 	}
 	return okCheck("deep", detail)
+}
+
+// verifyMode is the verification mode say would use from the config file, profile and
+// environment; an unreadable config counts as the default (dirChecks reports that error).
+func (c *CLI) verifyMode() verify.Mode {
+	st, err := c.resolveSettings(newFlagSet("doctor-settings"), nil)
+	if err != nil {
+		return verify.DefaultOptions().Mode
+	}
+	m, err := verify.ParseMode(st.Get("verify.mode").Raw)
+	if err != nil {
+		return verify.DefaultOptions().Mode
+	}
+	return m
 }
 
 // encoderChecks is check 6: the external encoders, warn only.

@@ -101,7 +101,7 @@ func newRun(synth realtime.Synthesizer, tr stt.Transcriber, jobs int) *run {
 	r := &run{}
 	r.cfg = pipeline.Config{
 		Jobs:        jobs,
-		Verify:      verify.DefaultOptions(),
+		Verify:      verify.OptionsFor(verify.ModeNormal),
 		Synth:       synth,
 		Transcriber: tr,
 		Retry:       openai.NewRetrier(1, noSleep),
