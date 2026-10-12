@@ -36,6 +36,10 @@ type Result struct {
 	Errors int // Levenshtein distance
 	Score  float64
 	Edits  []Edit
+	// Unaligned marks a comparison too large to align within maxAlignCells: Score is 0, Errors
+	// is max(reference, transcript) units (an upper bound on the distance), and there are no
+	// Edits. The take is unverifiable, never a match.
+	Unaligned bool
 }
 
 // Score compares hypothesis (the STT transcript) with reference (the chunk's spoken form) after
@@ -55,15 +59,12 @@ type alignment struct {
 
 func score(reference, hypothesis string, metric text.Metric) (Result, alignment) {
 	ref, hyp := units(reference, metric), units(hypothesis, metric)
-	steps := align(texts(ref), texts(hyp))
-	for i, st := range steps {
-		// Spelled letters are heard letter by letter, so their exact spelling is what was said:
-		// a folded match of "G R E Y" with "G R A Y" is a wrong letter.
-		if st.match && (ref[st.ref].spelled || hyp[st.hyp].spelled) && ref[st.ref].raw != hyp[st.hyp].raw {
-			steps[i].match = false
-		}
-	}
 	res := Result{Metric: metric, RefLen: len(ref)}
+	steps, ok := alignUnits(ref, hyp)
+	if !ok {
+		res.Unaligned, res.Errors = true, max(len(ref), len(hyp))
+		return res, alignment{ref: ref, hyp: hyp}
+	}
 	for _, st := range steps {
 		if !st.match {
 			res.Errors++
@@ -89,6 +90,9 @@ func ScriptMetric(chunk string) text.Metric { return text.Scorer(text.DetectScri
 func (r Result) Report() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s score %.4f (%d errors / %d)\n", strings.ToUpper(string(r.Metric)), r.Score, r.Errors, r.RefLen)
+	if r.Unaligned {
+		fmt.Fprintf(&b, "not aligned: %d reference units against %d heard exceed the alignment limit\n", r.RefLen, r.Errors)
+	}
 	for _, e := range r.Edits {
 		fmt.Fprintf(&b, "%s at %d: expected %q / heard %q\n", e.Kind, e.RefStart, e.Expected, e.Heard)
 	}
@@ -97,7 +101,8 @@ func (r Result) Report() string {
 
 // unit is one compared element: a canonical word, or one rune of one, with its original span.
 // raw is the text before spelling variants were folded; spelled marks a word read out letter
-// by letter ("G R E Y"), whose raw letters must match exactly.
+// by letter ("G R E Y"), whose raw letters must match exactly. Under CER each rune unit carries
+// the matching rune of the raw word, so "G R E Y" and compact "GREY" agree letter for letter.
 type unit struct {
 	text       string
 	start, end int
@@ -124,10 +129,7 @@ func rawUnits(src string, metric text.Metric) []unit {
 	if metric == text.MetricCER {
 		var out []unit
 		for i, t := range toks {
-			if spelledOut(src[t.Start:t.End]) {
-				t.Text = raw[i] // compared rune by rune, so the letters are kept as spelled
-			}
-			out = append(out, runeUnits(src, t, func(rune) bool { return true })...)
+			out = append(out, runeUnits(src, t, raw[i], spelledOut(src[t.Start:t.End]), func(rune) bool { return true })...)
 		}
 		return out
 	}
@@ -150,7 +152,7 @@ func rawUnits(src string, metric text.Metric) []unit {
 		if strings.IndexFunc(t.Text, unspaced) >= 0 {
 			// Han, Kana and Thai have no spaces between words, so inside a word-scored chunk
 			// they are compared by character ("上打开App" = "上打开 App").
-			out = append(out, runeUnits(src, t, unspaced)...)
+			out = append(out, runeUnits(src, t, raw[i], false, unspaced)...)
 		} else {
 			out = append(out, unit{text: t.Text, start: t.Start, end: t.End, raw: raw[i], spelled: spelledOut(src[t.Start:t.End])})
 		}
@@ -192,9 +194,14 @@ func unspaced(r rune) bool {
 
 // runeUnits splits token t into one unit per rune for which single is true, and one unit per
 // run of the other runes, each with its own source span when the source spells the token
-// letter for letter.
-func runeUnits(src string, t CanonToken, single func(rune) bool) []unit {
-	spans := runeSpans(src[t.Start:t.End], t.Text)
+// letter for letter. raw is the token before spelling variants were folded; when it has as
+// many runes as the token, each unit keeps its raw runes, and spans follow the raw letters.
+func runeUnits(src string, t CanonToken, raw string, spelled bool, single func(rune) bool) []unit {
+	rr := []rune(raw)
+	if len(rr) != utf8.RuneCountInString(t.Text) {
+		rr = []rune(t.Text)
+	}
+	spans := runeSpans(src[t.Start:t.End], string(rr))
 	span := func(a, b int) (int, int) {
 		if spans == nil {
 			return t.Start, t.End
@@ -211,7 +218,7 @@ func runeUnits(src string, t CanonToken, single func(rune) bool) []unit {
 			}
 		}
 		a, b := span(k, e-1)
-		out = append(out, unit{text: string(rs[k:e]), start: a, end: b, raw: string(rs[k:e])})
+		out = append(out, unit{text: string(rs[k:e]), start: a, end: b, raw: string(rr[k:e]), spelled: spelled})
 		k = e
 	}
 	return out
@@ -236,14 +243,6 @@ func runeSpans(src, tok string) [][2]int {
 		return nil
 	}
 	return spans
-}
-
-func texts(us []unit) []string {
-	out := make([]string, len(us))
-	for i, u := range us {
-		out[i] = u.text
-	}
-	return out
 }
 
 // edits groups each run of non-matching steps into one Edit.
@@ -306,37 +305,80 @@ const (
 	opIns
 )
 
-// align is a Levenshtein alignment of ref against hyp, returned in order. On equal cost it
-// prefers the diagonal, then a deletion, so the result is deterministic. Elements are interned
-// to integers first, and the common prefix and suffix are matched without the quadratic table.
-func align(ref, hyp []string) []step {
-	ids := map[string]int32{}
-	intern := func(xs []string) []int32 {
-		out := make([]int32, len(xs))
+// sym is one interned comparison element. Two syms are equal when their texts are, and, when
+// either is a spelled letter, their raw letters too: spelled letters are heard one by one, so
+// "G R E Y" matches compact "GREY" but not "G R A Y", though grey and gray fold together.
+// Equality is applied inside the alignment so the distance found is the minimum.
+type sym struct {
+	text, raw int32
+	spelled   bool
+}
+
+func (a sym) eq(b sym) bool {
+	return a.text == b.text && (!a.spelled && !b.spelled || a.raw == b.raw)
+}
+
+// interner gives each distinct string one id.
+type interner map[string]int32
+
+func (in interner) id(x string) int32 {
+	id, ok := in[x]
+	if !ok {
+		id = int32(len(in))
+		in[x] = id
+	}
+	return id
+}
+
+// align is a Levenshtein alignment of plain strings; see alignSyms.
+func align(ref, hyp []string) ([]step, bool) {
+	in := interner{}
+	conv := func(xs []string) []sym {
+		out := make([]sym, len(xs))
 		for i, x := range xs {
-			id, ok := ids[x]
-			if !ok {
-				id = int32(len(ids))
-				ids[x] = id
-			}
-			out[i] = id
+			out[i] = sym{text: in.id(x)}
 		}
 		return out
 	}
-	a, b := intern(ref), intern(hyp)
+	return alignSyms(conv(ref), conv(hyp))
+}
+
+// alignUnits aligns comparison units with spelling-aware equality; see alignSyms.
+func alignUnits(ref, hyp []unit) ([]step, bool) {
+	in := interner{}
+	conv := func(us []unit) []sym {
+		out := make([]sym, len(us))
+		for i, u := range us {
+			out[i] = sym{text: in.id(u.text), raw: in.id(u.raw), spelled: u.spelled}
+		}
+		return out
+	}
+	return alignSyms(conv(ref), conv(hyp))
+}
+
+// alignSyms is a Levenshtein alignment of ref against hyp, returned in order. On equal cost it
+// prefers the diagonal, then a deletion, so the result is deterministic. The common prefix and
+// suffix are matched without the quadratic table (an equal pair is always on some optimal
+// path under unit costs). It reports false, with no steps, when the alignment would need more
+// than maxAlignCells table cells.
+func alignSyms(a, b []sym) ([]step, bool) {
 	pre := 0
-	for pre < len(a) && pre < len(b) && a[pre] == b[pre] {
+	for pre < len(a) && pre < len(b) && a[pre].eq(b[pre]) {
 		pre++
 	}
 	suf := 0
-	for suf < len(a)-pre && suf < len(b)-pre && a[len(a)-1-suf] == b[len(b)-1-suf] {
+	for suf < len(a)-pre && suf < len(b)-pre && a[len(a)-1-suf].eq(b[len(b)-1-suf]) {
 		suf++
+	}
+	core, ok := alignCore(a[pre:len(a)-suf], b[pre:len(b)-suf])
+	if !ok {
+		return nil, false
 	}
 	steps := make([]step, 0, max(len(a), len(b)))
 	for k := range pre {
 		steps = append(steps, step{ref: k, hyp: k, match: true})
 	}
-	for _, st := range alignCore(a[pre:len(a)-suf], b[pre:len(b)-suf]) {
+	for _, st := range core {
 		if st.ref >= 0 {
 			st.ref += pre
 		}
@@ -348,13 +390,22 @@ func align(ref, hyp []string) []step {
 	for k := suf; k > 0; k-- {
 		steps = append(steps, step{ref: len(a) - k, hyp: len(b) - k, match: true})
 	}
-	return steps
+	return steps, true
 }
+
+// maxAlignCells bounds the operations table (one byte per cell, 32 MiB) and with it the work of
+// one alignment pass. Segmentation cannot bound it: an unbreakable run may exceed the chunk
+// budget (TXT-03), and the transcript is untrusted and any length. Every pair of up to about
+// 5,700 units each fits whatever its distance; beyond the limit the caller treats the take as
+// unverifiable. A linear-space (Hirschberg) traceback would bound memory but not the O(n·m)
+// time of a large distance, so a limit is needed either way.
+const maxAlignCells = 1 << 25
 
 // alignCore is a banded Levenshtein alignment (Ukkonen): cells further than k from the
 // diagonal are never computed, and k doubles until the distance found is at most k, which
-// proves no cheaper path leaves the band. Cost is O((d+1)·n) for distance d, not O(n·m).
-func alignCore(ref, hyp []int32) []step {
+// proves no cheaper path leaves the band. Cost is O((d+1)·n) for distance d, not O(n·m). It
+// reports false when a band would need more than maxAlignCells cells, before allocating it.
+func alignCore(ref, hyp []sym) ([]step, bool) {
 	n, m := len(ref), len(hyp)
 	// One side empty: only deletions or only insertions, and no table at all.
 	if n == 0 || m == 0 {
@@ -365,11 +416,15 @@ func alignCore(ref, hyp []int32) []step {
 		for j := range m {
 			steps = append(steps, step{ref: -1, hyp: j})
 		}
-		return steps
+		return steps, true
 	}
 	for k := 16; ; k *= 2 {
-		if steps, ok := alignBand(ref, hyp, min(k, max(n, m))); ok || k >= max(n, m) {
-			return steps
+		k = min(k, max(n, m))
+		if (n+1)*bandWidth(n, m, k) > maxAlignCells {
+			return nil, false
+		}
+		if steps, ok := alignBand(ref, hyp, k); ok || k >= max(n, m) {
+			return steps, true
 		}
 	}
 }
@@ -383,7 +438,7 @@ func bandWidth(n, m, k int) int {
 	return min(2*k+max(0, m-n)-min(0, m-n)+1, m+1)
 }
 
-func alignBand(ref, hyp []int32, k int) ([]step, bool) {
+func alignBand(ref, hyp []sym, k int) ([]step, bool) {
 	n, m := len(ref), len(hyp)
 	lo := func(i int) int { return i - k + min(0, m-n) }
 	hi := func(i int) int { return i + k + max(0, m-n) }
@@ -411,7 +466,7 @@ func alignBand(ref, hyp []int32, k int) ([]step, bool) {
 		r := ref[i-1]
 		for j := jlo; j <= jhi; j++ {
 			best, op := prev[j-1], opMatch
-			if r != hyp[j-1] {
+			if !r.eq(hyp[j-1]) {
 				best, op = best+1, opSub
 			}
 			if d := prev[j] + 1; d < best {

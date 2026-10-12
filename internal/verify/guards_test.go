@@ -137,3 +137,53 @@ func TestSpelledLettersAreNotFolded(t *testing.T) {
 		t.Errorf("word grey: %d errors", r.Errors)
 	}
 }
+
+// Under CER (a Han-dominant chunk) a protected spelled code accepts its letters spaced,
+// hyphenated or compact, and rejects a wrong letter.
+func TestSpelledLettersInHanChunk(t *testing.T) {
+	sp := "请输入代码 G R E Y 然后按确认键。"
+	start := strings.Index(sp, "G R E Y")
+	c := Chunk{
+		Spoken:    sp,
+		Language:  text.Resolve(sp, text.ResolveOptions{}),
+		Protected: []spoken.Range{{Start: start, End: start + len("G R E Y")}},
+	}
+	if m := ScriptMetric(sp); m != text.MetricCER {
+		t.Fatalf("metric %s, want CER", m)
+	}
+	for _, heard := range []string{"请输入代码 G R E Y 然后按确认键。", "请输入代码 GREY 然后按确认键。", "请输入代码 G-R-E-Y 然后按确认键。"} {
+		if j := judge(c, stt.Transcript{Text: heard}); j.rejection != nil || j.result.Score != 1 {
+			t.Errorf("%q: rejection %+v, score %v", heard, j.rejection, j.result.Score)
+		}
+	}
+	for _, heard := range []string{"请输入代码 GRAY 然后按确认键。", "请输入代码 G R A Y 然后按确认键。"} {
+		if j := judge(c, stt.Transcript{Text: heard}); j.rejection == nil || j.rejection.Reason != ReasonProtected {
+			t.Errorf("%q: rejection %+v, want %s", heard, j.rejection, ReasonProtected)
+		}
+	}
+}
+
+// A Han lexicon key is protected inside a run of Han text, where no word boundary exists; a
+// Latin key still needs whole-word edges.
+func TestLexiconProtectsEmbeddedHanKey(t *testing.T) {
+	sp := "请于先生稍后到客厅等候我们大家都准备好再去庭院看花。"
+	c := Chunk{Spoken: sp, Language: text.Resolve(sp, text.ResolveOptions{}), Lexicon: []string{"于"}}
+	j := judge(c, stt.Transcript{Text: strings.Replace(sp, "于", "以", 1)})
+	if j.rejection == nil || j.rejection.Reason != ReasonProtected {
+		t.Errorf("rejection %+v, want %s", j.rejection, ReasonProtected)
+	}
+	en := Chunk{Spoken: "we concatenate files", Lexicon: []string{"cat"}}
+	if got := protectedRanges(en); len(got) != 0 {
+		t.Errorf("cat inside concatenate protected: %v", got)
+	}
+}
+
+// A transcript too long to align is rejected as unverifiable, never scored as a match.
+func TestJudgeRejectsUnalignableTranscript(t *testing.T) {
+	sp := strings.Repeat("alpha ", 10_000)
+	c := Chunk{Spoken: sp, Language: text.Language{Code: "en"}}
+	j := judge(c, stt.Transcript{Text: strings.Repeat("beta ", 5_000)})
+	if j.rejection == nil || j.rejection.Reason != ReasonScore || !strings.Contains(j.rejection.Detail, "unverifiable") {
+		t.Errorf("rejection %+v, want an unverifiable score rejection", j.rejection)
+	}
+}

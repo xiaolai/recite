@@ -10,6 +10,7 @@ import (
 	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/numwords"
 	"github.com/xiaolai/recite/internal/realtime"
+	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/stt"
 	"github.com/xiaolai/recite/internal/text"
 )
@@ -43,7 +44,10 @@ const (
 // 3: spelled letters keep their exact spelling, substitutions crossed over matched words are a
 // word-order error, the empty and duration guards judge trimmed audio under --no-trim, and
 // lexicon ranges keep their offsets when case folding changes byte lengths.
-const GuardVersion = 3
+// 4: spelled letters keep their identity under CER and inside the alignment, lexicon keys are
+// matched by the lexicon's own word-boundary rule (Han keys inside Han text), and a comparison
+// too large to align is rejected as unverifiable.
+const GuardVersion = 4
 
 // Pre-STT guard limits (design §8.1).
 const (
@@ -133,6 +137,10 @@ func judge(c Chunk, t stt.Transcript) judgement {
 	metric := ScriptMetric(c.Spoken)
 	ref, hyp := toFormSpans(c.Spoken, c.Language.Code, c.LangSpans), toForm(eq.text, c.Language.Code)
 	res, al := score(ref.text, hyp.text, metric)
+	if res.Unaligned {
+		return judgement{result: res, rejection: &Rejection{ReasonScore, fmt.Sprintf(
+			"unverifiable: %d reference units against %d heard exceed the alignment limit", res.RefLen, len(al.hyp))}}
+	}
 	// Report edits against the reference and transcript as they are, for the protected ranges,
 	// the recorded transcript and the logprobs.
 	for i, e := range res.Edits {
@@ -254,7 +262,7 @@ func protectedRanges(c Chunk) [][2]int {
 		k = strings.TrimSpace(k)
 		n := utf8.RuneCountInString(k)
 		for i := 0; k != "" && i < len(c.Spoken); {
-			if e := runeEnd(c.Spoken, i, n); e >= 0 && strings.EqualFold(c.Spoken[i:e], k) && wordBoundary(c.Spoken, i, e) {
+			if e := runeEnd(c.Spoken, i, n); e >= 0 && strings.EqualFold(c.Spoken[i:e], k) && spoken.WordBounded(c.Spoken, i, e) {
 				out = append(out, [2]int{i, e})
 				i = e
 				continue
@@ -267,12 +275,6 @@ func protectedRanges(c Chunk) [][2]int {
 		out = append(out, [2]int{r.Start, r.End})
 	}
 	return out
-}
-
-func wordBoundary(s string, start, end int) bool {
-	before, _ := utf8.DecodeLastRuneInString(s[:start])
-	after, _ := utf8.DecodeRuneInString(s[end:])
-	return !isWordChar(before) && !isWordChar(after)
 }
 
 func hasNumberWord(tok string) bool {

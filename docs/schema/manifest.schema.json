@@ -212,7 +212,7 @@
                     "required": ["reason", "detail"],
                     "additionalProperties": false,
                     "properties": {
-                      "reason": { "enum": ["said", "empty", "duration", "status", "language", "protected-token", "edge-insertion", "content-word", "score"] },
+                      "reason": { "enum": ["said", "empty", "duration", "status", "language", "protected-token", "edge-insertion", "word-order", "content-word", "score"] },
                       "detail": { "type": "string" }
                     }
                   }

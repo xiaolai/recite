@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -173,7 +174,11 @@ func FuzzAlignDistance(f *testing.F) {
 	f.Fuzz(func(t *testing.T, x, y string) {
 		a, b := strings.Split(x, ""), strings.Split(y, "")
 		errs, i, j := 0, 0, 0
-		for _, st := range align(a, b) {
+		steps, ok := align(a, b)
+		if !ok {
+			t.Fatalf("alignment of %d × %d refused", len(a), len(b))
+		}
+		for _, st := range steps {
 			if !st.match {
 				errs++
 			}
@@ -251,12 +256,12 @@ func TestSpelledCodeScoresWithoutSpacingErrors(t *testing.T) {
 // against nothing once allocated about 10 GB.
 func TestAlignOneSidedStaysLinear(t *testing.T) {
 	const n = 100_000
-	ref := make([]int32, n)
+	ref := make([]sym, n)
 	for i := range ref {
-		ref[i] = int32(i%7 + 1)
+		ref[i] = sym{text: int32(i%7 + 1)}
 	}
-	for _, hyp := range [][]int32{nil, {1}} {
-		steps := alignCore(ref, hyp)
+	for _, hyp := range [][]sym{nil, {{text: 1}}} {
+		steps, _ := alignCore(ref, hyp)
 		dels := 0
 		for _, s := range steps {
 			if s.hyp < 0 {
@@ -278,12 +283,101 @@ func TestAlignOneSidedStaysLinear(t *testing.T) {
 }
 
 func BenchmarkAlignLongAgainstShort(b *testing.B) {
-	ref := make([]int32, 100_000)
+	ref := make([]sym, 100_000)
 	for i := range ref {
-		ref[i] = int32(i % 7)
+		ref[i] = sym{text: int32(i % 7)}
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		alignCore(ref, []int32{99})
+		alignCore(ref, []sym{{text: 99}})
+	}
+}
+
+// Letters read out one by one keep their exact identity on both sides and under both metrics:
+// spaced, hyphenated and compact forms of the same letters match one another, while a wrong
+// letter is an error even where the words would fold (grey = gray).
+func TestSpelledLettersMatchAcrossFormsUnderBothMetrics(t *testing.T) {
+	forms := []struct{ wrap string }{{"%s"}, {"Type the code %s now."}, {"请输入代码 %s 然后按确认键。"}}
+	same := []string{"G R E Y", "GREY", "G-R-E-Y"}
+	wrong := []string{"G R A Y", "GRAY", "G-R-A-Y"}
+	for _, f := range forms {
+		for _, metric := range []text.Metric{text.MetricWER, text.MetricCER} {
+			for _, ref := range same {
+				r := strings.Replace(f.wrap, "%s", ref, 1)
+				for _, hyp := range same {
+					h := strings.Replace(f.wrap, "%s", hyp, 1)
+					if got := Score(r, h, metric); got.Errors != 0 {
+						t.Errorf("%s: Score(%q, %q) = %d errors, want 0 (%+v)", metric, r, h, got.Errors, got.Edits)
+					}
+				}
+				if ref == "GREY" {
+					continue // compact GREY is the word grey, which gray matches
+				}
+				for _, hyp := range wrong {
+					h := strings.Replace(f.wrap, "%s", hyp, 1)
+					if got := Score(r, h, metric); got.Errors != 1 {
+						t.Errorf("%s: Score(%q, %q) = %d errors, want 1", metric, r, h, got.Errors)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Spelling-aware equality is part of the alignment, so the edit distance stays minimal: one
+// leading insertion, not a prefix match that leaves three errors behind it.
+func TestSpellingAwareAlignmentIsMinimal(t *testing.T) {
+	for _, c := range []struct {
+		metric text.Metric
+		errs   int
+	}{{text.MetricWER, 1}, {text.MetricCER, 4}} {
+		if got := Score("G R E Y gray", "gray G R E Y gray", c.metric); got.Errors != c.errs {
+			t.Errorf("%s: %d errors, want %d (%+v)", c.metric, got.Errors, c.errs, got.Edits)
+		}
+	}
+}
+
+// Disjoint sequences of 100,000 and 50,000 units once allocated a 5 GB operations table. The
+// aligner refuses work over maxAlignCells before allocating it, and the caller rejects the
+// take as unverifiable.
+func TestAlignRefusesOversizedInput(t *testing.T) {
+	ref, hyp := make([]sym, 100_000), make([]sym, 50_000)
+	for i := range ref {
+		ref[i] = sym{text: int32(i), raw: int32(i)}
+	}
+	for i := range hyp {
+		hyp[i] = sym{text: int32(-1 - i), raw: int32(-1 - i)}
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	steps, ok := alignCore(ref, hyp)
+	runtime.ReadMemStats(&after)
+	if ok || steps != nil {
+		t.Fatalf("oversized alignment: ok %v, %d steps", ok, len(steps))
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
+		t.Errorf("refusing the alignment allocated %d bytes", grew)
+	}
+	// Under the limit, a fully differing pair still aligns, at the exact distance.
+	n := 2000
+	small, other := make([]sym, n), make([]sym, n/2)
+	for i := range small {
+		small[i] = sym{text: int32(i), raw: int32(i)}
+	}
+	for i := range other {
+		other[i] = sym{text: int32(-1 - i), raw: int32(-1 - i)}
+	}
+	if steps, ok := alignCore(small, other); !ok || len(steps) != n {
+		t.Errorf("%d × %d: ok %v, %d steps", n, n/2, ok, len(steps))
+	}
+}
+
+// Score reports an oversized comparison as unaligned with a zero score, never as a match.
+func TestScoreOversizedIsUnaligned(t *testing.T) {
+	ref := strings.Repeat("alpha ", 10_000)
+	hyp := strings.Repeat("beta ", 5_000)
+	r := Score(ref, hyp, text.MetricWER)
+	if !r.Unaligned || r.Score != 0 || r.Errors != 10_000 {
+		t.Errorf("unaligned %v, score %v, errors %d", r.Unaligned, r.Score, r.Errors)
 	}
 }

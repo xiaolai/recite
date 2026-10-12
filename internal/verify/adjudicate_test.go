@@ -155,8 +155,18 @@ func TestVerifyOffRunsGuardsOnly(t *testing.T) {
 	o.Mode = verify.ModeOff
 	r := run(t, c, o, synthWith(c, rtfake.Pass(50*time.Millisecond)), noSTT{t})
 	wantResult(t, r, verify.StateUnverified, 2, 0, verify.ReasonEmpty, "")
+	// --verify off: an unverified chunk is unverified by request, so the run succeeds (D19/D23).
+	if code, write := verify.Outcome([]verify.ChunkResult{r}, verify.OutputPolicy{VerifyOff: true}); code != exitcode.OK || !write {
+		t.Fatalf("verify off outcome %d, %v, want %d with output", code, write, exitcode.OK)
+	}
+}
+
+// The same unverified chunk under verification without --allow-unverified exits 5 and still
+// writes the file (design §8.5).
+func TestUnverifiedWithoutAllowExitsVerifyFailed(t *testing.T) {
+	r := verify.ChunkResult{ChunkID: "c1", State: verify.StateUnverified}
 	if code, write := verify.Outcome([]verify.ChunkResult{r}, verify.OutputPolicy{}); code != exitcode.VerifyFailed || !write {
-		t.Fatalf("verify off outcome %d, %v", code, write)
+		t.Fatalf("unverified outcome %d, %v, want %d with output", code, write, exitcode.VerifyFailed)
 	}
 }
 

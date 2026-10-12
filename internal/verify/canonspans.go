@@ -61,8 +61,17 @@ func reconcile(want []string, got []CanonToken) []CanonToken {
 		gotTexts[i] = g.Text
 	}
 	out := make([]CanonToken, len(want))
+	steps, ok := align(want, gotTexts)
+	if !ok {
+		// Too large to align: every token reports the span of the whole text. A wider span
+		// can only widen an edit's reported range, so protection fails closed.
+		for i, w := range want {
+			out[i] = CanonToken{Text: w, Start: got[0].Start, End: got[len(got)-1].End}
+		}
+		return out
+	}
 	pos := 0
-	for _, st := range align(want, gotTexts) {
+	for _, st := range steps {
 		if st.ref < 0 {
 			continue // a per-unit token the whole text does not have
 		}
