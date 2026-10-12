@@ -1,7 +1,9 @@
 package calibrate_test
 
 import (
+	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +20,14 @@ var verdictLine = regexp.MustCompile(`(?m)^\*\*Held-out verdict( \(machine-label
 
 // machineProvenance is the method line of a machine-labelled report; it must name the labeller.
 var machineProvenance = regexp.MustCompile(`(?m)^- Held-out labels are machine labels from (\S.*?), not listening: they are weaker evidence than human listening, and a human labelling pass supersedes them\.`)
+
+// The Method lines that identify the held-out inventory: corpus, candidate counts and seed, split sizes.
+var (
+	titleScript = regexp.MustCompile(`(?m)^# Verifier calibration, \S+ \(VER-11 full calibration, (\w+)\)$`)
+	corpusLine  = regexp.MustCompile(`(?m)^- Corpus: ([^:]+):`)
+	candLine    = regexp.MustCompile(`(?m)^- Candidates: (\d+) good .* and (\d+) corrupted .*, built with seed (\d+)\.$`)
+	splitLine   = regexp.MustCompile(`(?m)^- Split 60/40, .*: (\d+) proposal samples, (\d+) held out\.`)
+)
 
 const humanProvenance = "- Held-out labels come from listening:"
 
@@ -78,7 +88,9 @@ func checkCommittedReport(t *testing.T, s string) {
 		t.Error("a human-labelled report lacks the listening provenance line")
 	}
 
-	ev := evaluateLabelTable(t, tableRows(t, s, labelHead, 7))
+	labelRows := tableRows(t, s, labelHead, 7)
+	checkHeldOutInventory(t, s, labelRows)
+	ev := evaluateLabelTable(t, labelRows)
 	want := "PASS"
 	if err := ev.Check(); err != nil {
 		want = "FAIL: " + strings.TrimPrefix(err.Error(), calibrate.ErrCriteria.Error()+": ")
@@ -95,12 +107,18 @@ func checkCommittedReport(t *testing.T, s string) {
 	if len(criteria) != len(wantCriteria) {
 		t.Fatalf("held-out criteria table has %d rows, want %d", len(criteria), len(wantCriteria))
 	}
+	seen := map[string]bool{}
 	for _, row := range criteria {
 		kn, ok := wantCriteria[row[0]]
 		if !ok {
 			t.Errorf("unknown held-out criterion %q", row[0])
 			continue
 		}
+		if seen[row[0]] {
+			t.Errorf("held-out criterion %q appears twice", row[0])
+			continue
+		}
+		seen[row[0]] = true
 		checkRate(t, row[0], row[1:], kn[0], kn[1])
 	}
 
@@ -123,6 +141,90 @@ func checkCommittedReport(t *testing.T, s string) {
 		if got := fmt.Sprintf("%.4f–%.4f", k.MinScore, k.MaxScore); row[4] != got {
 			t.Errorf("%s: scores %q, the label table gives %q", row[0], row[4], got)
 		}
+	}
+}
+
+// checkHeldOutInventory rebuilds the run's samples offline from the Method section (corpus
+// files, script, candidate counts, seed) with the package's BuildScript and Split, and requires
+// the label table to hold exactly the held-out clips the harness produced, with their
+// constructions, and the declared split sizes to match. Without it, deleting unfavourable label
+// rows and updating the summaries would still recompute to a consistent verdict.
+func checkHeldOutInventory(t *testing.T, s string, rows [][]string) {
+	t.Helper()
+	sc := calibrate.Latin
+	if m := titleScript.FindStringSubmatch(s); m != nil {
+		var err error
+		if sc, err = calibrate.ParseScript(m[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cm := corpusLine.FindStringSubmatch(s)
+	km := candLine.FindStringSubmatch(s)
+	sm := splitLine.FindStringSubmatch(s)
+	if cm == nil || km == nil || sm == nil {
+		t.Fatal("the Method section lacks the corpus, candidates or split line")
+	}
+	// "dir/a.txt then b.txt": later files are named relative to the first one's directory.
+	files := strings.Split(cm[1], " then ")
+	var passages []byte
+	for i, f := range files {
+		if i > 0 {
+			f = filepath.Join(filepath.Dir(files[0]), f)
+		}
+		b, err := os.ReadFile(filepath.Join("..", "..", f))
+		if err != nil {
+			t.Fatalf("corpus: %v", err)
+		}
+		passages = append(append(passages, b...), '\n')
+	}
+	corpus, err := calibrate.ReadPassages(bytes.NewReader(passages))
+	if err != nil {
+		t.Fatal(err)
+	}
+	atoi := func(v string) int {
+		t.Helper()
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	seed, err := strconv.ParseUint(km[3], 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples, err := calibrate.BuildScript(sc, corpus, atoi(km[1]), atoi(km[2]), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	propose, heldOut := calibrate.Split(samples, seed)
+	if atoi(sm[1]) != len(propose) || atoi(sm[2]) != len(heldOut) {
+		t.Errorf("Method declares %s proposal and %s held-out samples, the harness gives %d and %d", sm[1], sm[2], len(propose), len(heldOut))
+	}
+	if len(rows) != len(heldOut) {
+		t.Errorf("the label table has %d rows, the harness holds out %d clips", len(rows), len(heldOut))
+	}
+	want := map[string]calibrate.Kind{}
+	for _, h := range heldOut {
+		want[h.ID] = h.Kind
+	}
+	for _, row := range rows {
+		k, ok := want[row[0]]
+		switch {
+		case !ok:
+			t.Errorf("clip %s is not a held-out clip of this run", row[0])
+		case string(k) != row[1]:
+			t.Errorf("clip %s: construction %q, the harness built %q", row[0], row[1], k)
+		}
+		delete(want, row[0])
+	}
+	missing := make([]string, 0, len(want))
+	for id := range want {
+		missing = append(missing, id)
+	}
+	slices.Sort(missing)
+	if len(missing) > 0 {
+		t.Errorf("held-out clips missing from the label table: %v", missing)
 	}
 }
 
@@ -186,6 +288,9 @@ func evaluateLabelTable(t *testing.T, rows [][]string) calibrate.Evaluation {
 		score, err := strconv.ParseFloat(row[4], 64)
 		if err != nil {
 			t.Fatalf("clip %s: score %q: %v", id, row[4], err)
+		}
+		if math.IsNaN(score) || score < 0 || score > 1 { // also rejects ±Inf
+			t.Fatalf("clip %s: score %q is not within [0, 1]", id, row[4])
 		}
 		labels[id] = label
 		held = append(held, calibrate.Record{Sample: calibrate.Sample{ID: id, Kind: kind}, Reached: true, Accepted: accepted, Score: score})
