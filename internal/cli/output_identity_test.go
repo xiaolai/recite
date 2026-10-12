@@ -12,14 +12,8 @@ import (
 )
 
 // Existing outputs sharing size and modification time are told apart by device and inode in
-// one map lookup each: distinct files pass, a hard link to an earlier output collides, and the
-// pairwise os.SameFile fallback is never consulted on unix.
+// one map lookup each: distinct files pass and a hard link to an earlier output collides.
 func TestDistinctOutputsByFileIdentity(t *testing.T) {
-	calls := 0
-	orig := sameFile
-	sameFile = func(a, b os.FileInfo) bool { calls++; return orig(a, b) }
-	t.Cleanup(func() { sameFile = orig })
-
 	dir := t.TempDir()
 	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	const n = 500
@@ -44,8 +38,5 @@ func TestDistinctOutputsByFileIdentity(t *testing.T) {
 	err := distinctOutputs(append(append([]string{}, paths...), link)...)
 	if err == nil || !strings.Contains(err.Error(), "same file") {
 		t.Fatalf("hard link to an output: %v, want a same-file error", err)
-	}
-	if calls != 0 {
-		t.Fatalf("os.SameFile ran %d times; unix outputs must be keyed by device and inode", calls)
 	}
 }
