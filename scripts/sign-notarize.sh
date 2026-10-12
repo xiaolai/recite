@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Signs and notarises the darwin binaries in dist/ (REL-02). Run after `make release`,
-# on a Mac whose keychain holds the Developer ID Application identity and a notarytool
+# Signs and notarises the darwin binaries in dist/ (REL-02). Run after `make release` and
+# before scripts/release-check.sh (the order is in scripts/publish-release.sh), on a Mac whose keychain holds the Developer ID Application identity and a notarytool
 # profile (created once with `xcrun notarytool store-credentials`).
 #
 #   RECITE_SIGN_IDENTITY  the signing identity, e.g. "Developer ID Application: NAME (TEAMID)"
@@ -14,6 +14,12 @@ identity="${RECITE_SIGN_IDENTITY:?set RECITE_SIGN_IDENTITY to the Developer ID A
 profile="${NOTARY_PROFILE:?set NOTARY_PROFILE to the notarytool keychain profile}"
 dist="${DIST:-dist}"
 here="$(cd "$(dirname "$0")" && pwd)"
+stage="$(mktemp -d)"
+trap 'rm -rf -- "$stage"' EXIT
+
+sha_of() {
+	shasum -a 256 -- "$1" | awk '{print $1}'
+}
 
 for arch in arm64 amd64; do
 	bin="${dist}/recite-darwin-${arch}"
@@ -34,9 +40,16 @@ for arch in arm64 amd64; do
 		exit 1
 	fi
 
+	# Apple notarises the bytes uploaded, which must be the bytes recorded. A read-only copy
+	# is zipped and hashed before the upload, so a re-sign of the release binary during the
+	# long wait cannot slip different bytes under the Accepted record.
+	snapshot="${stage}/recite-darwin-${arch}"
+	cp -- "$bin" "$snapshot"
+	chmod a-w "$snapshot" # an absolute path; macOS chmod rejects "--"
+	submitted_sha="$(sha_of "$snapshot")"
 	zip="${dist}/recite-darwin-${arch}.zip"
 	rm -f -- "$zip"
-	ditto -c -k --keepParent "$bin" "$zip"
+	ditto -c -k --keepParent "$snapshot" "$zip"
 
 	echo "== notarise ${zip}"
 	submit_log="${dist}/notary-submit-darwin-${arch}.txt"
@@ -53,9 +66,13 @@ for arch in arm64 amd64; do
 		echo "sign-notarize.sh: submission ${id} is not Accepted; inspect it with: xcrun notarytool log ${id} --keychain-profile <profile>" >&2
 		exit 1
 	fi
-	# Binds the Accepted record to these bytes: publish-release.sh refuses a binary whose hash
-	# differs, so a binary replaced after notarisation cannot ride on an old record.
-	shasum -a 256 -- "$bin" | awk '{print $1}' >"${dist}/notary-sha256-darwin-${arch}.txt"
+	# Binds the Accepted record to the submitted bytes: publish-release.sh refuses a binary
+	# whose hash differs, so a binary replaced after notarisation cannot ride on an old record.
+	if [ "$(sha_of "$bin")" != "$submitted_sha" ]; then
+		echo "sign-notarize.sh: ${bin} changed while it was notarised (submitted sha256 ${submitted_sha}); run the script again" >&2
+		exit 1
+	fi
+	echo "$submitted_sha" >"${dist}/notary-sha256-darwin-${arch}.txt"
 done
 
 # codesign rewrote the darwin binaries, so the checksums must be recomputed.

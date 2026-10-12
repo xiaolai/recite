@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Publishes a release that was built, signed and checked locally (REL-01..REL-05):
 #
-#   git tag -a vX.Y.Z -m "recite X.Y.Z" && git push origin vX.Y.Z
+#   git tag -a vX.Y.Z -m "recite X.Y.Z"           # local only until the check passes
 #   make release                                  # binaries carry the tag as their version
 #   scripts/sign-notarize.sh                      # Developer ID, hardened runtime, Accepted
 #   RECITE_LIVE=1 scripts/release-check.sh        # must end "Result: PASS"
+#   git push origin vX.Y.Z
 #   scripts/publish-release.sh vX.Y.Z
 #
 # Before any network write it refuses unless: the tag exists locally and on xiaolai/recite
 # and both point at HEAD; the tree is clean; dist/ holds a release-check report for exactly
-# this version whose newest run passed (REL-05), checked a build of HEAD, and records the
-# sha256 of one of the release binaries; and both darwin binaries carry a Developer ID
+# this version whose newest run passed (REL-05), checked a build of HEAD, ran one of the
+# release binaries, and records a sha256 for each of the four release binaries that equals
+# that binary's current bytes; and both darwin binaries carry a Developer ID
 # signature with the hardened runtime and a notarisation that Apple Accepted for exactly
 # their current bytes (REL-02).
 # Then it packages the archives, creates the GitHub release, checks every asset downloads
@@ -37,7 +39,8 @@ if [ "$#" -ne 1 ]; then
 	exit 2
 fi
 version="$1"
-[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "${version} is not a vX.Y.Z version"
+# Canonical SemVer numbers (no leading zeros), the same rule tap-version-guard.sh applies.
+[[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail "${version} is not a vX.Y.Z version"
 bare="${version#v}"
 cd "$root"
 
@@ -57,14 +60,18 @@ while [ "$tag_type" = tag ]; do
 done
 [ "$tag_type" = commit ] || fail "${repo}'s tag ${version} names a ${tag_type:-nothing}, not a commit"
 [ "$tag_sha" = "$head" ] || fail "${repo}'s tag ${version} is ${tag_sha}, not HEAD ${head}"
-[ -z "$(git status --porcelain)" ] || fail "the working tree is not clean"
+# A failing git status (a corrupt index, say) prints nothing on stdout; empty output only
+# means clean when the command succeeded.
+tree_status="$(git status --porcelain)" || fail "git status failed; cannot establish that the working tree is clean"
+[ -z "$tree_status" ] || fail "the working tree is not clean"
 
 sha_of() {
 	shasum -a 256 -- "$1" | awk '{print $1}'
 }
 
 # REL-05: the newest release-check report for this version must say PASS, and must be about
-# these bytes: its commit is HEAD and its binary is one of the binaries published.
+# these bytes: its commit is HEAD, every binary published is the one it recorded, and the
+# binary it ran is one of them.
 report=""
 shopt -s nullglob
 for r in "${dist}"/release-check-*.md; do
@@ -76,6 +83,15 @@ shopt -u nullglob
 [ -n "$report" ] || fail "no release-check report for ${version} in ${dist}; run RECITE_LIVE=1 scripts/release-check.sh"
 grep -Eq '^Result: PASS( |$)' "$report" || fail "${report} did not pass; fix the failures and run the check again"
 grep -Fxq -- "- Commit: ${head}" "$report" || fail "${report} did not check a build of HEAD ${head}"
+for platform in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64; do
+	rb="${dist}/recite-${platform}"
+	recorded="$(sed -n "s/^- Release binary recite-${platform} sha256: \([0-9a-f]\{64\}\)\$/\1/p" "$report")"
+	[ -n "$recorded" ] || fail "${report} records no sha256 for recite-${platform}; run the check again"
+	[ -s "$rb" ] || fail "${rb} is missing; run make release and scripts/sign-notarize.sh"
+	# Two recorded lines would not equal one hash, so a doctored report fails here too.
+	[ "$(sha_of "$rb")" = "$recorded" ] ||
+		fail "recite-${platform} is not the binary ${report} checked (sha256 ${recorded}); run the check again"
+done
 checked_sha="$(sed -n 's/^- Binary sha256: \([0-9a-f]\{64\}\)$/\1/p' "$report")"
 [ -n "$checked_sha" ] || fail "${report} records no binary sha256; run the check again"
 checked=""

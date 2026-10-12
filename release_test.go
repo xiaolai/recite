@@ -1,15 +1,19 @@
 package recite_test
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeExec writes an executable shell script named name into dir.
@@ -46,25 +50,40 @@ func TestTapVersionGuard(t *testing.T) {
 	for _, tc := range []struct {
 		current, next string
 		want          int
+		msg           string // what the refusal must say
 	}{
-		{"0.1.0", "0.2.0", 0},
-		{"0.1.9", "0.1.10", 0}, // numeric, not lexical
-		{"", "0.1.0", 0},       // no formula in the tap yet
-		{"0.1.0", "v0.1.1", 0},
-		{"0.2.0", "0.2.0", 1},
-		{"0.2.0", "0.1.0", 1},
-		{"0.1.10", "0.1.9", 1},
-		{"0.1.0", "0.2.0-rc1", 1},
-		{"", "0.2.0-rc1", 1},
-		{"0.1.0", "latest", 1},
-		{"0oops", "1.2.3", 1},      // an unreadable tap version is never assumed older
-		{"1.2.3-beta", "1.2.4", 1}, // nor is a prerelease one
-		{"v1.2.3", "1.2.4", 0},
+		{"0.1.0", "0.2.0", 0, ""},
+		{"0.1.9", "0.1.10", 0, ""}, // numeric, not lexical
+		{"", "0.1.0", 0, ""},       // no formula in the tap yet
+		{"0.1.0", "v0.1.1", 0, ""},
+		{"v1.2.3", "1.2.4", 0, ""},
+		{"1.9.9", "2.0.0", 0, ""},
+		{"1.2.3", "1.10.0", 0, ""},
+		// Wider than any shell integer: compared as digit strings, never overflowed.
+		{"99999999999999999999.0.0", "100000000000000000000.0.0", 0, ""},
+		{"100000000000000000000.0.0", "99999999999999999999.0.0", 1, "is not newer than"},
+		{"0.2.0", "0.2.0", 1, "already has 0.2.0"},
+		{"0.2.0", "0.1.0", 1, "is not newer than"},
+		{"0.1.10", "0.1.9", 1, "is not newer than"},
+		{"0.1.0", "0.2.0-rc1", 1, "0.2.0-rc1 is not a canonical X.Y.Z release version"},
+		{"", "0.2.0-rc1", 1, "is not a canonical X.Y.Z release version"},
+		{"0.1.0", "latest", 1, "is not a canonical X.Y.Z release version"},
+		{"", "01.2.3", 1, "01.2.3 is not a canonical X.Y.Z release version"},
+		{"1.2.3", "1.02.4", 1, "1.02.4 is not a canonical X.Y.Z release version"},
+		{"1.2.3", "1.2.03", 1, "is not a canonical X.Y.Z release version"},
+		{"0oops", "1.2.3", 1, "the tap's 0oops is not a canonical X.Y.Z version"}, // never assumed older
+		{"01.2.3", "1.2.4", 1, "the tap's 01.2.3 is not a canonical X.Y.Z version"},
+		// The tap never holds a prerelease, so one there is an anomaly: fail closed.
+		{"1.2.3-beta", "1.2.4", 1, "the tap's 1.2.3-beta is a prerelease"},
+		{"1.2.3-beta", "1.2.3", 1, "is a prerelease"},
 	} {
 		code, out := runScript(t, t.TempDir(), nil, "scripts/tap-version-guard.sh", tc.current, tc.next)
-		if code != tc.want {
-			t.Errorf("guard(%q, %q) exit = %d, want %d: %s", tc.current, tc.next, code, tc.want, out)
+		if code != tc.want || !strings.Contains(out, tc.msg) || (tc.want == 0 && out != "") {
+			t.Errorf("guard(%q, %q) exit = %d, want %d with %q: %s", tc.current, tc.next, code, tc.want, tc.msg, out)
 		}
+	}
+	if strings.Contains(readFile(t, "scripts/tap-version-guard.sh"), "sort -V") {
+		t.Error("tap-version-guard.sh still orders versions with sort -V")
 	}
 }
 
@@ -113,6 +132,113 @@ func TestFormulaTestChecksReleasedVersion(t *testing.T) {
 	// publish-release.sh reads the tap's current version from this line for the guard.
 	if !strings.Contains(readFile(t, "scripts/publish-release.sh"), `sed -n 's/^ *VERSION = "\([^"]*\)".*$/\1/p' "$formula"`) {
 		t.Error("publish-release.sh no longer reads the tap's VERSION constant")
+	}
+}
+
+// packageRelease runs package-release.sh on dist under the given time zone and umask, with
+// TMPDIR at tmp and fakeBin first on the PATH.
+func packageRelease(t *testing.T, dist, tmp, fakeBin, tz, umask string) (int, string) {
+	t.Helper()
+	cmd := exec.Command("bash", "-c", "umask "+umask+" && exec bash scripts/package-release.sh")
+	cmd.Env = append(os.Environ(), "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DIST="+dist, "TMPDIR="+tmp, "TZ="+tz)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return 0, string(out)
+	}
+	ee, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("running package-release.sh: %v", err)
+	}
+	return ee.ExitCode(), string(out)
+}
+
+// The archives are a function of the binaries' bytes alone: the local time zone, the umask,
+// the files' own times and modes and any extended attributes change nothing, so a re-run
+// reproduces a published release byte for byte. A failed run leaves no staging behind.
+// accept: REL-03#1
+func TestPackageReleaseIsReproducible(t *testing.T) {
+	platforms := []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"}
+	newDist := func(mode os.FileMode, mtime time.Time) string {
+		dist := t.TempDir()
+		for _, p := range platforms {
+			path := filepath.Join(dist, "recite-"+p)
+			writeFile(t, path, "binary "+p, mode)
+			must(t, os.Chmod(path, mode))
+			must(t, os.Chtimes(path, mtime, mtime))
+			// Extended attributes, where the host can set them, must not reach the archive.
+			if xattr, err := exec.LookPath("xattr"); err == nil {
+				if out, err := exec.Command(xattr, "-w", "com.example.recite-test", "stray", path).CombinedOutput(); err != nil {
+					t.Fatalf("xattr: %v: %s", err, out)
+				}
+			}
+		}
+		return dist
+	}
+	distA, tmpA := newDist(0o700, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)), t.TempDir()
+	distB, tmpB := newDist(0o775, time.Date(2019, 6, 7, 8, 9, 10, 0, time.UTC)), t.TempDir()
+	if code, out := packageRelease(t, distA, tmpA, t.TempDir(), "Asia/Tokyo", "077"); code != 0 {
+		t.Fatalf("package-release.sh: exit %d: %s", code, out)
+	}
+	if code, out := packageRelease(t, distB, tmpB, t.TempDir(), "America/Los_Angeles", "022"); code != 0 {
+		t.Fatalf("package-release.sh: exit %d: %s", code, out)
+	}
+	for _, tmp := range []string{tmpA, tmpB} {
+		if left, _ := os.ReadDir(tmp); len(left) != 0 {
+			t.Errorf("staging left in TMPDIR: %v", left)
+		}
+	}
+	epoch := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, p := range platforms {
+		name := "recite-" + p + ".tar.gz"
+		a, b := readFile(t, filepath.Join(distA, name)), readFile(t, filepath.Join(distB, name))
+		if a != b {
+			t.Errorf("%s differs between environments", name)
+		}
+		zr, err := gzip.NewReader(strings.NewReader(a))
+		must(t, err)
+		tr := tar.NewReader(zr)
+		var names []string
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			must(t, err)
+			names = append(names, h.Name)
+			wantMode := int64(0o644)
+			if h.Name == "recite" {
+				wantMode = 0o755
+			}
+			if h.Typeflag != tar.TypeReg || h.Mode != wantMode || h.Uid != 0 || h.Gid != 0 ||
+				h.Uname != "root" || h.Gname != "root" || !h.ModTime.Equal(epoch) || len(h.PAXRecords) != 0 || len(h.Xattrs) != 0 { //nolint:staticcheck // Xattrs is read to prove there are none
+				t.Errorf("%s: %s header = type %c mode %o uid %d gid %d %s/%s mtime %v pax %v", name, h.Name,
+					h.Typeflag, h.Mode, h.Uid, h.Gid, h.Uname, h.Gname, h.ModTime.UTC(), h.PAXRecords)
+			}
+		}
+		if got := strings.Join(names, " "); got != "recite LICENSE README.md" {
+			t.Errorf("%s holds %q, want recite LICENSE README.md", name, got)
+		}
+	}
+
+	// A tar that fails mid-run still leaves no staging directory behind.
+	fakeBin, tmp := t.TempDir(), t.TempDir()
+	writeExec(t, fakeBin, "tar", `if [ "$1" = --version ]; then echo "bsdtar 3.5.3 - libarchive 3.7.4"; exit 0; fi
+echo "tar: write error" >&2; exit 1
+`)
+	if code, out := packageRelease(t, newDist(0o755, epoch), tmp, fakeBin, "UTC", "022"); code == 0 {
+		t.Errorf("failing tar: exit 0: %s", out)
+	}
+	if left, _ := os.ReadDir(tmp); len(left) != 0 {
+		t.Errorf("failed run left staging in TMPDIR: %v", left)
+	}
+
+	// An unknown tar cannot be told to drop extended attributes, so it is refused.
+	writeExec(t, fakeBin, "tar", `echo "star 1.6"; exit 0
+`)
+	if code, out := packageRelease(t, newDist(0o755, epoch), t.TempDir(), fakeBin, "UTC", "022"); code == 0 ||
+		!strings.Contains(out, "neither bsdtar nor GNU tar") {
+		t.Errorf("unknown tar: exit %d: %s", code, out)
 	}
 }
 
@@ -227,7 +353,10 @@ esac
 : >"$last"
 `)
 	writeExec(t, bin, "xcrun", logArgs+`case "$2" in
-submit) echo "  id: 11111111-2222-3333-4444-555555555555"; echo "  status: $FAKE_STATUS" ;;
+submit)
+	# A concurrent re-sign while Apple processes the upload.
+	if [ -n "${FAKE_MUTATE:-}" ]; then printf 'swapped while notarising' >"$FAKE_MUTATE"; fi
+	echo "  id: 11111111-2222-3333-4444-555555555555"; echo "  status: $FAKE_STATUS" ;;
 info) echo "  id: 11111111-2222-3333-4444-555555555555"; echo "  status: $FAKE_STATUS" ;;
 esac
 `)
@@ -240,6 +369,7 @@ esac
 	t.Setenv("FAKE_FLAGS", flags)
 	t.Setenv("FAKE_STATUS", status)
 	t.Setenv("FAKE_VERIFY_EXIT", strconv.Itoa(verifyExit))
+	t.Setenv("FAKE_MUTATE", "")
 	return bin, dist, log
 }
 
@@ -329,11 +459,50 @@ func TestSignNotarizeRequiresAccepted(t *testing.T) {
 	}
 }
 
-// releaseCheckFakes installs a fake recite binary and a fake go, so release-check.sh runs
-// end to end without the network. The recite fails the command named failOn (or none), and
-// its say writes what sayMode names: "" a complete, fully verified sample; "noaudio",
-// "nomanifest", "unverified", "nochunks" or "failed" an exit 0 without that evidence. The go
-// records each call in goLog and fails a test run whose arguments contain goFail.
+// Apple notarises the bytes that were uploaded, so the recorded hash is the submitted
+// snapshot's, and a release binary that changed during the wait is refused.
+// accept: REL-02#2
+func TestSignNotarizeBindsSubmittedBytes(t *testing.T) {
+	bin, dist, log := signFakes(t, "0x10000(runtime)", "Accepted", 0)
+	if code, out := runSign(t, bin, dist); code != 0 {
+		t.Fatalf("Accepted: exit %d: %s", code, out)
+	}
+	// ditto zips a staged copy, never the release binary itself.
+	dittos := 0
+	for _, line := range strings.Split(readLog(t, log), "\n") {
+		if !strings.HasPrefix(line, "ditto\x1f") {
+			continue
+		}
+		dittos++
+		for _, arg := range strings.Split(line, "\x1f") {
+			if arg == filepath.Join(dist, "recite-darwin-arm64") || arg == filepath.Join(dist, "recite-darwin-amd64") {
+				t.Errorf("zipped the mutable release binary: %q", line)
+			}
+		}
+	}
+	if dittos != 2 {
+		t.Errorf("ditto ran %d times, want 2", dittos)
+	}
+
+	bin, dist, _ = signFakes(t, "0x10000(runtime)", "Accepted", 0)
+	t.Setenv("FAKE_MUTATE", filepath.Join(dist, "recite-darwin-arm64"))
+	code, out := runSign(t, bin, dist)
+	if code == 0 || !strings.Contains(out, "changed while it was notarised") {
+		t.Errorf("binary swapped during notarisation: exit %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dist, "notary-sha256-darwin-arm64.txt")); !os.IsNotExist(err) {
+		t.Errorf("recorded a notarised hash for a swapped binary (%v)", err)
+	}
+}
+
+// releaseCheckFakes installs a fake recite binary, a fake go and a fake ffprobe, so
+// release-check.sh runs end to end without the network, and puts the four release binaries
+// in dist. The recite fails the command named failOn (or none), and its say writes what
+// sayMode names: "" a complete, fully verified sample whose audio is real WAV or MP4 bytes
+// as its extension asks; any other mode an exit 0 whose evidence is broken in that one way
+// (see the cases in TestReleaseCheckExitsNonZeroOnAFailedStep). The go records each call in
+// goLog and fails a test run whose arguments contain goFail. The ffprobe fake reports on the
+// bytes it is given, as the real tool does.
 func releaseCheckFakes(t *testing.T, failOn, sayMode, goFail string) (bin, dist, recite, goLog string) {
 	t.Helper()
 	bin, dist = t.TempDir(), t.TempDir()
@@ -349,19 +518,43 @@ if [ "$1" = say ]; then
 		if [ "$prev" = -o ]; then out="$a"; fi
 		prev="$a"
 	done
-	status=complete chunks=3 verified=3
+	# 24 kHz mono s16le: a 44-byte header and 4 bytes (2 samples) of data.
+	wav='RIFF\050\000\000\000WAVEfmt \020\000\000\000\001\000\001\000\300\135\000\000\200\273\000\000\002\000\020\000data\004\000\000\000'
+	m4a='\000\000\000\030ftypM4A \000\000\000\000M4A mp42'
+	case "$out" in *.m4a) kind=m4a ;; *) kind=wav ;; esac
 	case "$FAKE_SAY" in
-	noaudio) ;;
-	*) printf 'RIFF' >"$out" ;;
+	noaudio) kind="" ;;
+	mislabel) kind=wav ;;
 	esac
+	case "$kind" in
+	wav)
+		if [ "$FAKE_SAY" = truncwav ]; then
+			printf "${wav}"'\001\002' >"$out" # the header promises 4 data bytes; 2 arrived
+		else
+			printf "${wav}"'\001\002\003\004' >"$out"
+		fi ;;
+	m4a)
+		printf "$m4a" >"$out"
+		if [ "$FAKE_SAY" = zerodur ]; then printf 'ZERO' >>"$out"; fi ;;
+	esac
+	status=complete chunks=3 verified=3 records=3 stt=3
 	case "$FAKE_SAY" in
 	nomanifest) exit 0 ;;
+	malformed) printf '{"status":"complete","summary":{"chunks":3,' >"${out}.json"; exit 0 ;;
 	unverified) verified=2 ;;
-	nochunks) chunks=0 verified=0 ;;
+	nochunks) chunks=0 verified=0 records=0 ;;
 	failed) status=failed ;;
+	mismatch) records=2 ;;
+	nostt) stt=0 ;;
 	esac
-	printf '{"status":"%s","summary":{"chunks":%d,"verified":%d,"unverified":0,"stt_calls":3},"chunks":[{"status":"ok","verified":true}]}\n' \
-		"$status" "$chunks" "$verified" >"${out}.json"
+	recs=""
+	for ((i = 1; i <= records; i++)); do
+		state=verified ok=true
+		if [ "$FAKE_SAY" = unverifiedrecord ] && [ "$i" = 2 ]; then state=unverified ok=false; fi
+		recs="${recs}${recs:+,}{\"id\":\"c${i}\",\"state\":\"${state}\",\"verified\":${ok},\"stt_calls\":1}"
+	done
+	printf '{"status":"%s","output":{"duration_s":1.5},"summary":{"chunks":%d,"verified":%d,"unverified":0,"renders":3,"stt_calls":%d},"chunks":[%s]}\n' \
+		"$status" "$chunks" "$verified" "$stt" "$recs" >"${out}.json"
 fi
 exit 0
 `)
@@ -369,11 +562,46 @@ exit 0
 if [ -n "$FAKE_GO_FAIL" ] && [[ " $* " == *"$FAKE_GO_FAIL"* ]]; then echo "--- FAIL: fake"; exit 1; fi
 echo "ok  fake $*"
 `)
+	writeExec(t, bin, "ffprobe", fakeProbeHead+`case "$kind" in
+wav) printf 'codec_name=pcm_s16le\nformat_name=wav\nduration=0.000083\n' ;;
+mp4) printf 'codec_name=aac\nformat_name=mov,mp4,m4a,3gp,3g2,mj2\nduration=%s\n' "$dur" ;;
+*) echo "$f: Invalid data found when processing input" >&2; exit 1 ;;
+esac
+`)
+	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
+		writeFile(t, filepath.Join(dist, "recite-"+platform), "binary "+platform, 0o755)
+	}
 	t.Setenv("FAKE_FAIL_ON", failOn)
 	t.Setenv("FAKE_SAY", sayMode)
 	t.Setenv("FAKE_GO_FAIL", goFail)
 	t.Setenv("FAKE_GO_LOG", goLog)
 	return bin, dist, recite, goLog
+}
+
+// fakeProbeHead starts a fake audio prober: it takes the last argument as the file (dropping
+// ffprobe's file: prefix), and sets kind to wav or mp4 from the file's magic bytes and dur
+// to its duration, N/A for a file marked ZERO.
+const fakeProbeHead = `for f in "$@"; do :; done
+f="${f#file:}"
+kind=""
+if [ "$(head -c 4 -- "$f")" = RIFF ]; then kind=wav; fi
+if [ "$(head -c 8 -- "$f" | tail -c 4)" = ftyp ]; then kind=mp4; fi
+dur=1.500
+if grep -q ZERO -- "$f"; then dur=N/A; fi
+`
+
+// isolatedPath links the named host tools into bin and returns a PATH holding only bin, so
+// a test controls exactly which optional tools (ffprobe, afinfo) a script can find.
+func isolatedPath(t *testing.T, bin string, tools ...string) string {
+	t.Helper()
+	for _, tool := range tools {
+		p, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatalf("host tool %s: %v", tool, err)
+		}
+		must(t, os.Symlink(p, filepath.Join(bin, tool)))
+	}
+	return "PATH=" + bin
 }
 
 func latestReport(t *testing.T, dist string) string {
@@ -403,7 +631,17 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 		"- Binary: `~/",
 		"Logs: `~/",
 		"\nResult: PASS (",
+		// The sample rows carry the numbers parsed from each manifest.
+		"status=complete, chunks=3, verified=3, unverified=0, renders=3, stt_calls=3, duration_s=1.5 |",
 	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("passing report missing %q:\n%s", want, report)
+		}
+	}
+	// publish-release.sh binds the release to every binary this check saw, not only the one
+	// it ran.
+	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
+		want := "- Release binary recite-" + platform + " sha256: " + sha256File(t, filepath.Join(dist, "recite-"+platform)) + "\n"
 		if !strings.Contains(report, want) {
 			t.Errorf("passing report missing %q:\n%s", want, report)
 		}
@@ -428,10 +666,17 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 		{"doctor fails", "doctor", "", "", "fake failure"},
 		{"say fails", "say", "", "", "fake failure"},
 		{"no audio", "", "noaudio", "", "no audio"},
-		{"no manifest", "", "nomanifest", "", "manifest status is missing, not complete"},
+		{"no manifest", "", "nomanifest", "", "no manifest"},
+		{"malformed manifest", "", "malformed", "", "manifest is not valid JSON"},
 		{"unverified chunk", "", "unverified", "", "verified 2 of 3 chunks"},
 		{"no chunks", "", "nochunks", "", "manifest has no chunks"},
 		{"failed run", "", "failed", "", "manifest status is failed, not complete"},
+		{"fewer records than the summary", "", "mismatch", "", "manifest summary counts 3 chunks but holds 2 chunk records"},
+		{"an unverified chunk record", "", "unverifiedrecord", "", "chunk c2 is not verified (state unverified)"},
+		{"no STT calls", "", "nostt", "", "manifest records no STT calls"},
+		{"truncated WAV", "", "truncwav", "", "RIFF size 40 does not match the file's 46 bytes"},
+		{"WAV bytes named m4a", "", "mislabel", "", "en.m4a is not an mp4 container (ffprobe: wav)"},
+		{"m4a without audio", "", "zerodur", "", "en.m4a has no positive duration (ffprobe: N/A)"},
 		{"round-trip test fails", "", "", "TestLiveSayHello", "--- FAIL: fake"},
 		{"known-sentence test fails", "", "", "TestLiveHTTPKnownSentence", "--- FAIL: fake"},
 	} {
@@ -449,6 +694,50 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 	if code, _ := runScript(t, bin, []string{"RECITE_LIVE=", "DIST=" + dist, "RECITE_BIN=" + recite}, "scripts/release-check.sh"); code != 2 {
 		t.Errorf("without RECITE_LIVE=1: exit %d, want 2", code)
 	}
+
+	// Without all four release binaries there is nothing to bind the report to.
+	bin, dist, recite, _ = releaseCheckFakes(t, "", "", "")
+	must(t, os.Remove(filepath.Join(dist, "recite-linux-arm64")))
+	env = []string{"RECITE_LIVE=1", "DIST=" + dist, "RECITE_BIN=" + recite}
+	if code, out := runScript(t, bin, env, "scripts/release-check.sh"); code != 2 || !strings.Contains(out, "recite-linux-arm64 is missing") {
+		t.Errorf("missing release binary: exit %d, want 2: %s", code, out)
+	}
+}
+
+// Without ffprobe, the m4a is probed with afinfo; with neither, it cannot be shown to be
+// audio and the step fails rather than passing on its size.
+// accept: REL-05#1
+func TestReleaseCheckProbesM4AWithoutFFprobe(t *testing.T) {
+	hostTools := []string{"bash", "env", "dirname", "basename", "date", "mkdir", "cat", "shasum", "awk",
+		"head", "sed", "tail", "tr", "grep", "python3"}
+	for _, tc := range []struct {
+		name, say string
+		afinfo    bool
+		code      int
+		want      string
+	}{
+		{"afinfo, good m4a", "", true, 0, "Result: PASS"},
+		{"afinfo, WAV bytes named m4a", "mislabel", true, 1, "en.m4a is not an m4af file (afinfo: WAVE)"},
+		{"afinfo, no duration", "zerodur", true, 1, "en.m4a has no positive duration (afinfo: 0.000)"},
+		{"no prober", "", false, 1, "en.m4a cannot be probed: neither ffprobe nor afinfo is on the PATH"},
+	} {
+		bin, dist, recite, _ := releaseCheckFakes(t, "", tc.say, "")
+		must(t, os.Remove(filepath.Join(bin, "ffprobe")))
+		if tc.afinfo {
+			writeExec(t, bin, "afinfo", fakeProbeHead+`case "$kind" in
+wav) printf 'File:           %s\nFile type ID:   WAVE\nData format:     1 ch,  24000 Hz, lpcm (0x0000000C) 16 bits/channel\nestimated duration: 0.000083 sec\n' "$f" ;;
+mp4) [ "$dur" = N/A ] && dur=0.000
+	printf 'File:           %s\nFile type ID:   m4af\nData format:     1 ch,  24000 Hz, aac  (0x00000000) 0 bits/channel\nestimated duration: %s sec\n' "$f" "$dur" ;;
+*) echo "AudioFileOpen failed ('typ?')" >&2; exit 1 ;;
+esac
+`)
+		}
+		env := []string{"RECITE_LIVE=1", "DIST=" + dist, "RECITE_BIN=" + recite, isolatedPath(t, bin, hostTools...)}
+		code, out := runScript(t, bin, env, "scripts/release-check.sh")
+		if code != tc.code || !strings.Contains(out+latestReport(t, dist), tc.want) {
+			t.Errorf("%s: exit %d, want %d with %q: %s", tc.name, code, tc.code, tc.want, out)
+		}
+	}
 }
 
 const (
@@ -465,11 +754,15 @@ type publishEnv struct {
 	release        string // the fake GitHub release's assets
 }
 
-// passReport is a passing release-check report for v9.9.9 at publishHead that checked the
-// binary with the given sha256.
-func passReport(sha string) string {
-	return "# recite release check\n\n- Binary sha256: " + sha + "\n- Version: recite v9.9.9\n- Commit: " +
-		publishHead + "\n\nResult: PASS (10 steps)\n"
+// passReport is a passing release-check report for v9.9.9 at publishHead that ran
+// dist's darwin-arm64 binary and recorded the sha256 of all four release binaries in dist.
+func passReport(t *testing.T, dist string) string {
+	t.Helper()
+	r := "# recite release check\n\n- Binary sha256: " + sha256File(t, filepath.Join(dist, "recite-darwin-arm64")) + "\n"
+	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
+		r += "- Release binary recite-" + platform + " sha256: " + sha256File(t, filepath.Join(dist, "recite-"+platform)) + "\n"
+	}
+	return r + "- Version: recite v9.9.9\n- Commit: " + publishHead + "\n\nResult: PASS (10 steps)\n"
 }
 
 // publishFakes installs fakes for every external command publish-release.sh runs. gh, curl,
@@ -483,7 +776,11 @@ func publishFakes(t *testing.T) publishEnv {
 	p.log = filepath.Join(t.TempDir(), "calls.log")
 	writeExec(t, p.bin, "git", `case "$1" in
 rev-parse) echo `+publishHead+` ;;
-status) ;;
+status)
+	# FAKE_GIT_STATUS is the porcelain output; FAKE_GIT_STATUS_EXIT a failure such as a
+	# corrupt index, which prints nothing on stdout.
+	if [ -n "$FAKE_GIT_STATUS_EXIT" ]; then echo "fatal: index file corrupt" >&2; exit "$FAKE_GIT_STATUS_EXIT"; fi
+	printf '%s' "$FAKE_GIT_STATUS" ;;
 -C) `+logArgs+` ;;
 *) `+logArgs+` exit 1 ;;
 esac
@@ -532,12 +829,14 @@ esac
 			sha256File(t, filepath.Join(p.dist, "recite-darwin-"+arch))+"\n", 0o644)
 	}
 	writeFile(t, filepath.Join(p.dist, "release-check-20261012T000000Z.md"),
-		passReport(sha256File(t, filepath.Join(p.dist, "recite-darwin-arm64"))), 0o644)
+		passReport(t, p.dist), 0o644)
 	t.Setenv("FAKE_LOG", p.log)
 	t.Setenv("FAKE_RELEASE", p.release)
 	t.Setenv("FAKE_TAG_REF", "tag "+publishTagObj)
 	t.Setenv("FAKE_TAG_COMMIT", publishHead)
 	t.Setenv("FAKE_FORMULA", "")
+	t.Setenv("FAKE_GIT_STATUS", "")
+	t.Setenv("FAKE_GIT_STATUS_EXIT", "")
 	return p
 }
 
@@ -574,9 +873,17 @@ func TestPublishReleaseRefusesWithoutPassingCheck(t *testing.T) {
 		{"report without a binary hash", func(t *testing.T, p publishEnv) {
 			replaceIn(t, filepath.Join(p.dist, report), "- Binary sha256: ", "- Binary: ")
 		}, "records no binary sha256"},
-		{"report of another binary", func(t *testing.T, p publishEnv) {
-			writeFile(t, filepath.Join(p.dist, "recite-darwin-arm64"), "rebuilt after the check", 0o755)
+		{"report that ran another binary", func(t *testing.T, p publishEnv) {
+			replaceIn(t, filepath.Join(p.dist, report), "- Binary sha256: "+sha256File(t, filepath.Join(p.dist, "recite-darwin-arm64")),
+				"- Binary sha256: "+strings.Repeat("e", 64))
 		}, "is not one of the release binaries"},
+		{"report without a linux-arm64 hash", func(t *testing.T, p publishEnv) {
+			replaceIn(t, filepath.Join(p.dist, report), "- Release binary recite-linux-arm64 sha256: ", "- Release binary recite-linux-arm64: ")
+		}, "records no sha256 for recite-linux-arm64"},
+		{"dirty tree", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_GIT_STATUS", " M README.md\n") },
+			"the working tree is not clean"},
+		{"git status fails", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_GIT_STATUS_EXIT", "128") },
+			"git status failed"},
 		{"not notarised", func(t *testing.T, p publishEnv) {
 			writeFile(t, filepath.Join(p.dist, "notary-info-darwin-amd64.txt"), "  status: Invalid\n", 0o644)
 		}, "does not say Accepted"},
@@ -584,7 +891,9 @@ func TestPublishReleaseRefusesWithoutPassingCheck(t *testing.T) {
 			must(t, os.Remove(filepath.Join(p.dist, "notary-sha256-darwin-arm64.txt")))
 		}, "notary-sha256-darwin-arm64.txt is missing"},
 		{"binary replaced after notarisation", func(t *testing.T, p publishEnv) {
+			// Re-checked too, so only the notarisation record is stale.
 			writeFile(t, filepath.Join(p.dist, "recite-darwin-amd64"), "re-signed later", 0o755)
+			writeFile(t, filepath.Join(p.dist, report), passReport(t, p.dist), 0o644)
 		}, "is not the binary that was notarised"},
 		{"tag missing on xiaolai/recite", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_TAG_REF", "") },
 			"tag v9.9.9 is not on xiaolai/recite"},
@@ -602,8 +911,38 @@ func TestPublishReleaseRefusesWithoutPassingCheck(t *testing.T) {
 		}
 	}
 
-	if code, out := runScript(t, t.TempDir(), nil, "scripts/publish-release.sh", "v9.9.9-rc1"); code == 0 {
-		t.Errorf("prerelease version accepted: %s", out)
+	// Each release binary is bound to the report on its own: replacing any one of them after
+	// the check refuses, whichever platform it is.
+	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
+		p := publishFakes(t)
+		writeFile(t, filepath.Join(p.dist, "recite-"+platform), "rebuilt after the check", 0o755)
+		code, out := p.run(t)
+		if want := "recite-" + platform + " is not the binary " + filepath.Join(p.dist, report) + " checked"; code == 0 || !strings.Contains(out, want) {
+			t.Errorf("%s replaced: exit %d, want a refusal containing %q: %s", platform, code, want, out)
+		}
+		if calls := readLog(t, p.log); calls != "" {
+			t.Errorf("%s replaced: network commands ran before the refusal:\n%q", platform, calls)
+		}
+	}
+}
+
+// A version that is not a canonical vX.Y.Z is refused by the argument check itself, before
+// any command runs: every tool the script could reach is a fake that records its call.
+// accept: REL-05#1
+func TestPublishReleaseRejectsNonReleaseVersions(t *testing.T) {
+	for _, version := range []string{"v9.9.9-rc1", "v09.9.9", "v9.09.9", "v9.9.09", "9.9.9", "v9.9"} {
+		bin := t.TempDir()
+		log := filepath.Join(t.TempDir(), "calls.log")
+		for _, tool := range []string{"git", "gh", "curl", "brew", "codesign", "shasum", "tar", "gzip"} {
+			writeExec(t, bin, tool, logArgs+"exit 0\n")
+		}
+		code, out := runScript(t, bin, []string{"FAKE_LOG=" + log, "DIST=" + t.TempDir()}, "scripts/publish-release.sh", version)
+		if want := "publish-release.sh: " + version + " is not a vX.Y.Z version\n"; code != 1 || out != want {
+			t.Errorf("%s: exit %d, want 1 with exactly %q: %q", version, code, want, out)
+		}
+		if calls := readLog(t, log); calls != "" {
+			t.Errorf("%s: commands ran before the version check:\n%q", version, calls)
+		}
 	}
 }
 
