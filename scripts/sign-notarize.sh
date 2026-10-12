@@ -53,6 +53,9 @@ for arch in arm64 amd64; do
 		echo "sign-notarize.sh: submission ${id} is not Accepted; inspect it with: xcrun notarytool log ${id} --keychain-profile <profile>" >&2
 		exit 1
 	fi
+	# Binds the Accepted record to these bytes: publish-release.sh refuses a binary whose hash
+	# differs, so a binary replaced after notarisation cannot ride on an old record.
+	shasum -a 256 -- "$bin" | awk '{print $1}' >"${dist}/notary-sha256-darwin-${arch}.txt"
 done
 
 # codesign rewrote the darwin binaries, so the checksums must be recomputed.

@@ -55,13 +55,28 @@ cat >"${work}/short.txt" <<'TEXT'
 Every effort level must read this sentence word for word.
 TEXT
 
+# redact replaces the repository root with . and the home directory with ~, so no row names
+# the local account or the checkout's location.
+redact() {
+	local s="$1"
+	s="${s//"$PWD"\//./}"
+	printf '%s' "${s//"$HOME"/\~}"
+}
+
+# The report binds its result to these bytes and this commit: publish-release.sh refuses a
+# report whose hash or commit is not that of what it publishes.
+bin_sha="$(shasum -a 256 -- "$bin" | awk '{print $1}')"
+version_out="$("$bin" version)"
+
 failed=0
 {
 	echo "# recite release check"
 	echo
 	echo "- Started: ${stamp}"
-	echo "- Binary: \`${bin}\`"
-	echo "- Version: $("$bin" version | head -n 1)"
+	echo "- Binary: \`$(redact "$bin")\`"
+	echo "- Binary sha256: ${bin_sha}"
+	echo "- Version: $(head -n 1 <<<"$version_out")"
+	echo "- Commit: $(sed -n 's/^commit: //p' <<<"$version_out" | head -n 1)"
 	echo
 	echo "| # | Step | Command | Exit | Seconds | Key numbers |"
 	echo "|---|---|---|---|---|---|"
@@ -86,12 +101,25 @@ doctor_numbers() {
 		END { printf "ok=%d, warn=%d, fail=%d", c["ok"], c["warn"], c["fail"] }' "$1"
 }
 
-# redact replaces the repository root with . and the home directory with ~, so no row names
-# the local account or the checkout's location.
-redact() {
-	local s="$1"
-	s="${s//"$PWD"\//./}"
-	printf '%s' "${s//"$HOME"/\~}"
+# say_evidence AUDIO NUMBERS prints why a say step's output does not prove it passed, or
+# nothing. NUMBERS is manifest_numbers' output for AUDIO's manifest (its first status,
+# chunks and verified are the run's, ahead of the per-chunk records).
+say_evidence() {
+	local audio="$1" numbers="$2" status chunks verified
+	if [ ! -s "$audio" ]; then
+		printf 'no audio'
+		return
+	fi
+	status="$(sed -n 's/^\(.*, \)\{0,1\}status=\([a-z-]*\).*/\2/p' <<<"$numbers")"
+	chunks="$(sed -n 's/^\(.*, \)\{0,1\}chunks=\([0-9]*\).*/\2/p' <<<"$numbers")"
+	verified="$(sed -n 's/^\(.*, \)\{0,1\}verified=\([0-9]*\).*/\2/p' <<<"$numbers")"
+	if [ "$status" != complete ]; then
+		printf 'manifest status is %s, not complete' "${status:-missing}"
+	elif [ -z "$chunks" ] || [ "$chunks" -eq 0 ]; then
+		printf 'manifest has no chunks'
+	elif [ "$verified" != "$chunks" ]; then
+		printf 'verified %s of %s chunks' "${verified:-0}" "$chunks"
+	fi
 }
 
 # step NAME MANIFEST CMD... runs CMD, logs its output and appends a report row.
@@ -111,6 +139,17 @@ step() {
 		numbers="$(manifest_numbers "$manifest")"
 	else
 		numbers="$(grep -Eo '^(ok|FAIL|---) .*' "$log" | tail -n 3 | tr '\n' ' ' | tr '|' '/')"
+	fi
+	# A say step passes on evidence, not on its exit status alone: non-empty audio and a
+	# complete manifest whose every chunk the verifier passed.
+	if [ "$code" -eq 0 ] && [ -n "$manifest" ] && [ "$manifest" != doctor ]; then
+		local bad
+		bad="$(say_evidence "${manifest%.json}" "$numbers")"
+		if [ -n "$bad" ]; then
+			code=1
+			echo "release-check.sh: ${bad}" >>"$log"
+			numbers="${numbers}; ${bad}"
+		fi
 	fi
 	if [ "$code" -ne 0 ]; then
 		failed=$((failed + 1))
@@ -152,7 +191,7 @@ step "transcription of a known sentence" "" \
 		echo "Result: FAIL (${failed} of ${n} steps failed)"
 	fi
 	echo
-	echo "Logs: \`${work}/\`"
+	echo "Logs: \`$(redact "$work")/\`"
 } >>"$report"
 
 echo "report: ${report}"

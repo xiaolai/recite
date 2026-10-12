@@ -21,6 +21,11 @@ fi
 if [ -z "$current" ]; then
 	exit 0
 fi
+# sort -V orders bare X.Y.Z numerically; anything else in CURRENT makes the order unknown.
+if ! [[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+	echo "tap-version-guard.sh: the tap's ${current} is not a bare X.Y.Z version" >&2
+	exit 1
+fi
 if [ "$current" = "$new" ]; then
 	echo "tap-version-guard.sh: the tap already has ${new}" >&2
 	exit 1

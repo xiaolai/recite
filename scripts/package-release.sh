@@ -19,9 +19,12 @@ for platform in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
 	cp -p -- "$bin" "${stage}/recite"
 	cp -- LICENSE README.md "${stage}/"
 	# COPYFILE_DISABLE keeps macOS from adding ._ resource files; the fixed owner keeps the
-	# local account name out of the archive.
+	# local account name out of the archive. The fixed mtimes and gzip -n make the archive a
+	# function of its contents, so a re-run of publish-release.sh reproduces the assets of a
+	# release it already created and can verify them byte for byte.
+	touch -t 200001010000 -- "${stage}/recite" "${stage}/LICENSE" "${stage}/README.md"
 	COPYFILE_DISABLE=1 tar --uid 0 --gid 0 --uname root --gname root \
-		-czf "${dist}/recite-${platform}.tar.gz" -C "$stage" recite LICENSE README.md
+		-cf - -C "$stage" recite LICENSE README.md | gzip -n -9 >"${dist}/recite-${platform}.tar.gz"
 	rm -rf -- "$stage"
 	echo "packed ${dist}/recite-${platform}.tar.gz"
 done
