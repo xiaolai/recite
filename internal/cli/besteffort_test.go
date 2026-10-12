@@ -28,7 +28,7 @@ func TestHintDocumentedBestEffort(t *testing.T) {
 		"`{ hint = \"…\" }` (`hint` is best-effort; prefer `say`",
 		"A lexicon `hint` entry leaves the text unchanged",
 		"so `hint` is unverifiable by STT",
-		"Prefer `say`, which rewrites the spoken text and is verified",
+		"Prefer `say`, which rewrites the spoken text; with `--verify normal` or `strict`, its output is\n  verified against that rewrite",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("README lacks %q", want)

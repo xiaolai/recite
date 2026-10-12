@@ -146,8 +146,8 @@ Two pronunciation and stress controls are best-effort, not verified:
 
 - A lexicon `hint` entry leaves the text unchanged and only asks the model to pronounce the term
   a certain way. Speech-to-text cannot check a pronunciation, so `hint` is unverifiable by STT
-  and its effect is not guaranteed. Prefer `say`, which rewrites the spoken text and is verified
-  against that rewrite.
+  and its effect is not guaranteed. Prefer `say`, which rewrites the spoken text; with `--verify normal` or `strict`, its output is
+  verified against that rewrite (verification is off by default).
 - The `{{emph|words}}` speech mark asks the model to stress the words and leaves the text
   unchanged. Whether the stress is audible is not verified.
 
