@@ -398,6 +398,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 	}
 	var out *manifest.Output
 	var sections []manifest.Section
+	var subtitles []manifest.Subtitle
 	if stream != nil {
 		// A stream cannot take bytes back: whatever prefix was assembled has been sent, and
 		// the exit code reports a failure after it (AUD-07).
@@ -418,7 +419,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 		default:
 			seconds = audio.DurationOf(asm.Written()).Seconds()
 			pub, perr = c.publishAudio(ctx, req, job, spool, asm.Written(), asm.Spans())
-			sections = pub.sections
+			sections, subtitles = pub.sections, pub.subtitles
 			if perr == nil {
 				c.Logger.Info("wrote output", "path", job.target, "seconds", seconds)
 			}
@@ -456,7 +457,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 	if sections == nil {
 		sections = manifestSections(job.extras.sections)
 	}
-	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out, sections); merr != nil {
+	if merr := c.writeRunManifest(req, job, rec, tr, res, asm.Spans(), status, out, sections, subtitles); merr != nil {
 		if err == nil {
 			return merr
 		}
@@ -479,7 +480,8 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 
 // writeRunManifest builds and publishes the run's manifest, unless --no-manifest.
 func (c *CLI) writeRunManifest(req SayRequest, job sayJob, rec *recorder, tr stt.Transcriber, res pipeline.Result,
-	spans []audio.Span, status manifest.Status, out *manifest.Output, sections []manifest.Section) error {
+	spans []audio.Span, status manifest.Status, out *manifest.Output, sections []manifest.Section,
+	subtitles []manifest.Subtitle) error {
 	if job.manifest == "" {
 		return nil
 	}
@@ -488,7 +490,7 @@ func (c *CLI) writeRunManifest(req SayRequest, job sayJob, rec *recorder, tr stt
 		CreatedAt: c.Now(), Status: status, Input: inputOf(req, job.input), Settings: settingsOf(req),
 		Verifier: verifierOf(req.Verify.Mode, tr, fb), Output: out,
 		Plan: job.plan, Tasks: job.tasks, Results: res.Chunks, Spans: spans, Gaps: job.gaps, Sections: sections,
-		EstimateUSD: estimate, PriceNote: usage.ListPrices.Label(),
+		Subtitles: subtitles, EstimateUSD: estimate, PriceNote: usage.ListPrices.Label(),
 	})
 	if err != nil {
 		return err

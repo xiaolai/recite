@@ -44,6 +44,9 @@ type Manifest struct {
 	Summary   Summary   `json:"summary"`
 	Chunks    []Chunk   `json:"chunks"`
 	Chapters  []Chapter `json:"chapters"`
+	// Subtitles are the subtitle files published, in publication order. Optional and
+	// additive within schema v1: absent when the run published none.
+	Subtitles []Subtitle `json:"subtitles,omitempty"`
 
 	UsageEstimate float64 `json:"usage_estimate_usd_list_price"`
 	UsageNote     string  `json:"usage_estimate_note"`
@@ -122,6 +125,14 @@ type Fallback struct {
 	From  string `json:"from"`
 	To    string `json:"to"`
 	Cause string `json:"cause"`
+}
+
+// Subtitle is one published subtitle file. Section is the split section it belongs to,
+// absent for the subtitles of a single output file.
+type Subtitle struct {
+	Path    string  `json:"path"`
+	Format  string  `json:"format"`
+	Section *string `json:"section,omitempty"`
 }
 
 // Output describes the written audio.
@@ -224,6 +235,8 @@ type Run struct {
 	Gaps    []int                // the silence after each chunk, in samples
 	// Sections are the input's sections in order, each starting at a later chunk.
 	Sections []Section
+	// Subtitles are the subtitle files published, also after a failed publication.
+	Subtitles []Subtitle
 
 	EstimateUSD float64 // the list-price estimate of every render and STT call of the run
 	PriceNote   string
@@ -258,6 +271,7 @@ func Build(r Run) (Manifest, error) {
 		Summary:       Summary{Chunks: len(r.Plan.Chunks), Findings: map[string]int{}},
 		Chunks:        make([]Chunk, len(r.Plan.Chunks)),
 		Chapters:      make([]Chapter, len(r.Sections)),
+		Subtitles:     r.Subtitles,
 		UsageEstimate: r.EstimateUSD, UsageNote: r.PriceNote,
 	}
 	if f := m.Verifier.Fallback; f != nil {

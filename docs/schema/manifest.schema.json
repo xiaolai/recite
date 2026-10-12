@@ -144,6 +144,21 @@
         }
       }
     },
+    "subtitles": {
+      "description": "Optional, added within version 1: every subtitle file the run published (--subtitles), in publication order, also when publication failed part-way. Absent when none was published. section is the split section's title under --split-sections (OUT-05), absent for a single output file's subtitles.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "format"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "format": { "enum": ["srt", "vtt"] },
+          "section": { "type": "string" }
+        }
+      }
+    },
     "usage_estimate_usd_list_price": { "type": "number", "minimum": 0 },
     "usage_estimate_note": { "type": "string" }
   },

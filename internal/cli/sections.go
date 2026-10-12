@@ -246,8 +246,9 @@ func cuesOf(chunks []pipeline.Chunk, spans []audio.Span, from, to int) ([]subtit
 // failure it still lists what was published before it, so the failed manifest records those
 // files rather than leaving them unaccounted for.
 type publication struct {
-	sections []manifest.Section
-	audio    bool
+	sections  []manifest.Section
+	subtitles []manifest.Subtitle
+	audio     bool
 }
 
 // publishAudio writes the assembled audio and its extras: one file (with chapter markers when
@@ -266,6 +267,7 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 		staged  *stagedOutput
 		section int // the split section whose audio this is, or -1
 		audio   bool
+		sub     *manifest.Subtitle // set for a subtitle file
 		seconds float64
 	}
 	var items []item
@@ -292,7 +294,7 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 			return audio.EncodeFileFrom(ctx, enc, src, n, f.Name())
 		}, it)
 	}
-	subs := func(path string, from, to int, offset int64) error {
+	subs := func(path string, from, to int, offset int64, section *string) error {
 		if x.subtitles == "" {
 			return nil
 		}
@@ -301,9 +303,10 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 			return err
 		}
 		cues = subtitle.Shift(cues, sampleTime(offset))
-		return stage(subtitlePath(path, x.subtitles), func(f *os.File) error {
+		sp := subtitlePath(path, x.subtitles)
+		return stage(sp, func(f *os.File) error {
 			return subtitle.Write(f, x.subtitles, cues)
-		}, item{section: -1})
+		}, item{section: -1, sub: &manifest.Subtitle{Path: sp, Format: string(x.subtitles), Section: section}})
 	}
 	if !x.split {
 		enc := job.enc
@@ -313,7 +316,7 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 		if err := audioAt(job.target, enc, 0, size, item{section: -1, audio: true}); err != nil {
 			return pub, err
 		}
-		if err := subs(job.target, 0, len(spans)-1, 0); err != nil {
+		if err := subs(job.target, 0, len(spans)-1, 0, nil); err != nil {
 			return pub, err
 		}
 	} else {
@@ -333,7 +336,7 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 			if err := audioAt(path, job.enc, start*audio.BytesPerSample, (end-start)*audio.BytesPerSample, it); err != nil {
 				return pub, err
 			}
-			if err := subs(path, from, s.last, start); err != nil {
+			if err := subs(path, from, s.last, start, &s.title); err != nil {
 				return pub, err
 			}
 		}
@@ -344,6 +347,8 @@ func (c *CLI) publishAudio(ctx context.Context, req SayRequest, job sayJob, pcm 
 			switch {
 			case it.audio:
 				pub.audio = true
+			case it.sub != nil:
+				pub.subtitles = append(pub.subtitles, *it.sub)
 			case it.section >= 0:
 				pub.sections[it.section].Path = it.staged.target
 				c.Logger.Info("wrote section", "path", it.staged.target, "seconds", it.seconds)

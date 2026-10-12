@@ -101,3 +101,74 @@ func TestSaySplitRecordsPartialPublication(t *testing.T) {
 		t.Fatalf("the third target was replaced: %q", b)
 	}
 }
+
+var splitSRT = []string{"01-the-beginning.srt", "02-part-2-quotes-slashes.srt", "03-第三章-结局.srt"}
+
+// A complete run records every subtitle file it published, each with its split section, and
+// the manifest validates against the published schema.
+func TestSayManifestRecordsSubtitles(t *testing.T) {
+	m := newMultiEnv(t)
+	writeBook(t, m)
+	m.look = countingEncoder(t, 0, 0)
+	r := m.run("-f", "book.md", "-o", "parts", "--split-sections", "--format", "mp3", "--loudness", "none", "--subtitles", "srt")
+	if r.code != exitcode.OK {
+		t.Fatalf("code %d, stderr %q", r.code, r.stderr)
+	}
+	man := validManifest(t, manifestSchema(t), m.path("parts.json"))
+	if len(man.Subtitles) != len(splitSRT) {
+		t.Fatalf("subtitles %+v, want %d", man.Subtitles, len(splitSRT))
+	}
+	for i, s := range man.Subtitles {
+		want := filepath.Join("parts", splitSRT[i])
+		if s.Path != want || s.Format != "srt" || s.Section == nil || *s.Section != wantTitles[i] {
+			t.Fatalf("subtitle %d = %+v, want %s srt in %q", i+1, s, want, wantTitles[i])
+		}
+		if _, err := os.Stat(m.path(want)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A single-file run records its one subtitle without a section.
+func TestSayManifestRecordsSingleSubtitle(t *testing.T) {
+	m := newMultiEnv(t)
+	writeBook(t, m)
+	r := m.run("-f", "book.md", "-o", "book.wav", "--subtitles", "vtt")
+	if r.code != exitcode.OK {
+		t.Fatalf("code %d, stderr %q", r.code, r.stderr)
+	}
+	man := validManifest(t, manifestSchema(t), m.path("book.wav.json"))
+	if len(man.Subtitles) != 1 || man.Subtitles[0].Path != "book.vtt" || man.Subtitles[0].Format != "vtt" || man.Subtitles[0].Section != nil {
+		t.Fatalf("subtitles %+v, want book.vtt vtt without a section", man.Subtitles)
+	}
+}
+
+// When publication fails after a subtitle was published, the failed manifest records exactly
+// the subtitles published: the second section's subtitle target appears during the run, so
+// the first section's audio and subtitle and the second's audio are published, then the run
+// stops.
+func TestSaySplitRecordsPublishedSubtitlesOnFailure(t *testing.T) {
+	m := newMultiEnv(t)
+	writeBook(t, m)
+	if err := os.Mkdir(m.path("parts"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_APPEAR", m.path(filepath.Join("parts", splitSRT[1])))
+	m.look = countingEncoder(t, 0, 3)
+	r := m.run("-f", "book.md", "-o", "parts", "--split-sections", "--format", "mp3", "--loudness", "none", "--subtitles", "srt")
+	if r.code != exitcode.Usage || !strings.Contains(r.stderr, "created during the run") {
+		t.Fatalf("code %d, stderr %q", r.code, r.stderr)
+	}
+	man := validManifest(t, manifestSchema(t), m.path("parts.json"))
+	if man.Status != manifest.StatusFailed {
+		t.Fatalf("status %q", man.Status)
+	}
+	want := filepath.Join("parts", splitSRT[0])
+	if len(man.Subtitles) != 1 || man.Subtitles[0].Path != want || man.Subtitles[0].Format != "srt" ||
+		man.Subtitles[0].Section == nil || *man.Subtitles[0].Section != wantTitles[0] {
+		t.Fatalf("subtitles %+v, want only %s", man.Subtitles, want)
+	}
+	if man.Chapters[1].Path == nil || man.Chapters[2].Path != nil {
+		t.Fatalf("chapter paths %v %v, want the second published and the third not", man.Chapters[1].Path, man.Chapters[2].Path)
+	}
+}
