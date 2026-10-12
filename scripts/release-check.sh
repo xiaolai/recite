@@ -73,7 +73,10 @@ TEXT
 redact() {
 	local s="$1"
 	s="${s//"$PWD"\//./}"
-	printf '%s' "${s//"$HOME"/\~}"
+	# The replacement comes from an unquoted variable: bash 3.2 keeps a backslash in "\~" and
+	# keeps quotes in a quoted replacement, and both would leak into the report.
+	local tilde='~'
+	printf '%s' "${s//"$HOME"/$tilde}"
 }
 
 # The report binds its result to these bytes and this commit: publish-release.sh refuses a
