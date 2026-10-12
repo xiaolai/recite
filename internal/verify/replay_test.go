@@ -2,6 +2,7 @@ package verify_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,9 +48,16 @@ func TestCalibrationReplay(t *testing.T) {
 			for _, h := range tc.Heard {
 				outs = append(outs, sttfake.Text(h))
 			}
+			// Every transcription the case needs is recorded: one more would be the fake's
+			// default, judged instead of what the recogniser wrote, so it fails the run.
+			tr := sttWith(outs...)
+			tr.Default = sttfake.Fail(errors.New("replay: no recorded transcript left"))
 			o := verify.OptionsFor(verify.ModeNormal)
 			o.MaxAttempts = 1
-			r := run(t, c, o, synthWith(c), sttWith(outs...))
+			r := run(t, c, o, synthWith(c), tr)
+			if got := len(tr.Calls()); got != len(tc.Heard) {
+				t.Fatalf("%d STT calls, %d transcripts recorded", got, len(tc.Heard))
+			}
 			if string(r.State) != tc.Want {
 				t.Fatalf("%s take: state %s (%v, score %.4f), want %s: %s", tc.Kind, r.State, reasons(r), r.Score, tc.Want, tc.Note)
 			}

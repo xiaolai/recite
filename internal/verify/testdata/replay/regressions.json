@@ -42,10 +42,10 @@
     "heard": ["何小满老师认为，每一张地图都是一种主张，所以他要求学生先凭记忆画出整个云溪县，然后才能看真正的地图。画得最不像的那张，常常最能说明画图的人住在哪里。"]
   },
   {
-    "id": "han-s025", "kind": "good", "want": "unverified",
+    "id": "han-s025", "kind": "good", "want": "unverified", "reason": "content-word",
     "note": "as recorded: 云溪 heard as 云西 twice. Name homophones are checked as written unless the lexicon says otherwise, so this good take still rejects.",
     "spoken": "何小满老师认为每一张地图都是一种主张，所以她要求学生先凭记忆画出整个云溪县，然后才能看真正的地图，画得最不像的那张，常常最能说明画图的人住在哪里。",
-    "heard": ["何小满老师认为，每一张地图都是一种主张，所以他要求学生先凭记忆画出整个云西县，然后才能看真正的地图。画得最不像的那张，常常最能说明画图的人住在哪里。"]
+    "heard": ["何小满老师认为，每一张地图都是一种主张，所以他要求学生先凭记忆画出整个云西县，然后才能看真正的地图。画得最不像的那张，常常最能说明画图的人住在哪里。", "何小满老师认为，每一张地图都是一种主张，所以他要求学生先凭记忆画出整个云西县，然后才能看真正的地图。画得最不像的那张，常常最能说明画图的人住在哪里。"]
   },
   {
     "id": "ver07-s14-literal", "kind": "corrupted", "want": "unverified", "reason": "word-order",

@@ -51,6 +51,11 @@ func run(t *testing.T, c verify.Chunk, o verify.Options, synth *rtfake.ScriptedS
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 	render := func(ctx context.Context, n int) (realtime.Take, error) {
 		return sess.Render(ctx, realtime.RenderRequest{ChunkID: c.ID, Text: c.Spoken, Attempt: n})
 	}

@@ -40,7 +40,10 @@ const (
 //
 // 2: spelling variants and compounds, 她/他/它 folded, the word-order guard, and causal
 // connectives taken off the function-word list.
-const GuardVersion = 2
+// 3: spelled letters keep their exact spelling, substitutions crossed over matched words are a
+// word-order error, the empty and duration guards judge trimmed audio under --no-trim, and
+// lexicon ranges keep their offsets when case folding changes byte lengths.
+const GuardVersion = 3
 
 // Pre-STT guard limits (design §8.1).
 const (
@@ -57,21 +60,23 @@ type Rejection struct {
 
 // PreSTT runs the guards that need no network, in this order: status, empty, said, duration.
 // It returns the take's audio, trimmed unless noTrim, and the first failing guard, or nil.
-// Empty and duration judge the trimmed audio, so a take of silence counts as empty.
+// Empty and duration always judge the trimmed audio, so a take of silence counts as empty;
+// noTrim only keeps the silence in the audio returned for output.
 func PreSTT(c Chunk, take realtime.Take, noTrim bool) (audio.PCM, *Rejection) {
 	return preSTT(c, take, noTrim, false)
 }
 
 // preSTT is PreSTT with the said guard optionally skipped (Options.BypassSaid).
 func preSTT(c Chunk, take realtime.Take, noTrim, bypassSaid bool) (audio.PCM, *Rejection) {
-	pcm := audio.PCM(take.PCM)
-	if !noTrim {
-		pcm = audio.Trim(pcm)
+	trimmed := audio.Trim(audio.PCM(take.PCM))
+	pcm := trimmed
+	if noTrim {
+		pcm = audio.PCM(take.PCM)
 	}
 	if take.Status != realtime.StatusCompleted {
 		return pcm, &Rejection{ReasonStatus, fmt.Sprintf("response ended %q", take.Status)}
 	}
-	d := pcm.Duration()
+	d := trimmed.Duration()
 	if d < MinTakeDuration {
 		return pcm, &Rejection{ReasonEmpty, fmt.Sprintf("%v of audio", d)}
 	}
@@ -122,16 +127,17 @@ type judgement struct {
 // judge scores one transcript against the chunk and runs the language, protected-token and
 // edge-insertion guards, and collects the content-word mismatches (design §8.4).
 func judge(c Chunk, t stt.Transcript) judgement {
-	// Every offset below is into this rewritten transcript.
-	t.Text = applyEquivalents(t.Text, sayPairsFor(c.Spoken, c.Equivalents))
+	// The transcript is compared with lexicon equivalents rewritten, then in spoken form; eq
+	// and hyp map offsets back through both steps.
+	eq := rewriteEquivalents(t.Text, sayPairsFor(c.Spoken, c.Equivalents))
 	metric := ScriptMetric(c.Spoken)
-	ref, hyp := toFormSpans(c.Spoken, c.Language.Code, c.LangSpans), toForm(t.Text, c.Language.Code)
+	ref, hyp := toFormSpans(c.Spoken, c.Language.Code, c.LangSpans), toForm(eq.text, c.Language.Code)
 	res, al := score(ref.text, hyp.text, metric)
-	// Report edits against the reference and transcript as they are, for the protected ranges
-	// and the logprobs.
+	// Report edits against the reference and transcript as they are, for the protected ranges,
+	// the recorded transcript and the logprobs.
 	for i, e := range res.Edits {
 		e.RefStart, e.RefEnd = ref.back(e.RefStart, e.RefEnd)
-		e.HeardStart, e.HeardEnd = hyp.back(e.HeardStart, e.HeardEnd)
+		e.HeardStart, e.HeardEnd = eq.back(hyp.back(e.HeardStart, e.HeardEnd))
 		e.Expected, e.Heard = c.Spoken[e.RefStart:e.RefEnd], t.Text[e.HeardStart:e.HeardEnd]
 		res.Edits[i] = e
 	}
@@ -242,19 +248,19 @@ func protectedRanges(c Chunk) [][2]int {
 			out = append(out, [2]int{tok.start, tok.end})
 		}
 	}
-	lower := strings.ToLower(c.Spoken)
+	// Case is folded rune by rune on the original text: lowercasing the whole string can
+	// change byte lengths ("İ" → "i") and shift every offset after it.
 	for _, k := range c.Lexicon {
-		k = strings.ToLower(strings.TrimSpace(k))
-		for from := 0; k != ""; {
-			i := strings.Index(lower[from:], k)
-			if i < 0 {
-				break
+		k = strings.TrimSpace(k)
+		n := utf8.RuneCountInString(k)
+		for i := 0; k != "" && i < len(c.Spoken); {
+			if e := runeEnd(c.Spoken, i, n); e >= 0 && strings.EqualFold(c.Spoken[i:e], k) && wordBoundary(c.Spoken, i, e) {
+				out = append(out, [2]int{i, e})
+				i = e
+				continue
 			}
-			s, e := from+i, from+i+len(k)
-			if wordBoundary(lower, s, e) {
-				out = append(out, [2]int{s, e})
-			}
-			from = e
+			_, w := utf8.DecodeRuneInString(c.Spoken[i:])
+			i += w
 		}
 	}
 	for _, r := range c.Protected {

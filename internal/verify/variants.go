@@ -150,18 +150,29 @@ var hanPronouns = map[string]string{"她": "他", "它": "他"}
 // foldVariants rewrites canonical tokens to the forms the comparison uses: listed British
 // spellings to American ones, then listed two-word compounds to one token spanning both.
 func foldVariants(toks []CanonToken) []CanonToken {
+	out, _ := foldVariantsRaw(toks)
+	return out
+}
+
+// foldVariantsRaw is foldVariants that also returns, for each folded token, the text it had
+// before folding (a joined compound gives its words joined by a space).
+func foldVariantsRaw(toks []CanonToken) ([]CanonToken, []string) {
 	out := make([]CanonToken, 0, len(toks))
+	raw := make([]string, 0, len(toks))
 	for _, t := range toks {
+		r := t.Text
 		if v, ok := spellingVariants[t.Text]; ok {
 			t.Text = v
 		}
 		if n := len(out); n > 0 {
 			if j, ok := compoundVariants[[2]string{out[n-1].Text, t.Text}]; ok {
 				out[n-1] = CanonToken{Text: j, Start: out[n-1].Start, End: t.End}
+				raw[n-1] += " " + r
 				continue
 			}
 		}
 		out = append(out, t)
+		raw = append(raw, r)
 	}
-	return out
+	return out, raw
 }

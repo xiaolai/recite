@@ -245,3 +245,45 @@ func TestSpelledCodeScoresWithoutSpacingErrors(t *testing.T) {
 		t.Errorf("wrong letter: %d errors, want 1", r.Errors)
 	}
 }
+
+// A long reference against an empty or one-word transcript is all deletions, and the band
+// stores at most m+1 cells a row, so the table stays linear in the reference: 100,000 units
+// against nothing once allocated about 10 GB.
+func TestAlignOneSidedStaysLinear(t *testing.T) {
+	const n = 100_000
+	ref := make([]int32, n)
+	for i := range ref {
+		ref[i] = int32(i%7 + 1)
+	}
+	for _, hyp := range [][]int32{nil, {1}} {
+		steps := alignCore(ref, hyp)
+		dels := 0
+		for _, s := range steps {
+			if s.hyp < 0 {
+				dels++
+			}
+		}
+		if len(steps) != n || dels != n-len(hyp) {
+			t.Errorf("m=%d: %d steps, %d deletions", len(hyp), len(steps), dels)
+		}
+	}
+	for k := 16; k <= n; k *= 2 {
+		if w := bandWidth(n, 1, k); w > 2 {
+			t.Errorf("k=%d: %d cells a row against one unit, want at most 2", k, w)
+		}
+	}
+	if allocs := testing.AllocsPerRun(5, func() { alignCore(ref, nil) }); allocs > 1 {
+		t.Errorf("empty transcript: %v allocations, want only the steps", allocs)
+	}
+}
+
+func BenchmarkAlignLongAgainstShort(b *testing.B) {
+	ref := make([]int32, 100_000)
+	for i := range ref {
+		ref[i] = int32(i % 7)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		alignCore(ref, []int32{99})
+	}
+}

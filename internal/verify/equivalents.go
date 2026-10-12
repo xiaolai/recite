@@ -13,9 +13,13 @@ import (
 // rewrite or wrote the term back. Matching ignores case (STT case varies) and uses the
 // lexicon's word rule: whole words in spaced scripts, substrings in Chinese and Japanese.
 // The longest term wins at a position.
-func applyEquivalents(s string, eqs []SayPair) string {
+func applyEquivalents(s string, eqs []SayPair) string { return rewriteEquivalents(s, eqs).text }
+
+// rewriteEquivalents is applyEquivalents with the span map back to s, so offsets into the
+// rewritten text can be reported in the transcript as STT wrote it.
+func rewriteEquivalents(s string, eqs []SayPair) form {
 	if len(eqs) == 0 {
-		return s
+		return form{text: s}
 	}
 	type term struct {
 		runes int
@@ -29,6 +33,16 @@ func applyEquivalents(s string, eqs []SayPair) string {
 	}
 	slices.SortStableFunc(ts, func(a, b term) int { return b.runes - a.runes })
 	var b strings.Builder
+	var segs []spoken.Segment
+	copied := 0 // start of the run of s copied as is
+	flush := func(end int) {
+		if end > copied {
+			segs = append(segs, spoken.Segment{
+				Display: spoken.Range{Start: copied, End: end},
+				Spoken:  spoken.Range{Start: b.Len() - (end - copied), End: b.Len()},
+			})
+		}
+	}
 	for i := 0; i < len(s); {
 		matched := false
 		for _, t := range ts {
@@ -36,8 +50,15 @@ func applyEquivalents(s string, eqs []SayPair) string {
 			if j < 0 || !strings.EqualFold(s[i:j], t.eq.Written) || !spoken.WordBounded(s, i, j) {
 				continue
 			}
+			flush(i)
+			start := b.Len()
 			b.WriteString(t.eq.Spoken)
-			i, matched = j, true
+			segs = append(segs, spoken.Segment{
+				Display: spoken.Range{Start: i, End: j},
+				Spoken:  spoken.Range{Start: start, End: b.Len()},
+				Rule:    "say",
+			})
+			i, copied, matched = j, j, true
 			break
 		}
 		if !matched {
@@ -46,7 +67,11 @@ func applyEquivalents(s string, eqs []SayPair) string {
 			i += n
 		}
 	}
-	return b.String()
+	flush(len(s))
+	if copied == 0 {
+		return form{text: s} // nothing rewritten
+	}
+	return form{text: b.String(), segs: segs}
 }
 
 // sayPairsFor drops the pairs whose written term the reference itself holds (a {{verbatim}}

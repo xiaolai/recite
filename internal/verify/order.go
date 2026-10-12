@@ -13,8 +13,9 @@ const (
 	transposeRunesCER = 4
 )
 
-// transposition finds neighbouring units heard in the wrong order: two adjacent substitutions
-// that cross ("of the" heard "the of"), or a unit deleted and the same unit inserted after at
+// transposition finds neighbouring units heard in the wrong order: two substitutions that
+// cross, adjacent ("of the" heard "the of") or over at most a few matched units ("to him from"
+// heard "from him to"), or a unit deleted and the same unit inserted after at
 // most a few matched units, or inserted and then deleted ("kind of" heard "of kind"; 红了眼眶
 // heard 红眼眶了). The aligner prices such a take at one or two edits, often on function words,
 // so neither the score nor the content-word guard notices it. Every unit counts, function
@@ -46,11 +47,19 @@ func transposition(al alignment, metric text.Metric) (expected, heard string, ok
 	isDel := func(s step) bool { return s.hyp < 0 }
 	isIns := func(s step) bool { return s.ref < 0 }
 	for i := range st {
-		if i+1 < len(st) && isSub(st[i]) && isSub(st[i+1]) {
-			a, b := refText(st[i]), refText(st[i+1])
-			if a != b && hypText(st[i]) == b && hypText(st[i+1]) == a {
-				e, h := report(st[i : i+2])
-				return e, h, true
+		if isSub(st[i]) {
+			// The next unmatched step, past at most window matched units ("to him from" heard
+			// "from him to" crosses over "him").
+			j := i + 1
+			for j < len(st) && st[j].match && j-i-1 < window {
+				j++
+			}
+			if j < len(st) && isSub(st[j]) {
+				a, b := refText(st[i]), refText(st[j])
+				if a != b && hypText(st[i]) == b && hypText(st[j]) == a {
+					e, h := report(st[i : j+1])
+					return e, h, true
+				}
 			}
 		}
 		var moved string

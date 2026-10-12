@@ -56,6 +56,13 @@ type alignment struct {
 func score(reference, hypothesis string, metric text.Metric) (Result, alignment) {
 	ref, hyp := units(reference, metric), units(hypothesis, metric)
 	steps := align(texts(ref), texts(hyp))
+	for i, st := range steps {
+		// Spelled letters are heard letter by letter, so their exact spelling is what was said:
+		// a folded match of "G R E Y" with "G R A Y" is a wrong letter.
+		if st.match && (ref[st.ref].spelled || hyp[st.hyp].spelled) && ref[st.ref].raw != hyp[st.hyp].raw {
+			steps[i].match = false
+		}
+	}
 	res := Result{Metric: metric, RefLen: len(ref)}
 	for _, st := range steps {
 		if !st.match {
@@ -89,9 +96,13 @@ func (r Result) Report() string {
 }
 
 // unit is one compared element: a canonical word, or one rune of one, with its original span.
+// raw is the text before spelling variants were folded; spelled marks a word read out letter
+// by letter ("G R E Y"), whose raw letters must match exactly.
 type unit struct {
 	text       string
 	start, end int
+	raw        string
+	spelled    bool
 }
 
 func units(src string, metric text.Metric) []unit {
@@ -109,10 +120,13 @@ func foldPronouns(us []unit) []unit {
 }
 
 func rawUnits(src string, metric text.Metric) []unit {
-	toks := foldVariants(CanonTokens(src))
+	toks, raw := foldVariantsRaw(CanonTokens(src))
 	if metric == text.MetricCER {
 		var out []unit
-		for _, t := range toks {
+		for i, t := range toks {
+			if spelledOut(src[t.Start:t.End]) {
+				t.Text = raw[i] // compared rune by rune, so the letters are kept as spelled
+			}
 			out = append(out, runeUnits(src, t, func(rune) bool { return true })...)
 		}
 		return out
@@ -127,7 +141,7 @@ func rawUnits(src string, metric text.Metric) []unit {
 		// (design §8.3); the cardinal's words keep the span of the pair.
 		if v, n := yearPairAt(texts, i); n > 0 {
 			for _, w := range cardinal(uint64(v)) {
-				out = append(out, unit{w, toks[i].Start, toks[i+n-1].End})
+				out = append(out, unit{text: w, start: toks[i].Start, end: toks[i+n-1].End, raw: w})
 			}
 			i += n
 			continue
@@ -138,11 +152,37 @@ func rawUnits(src string, metric text.Metric) []unit {
 			// they are compared by character ("上打开App" = "上打开 App").
 			out = append(out, runeUnits(src, t, unspaced)...)
 		} else {
-			out = append(out, unit{t.Text, t.Start, t.End})
+			out = append(out, unit{text: t.Text, start: t.Start, end: t.End, raw: raw[i], spelled: spelledOut(src[t.Start:t.End])})
 		}
 		i++
 	}
 	return out
+}
+
+// spelledOut reports source text that reads a word letter by letter: at least two runs of
+// letters, each a single letter ("G R E Y", "G-R-E-Y").
+func spelledOut(src string) bool {
+	runs, run := 0, 0
+	for _, r := range src {
+		if unicode.IsLetter(r) || unicode.IsMark(r) {
+			run++
+			continue
+		}
+		if run > 1 {
+			return false
+		}
+		if run == 1 {
+			runs++
+		}
+		run = 0
+	}
+	if run > 1 {
+		return false
+	}
+	if run == 1 {
+		runs++
+	}
+	return runs >= 2
 }
 
 // unspaced reports a rune of a script written without spaces between words.
@@ -171,7 +211,7 @@ func runeUnits(src string, t CanonToken, single func(rune) bool) []unit {
 			}
 		}
 		a, b := span(k, e-1)
-		out = append(out, unit{string(rs[k:e]), a, b})
+		out = append(out, unit{text: string(rs[k:e]), start: a, end: b, raw: string(rs[k:e])})
 		k = e
 	}
 	return out
@@ -316,6 +356,17 @@ func align(ref, hyp []string) []step {
 // proves no cheaper path leaves the band. Cost is O((d+1)·n) for distance d, not O(n·m).
 func alignCore(ref, hyp []int32) []step {
 	n, m := len(ref), len(hyp)
+	// One side empty: only deletions or only insertions, and no table at all.
+	if n == 0 || m == 0 {
+		steps := make([]step, 0, n+m)
+		for i := range n {
+			steps = append(steps, step{ref: i, hyp: -1})
+		}
+		for j := range m {
+			steps = append(steps, step{ref: -1, hyp: j})
+		}
+		return steps
+	}
 	for k := 16; ; k *= 2 {
 		if steps, ok := alignBand(ref, hyp, min(k, max(n, m))); ok || k >= max(n, m) {
 			return steps
@@ -325,13 +376,20 @@ func alignCore(ref, hyp []int32) []step {
 
 const inf = int32(1 << 30)
 
+// bandWidth is the number of cells stored per row: the band, but never more than the m+1
+// columns that exist, so a long reference against a short transcript stores O(n), not
+// O(n·(n−m)). Row i stores columns max(0, lo(i)) through min(m, hi(i)).
+func bandWidth(n, m, k int) int {
+	return min(2*k+max(0, m-n)-min(0, m-n)+1, m+1)
+}
+
 func alignBand(ref, hyp []int32, k int) ([]step, bool) {
 	n, m := len(ref), len(hyp)
 	lo := func(i int) int { return i - k + min(0, m-n) }
 	hi := func(i int) int { return i + k + max(0, m-n) }
-	w := hi(0) - lo(0) + 1
+	w := bandWidth(n, m, k)
 	ops := make([]byte, (n+1)*w)
-	at := func(i, j int) int { return i*w + j - lo(i) }
+	at := func(i, j int) int { return i*w + j - max(0, lo(i)) }
 	prev, cur := make([]int32, m+2), make([]int32, m+2)
 	for j := range prev {
 		prev[j], cur[j] = inf, inf
