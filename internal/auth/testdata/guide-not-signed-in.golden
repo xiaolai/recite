@@ -4,5 +4,5 @@ Codex is not signed in.
   On a machine without a browser, such as over SSH:
       CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' login --device-auth
   Device-code login must first be enabled in your ChatGPT security settings (or by your workspace admin); if it isn't available, sign in on a machine with a browser.
-  Or run `recite auth login`, which runs the same command for you.
+  Or run `recite --codex-bin '/opt/codex tools/bin/codex' --codex-home /srv/codex-home --auth-source codex auth login`, which runs the same command for you.
 More help: https://learn.chatgpt.com/docs/auth

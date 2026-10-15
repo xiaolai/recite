@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/xiaolai/sayso/go/codexapp"
@@ -80,11 +81,27 @@ type Context struct {
 	// MissingBin is the executable the user named (--codex-bin or RECITE_CODEX_BIN) when it
 	// was not found, so the guide can point at the path rather than say Codex is missing.
 	MissingBin string
+
+	// child is how the probe started Codex. It is a pointer so that no formatting of a Context
+	// or a Status (%v, %+v, %#v) prints the environment, which holds the user's credentials.
+	child *childConfig
 }
 
-// CodexConfig is the configuration of a Codex child for this context, with recite's test guard.
+// childConfig is the environment and per-call timeout every Codex child of one probe uses.
+type childConfig struct {
+	env     []string
+	timeout time.Duration
+}
+
+// CodexConfig is the configuration of a Codex child for this context, with recite's test guard:
+// the probe's environment and per-call timeout, so a later child (plan, login) talks to the same
+// Codex sign-in the probe classified.
 func (c Context) CodexConfig(logger *slog.Logger) codexapp.Config {
-	return codexapp.Config{Bin: c.CodexBin, CodexHome: c.CodexHome, Timeout: DefaultTimeout, Logger: logger,
+	timeout, env := DefaultTimeout, []string(nil)
+	if c.child != nil {
+		timeout, env = c.child.timeout, c.child.env
+	}
+	return codexapp.Config{Bin: c.CodexBin, CodexHome: c.CodexHome, Env: env, Timeout: timeout, Logger: logger,
 		ClientName: "recite", Guard: guard}
 }
 
@@ -151,14 +168,31 @@ func Probe(ctx context.Context, cfg ProbeConfig) *Status {
 	}
 	// The process environment, minus CODEX_HOME: recite decides CODEX_HOME from its flags and
 	// Getenv, and codexauth sets it on the child when one is in force.
-	var env []string
+	env := []string{}
+	path := ""
 	for _, kv := range os.Environ() {
-		if len(kv) < 11 || kv[:11] != "CODEX_HOME=" {
+		if strings.HasPrefix(kv, "PATH=") {
+			path = kv[len("PATH="):]
+		}
+		if !strings.HasPrefix(kv, "CODEX_HOME=") {
 			env = append(env, kv)
 		}
 	}
+	// Resolve the executable once, here: the refresh and every later child then run this same
+	// absolute path even if PATH changes, and the file source still knows it for the guide's
+	// fix commands. An executable that does not resolve is left to codexauth to classify.
+	cands := candidates()
+	if cands == nil {
+		if h, err := os.UserHomeDir(); err == nil {
+			cands = codexapp.Candidates(h)
+		}
+	}
+	resolved, rerr := codexapp.Resolve(bin, path, cands)
+	if rerr == nil {
+		bin = resolved
+	}
 	cst, err := codexauth.Probe(ctx, codexauth.Config{
-		Source: source, Bin: bin, CodexHome: home, Env: env, Candidates: candidates(),
+		Source: source, Bin: bin, CodexHome: home, Env: env, Candidates: cands,
 		Margin: RefreshMargin, Timeout: cfg.Timeout, Now: cfg.Now, Logger: cfg.Logger,
 		ClientName: "recite", Guard: guard,
 	})
@@ -169,7 +203,10 @@ func Probe(ctx context.Context, cfg ProbeConfig) *Status {
 	st.State, st.Err = cst.State, cst.Err
 	st.Mode, st.CodexVersion, st.Expires = cst.Mode, cst.Info.CodexVersion, cst.Expires
 	st.Context = Context{CodexBin: cst.Info.Bin, CodexHome: cst.Info.CodexHome, Source: string(cst.Info.Source),
-		MissingBin: cst.Info.MissingBin}
+		MissingBin: cst.Info.MissingBin, child: &childConfig{env: env, timeout: cfg.Timeout}}
+	if st.Context.CodexBin == "" && rerr == nil {
+		st.Context.CodexBin = resolved // the file source never starts Codex, but its guide names it
+	}
 	if st.State != StateReady {
 		return st
 	}

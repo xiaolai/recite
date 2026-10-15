@@ -152,7 +152,7 @@ func (c *CLI) authCheck(st *auth.Status) doctorCheck {
 	left := st.Expires.Sub(c.Now())
 	detail := "chatgpt, plan " + orUnknown(st.Plan) + ", token expires " + relative(left)
 	if left < tokenMargin {
-		return warnCheck("auth", detail, auth.CodexCommand(st.Context)+" login status")
+		return warnCheck("auth", detail, auth.CodexCommand(st.Context)+" login") // login status does not refresh
 	}
 	return okCheck("auth", detail)
 }

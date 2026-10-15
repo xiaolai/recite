@@ -63,6 +63,7 @@
         "state",
         "message",
         "fix_commands",
+        "steps",
         "link"
       ],
       "additionalProperties": false,
@@ -91,6 +92,25 @@
           "items": {
             "type": "string",
             "minLength": 1
+          }
+        },
+        "steps": {
+          "description": "Every line of the guide in order: an explanation, a command, or both. Warnings and prerequisites appear here, beside the commands they qualify.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "command": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         },
         "link": {

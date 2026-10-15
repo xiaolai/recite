@@ -1,6 +1,4 @@
 Your ChatGPT sign-in for Codex has expired or is about to.
-  Run any Codex command to refresh it, for example:
-      CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' login status
-  or sign in again:
+  Sign in again:
       CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' login
 More help: https://learn.chatgpt.com/docs/auth

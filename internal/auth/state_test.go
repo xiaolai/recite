@@ -390,3 +390,43 @@ func TestNoCodexGuideNamesMistypedPath(t *testing.T) {
 		t.Fatalf("guide message %q", g.Message)
 	}
 }
+
+// A later Codex child (plan, login) uses the probe's environment and timeout, so it talks to the
+// sign-in the probe classified: an ambient CODEX_HOME that recite's environment does not report
+// stays out of it.
+func TestContextKeepsTheProbesChildConfig(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	st, _ := probeFake(t, probeCase{mode: "chatgpt", home: "-", timeout: 7 * time.Second})
+	wantState(t, st, StateReady)
+	cfg := st.Context.CodexConfig(nil)
+	if cfg.Timeout != 7*time.Second {
+		t.Fatalf("timeout %v, want 7s", cfg.Timeout)
+	}
+	if cfg.Env == nil {
+		t.Fatal("no environment: the child would inherit the process's CODEX_HOME")
+	}
+	for _, kv := range cfg.Env {
+		if strings.HasPrefix(kv, "CODEX_HOME=") {
+			t.Fatal("the child environment carries the ambient CODEX_HOME") // the value is not printed
+		}
+	}
+	if s := fmt.Sprintf("%v %+v %#v", st.Context, st.Context, st.Context); strings.Contains(s, "PATH=") {
+		t.Fatal("formatting a Context prints the environment")
+	}
+}
+
+// The file source never starts Codex, but its guide still names the executable the user chose.
+func TestFileSourceKeepsTheExecutableForTheGuide(t *testing.T) {
+	st, rec := probeFake(t, probeCase{source: SourceFile})
+	wantState(t, st, StateNoSignInFile)
+	if rec != "" {
+		t.Fatal("the file source started Codex")
+	}
+	if st.Context.CodexBin != fakeBin {
+		t.Fatalf("CodexBin %q, want the --codex-bin executable", st.Context.CodexBin)
+	}
+	g, _ := st.Guide()
+	if !strings.Contains(g.Text(), ShellQuote(fakeBin)+" login") {
+		t.Fatalf("guide does not name the chosen executable:\n%s", g.Text())
+	}
+}

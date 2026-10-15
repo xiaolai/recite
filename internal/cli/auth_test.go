@@ -212,11 +212,21 @@ func TestAuthErrorEventValidates(t *testing.T) {
 		if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil || ev.Event != "auth_error" || ev.Link != auth.AuthURL || len(ev.FixCommands) == 0 {
 			t.Fatalf("%s: event %+v", mode, ev)
 		}
+		// Every line of the guide travels with the commands: the api-key warning, the device-code
+		// prerequisite.
+		var texts []string
+		for _, s := range ev.Steps {
+			texts = append(texts, s.Text)
+		}
+		want := map[string]string{"apikey": "Warning: this changes how Codex itself signs in.", "logged-out": "Device-code login must first be enabled"}[mode]
+		if want != "" && !strings.Contains(strings.Join(texts, "\n"), want) {
+			t.Fatalf("%s: steps %+v lack %q", mode, ev.Steps, want)
+		}
 	}
 	r := authRun(t, "chatgpt", "auth", "status", "--json")
 	validate(t, sch, strings.TrimSuffix(r.stdout, "\n"))
 	// The schema rejects a malformed auth_error.
-	v, _ := jsonschema.UnmarshalJSON(strings.NewReader(`{"event":"auth_error","state":"ready","message":"x","fix_commands":[],"link":"https://x"}`))
+	v, _ := jsonschema.UnmarshalJSON(strings.NewReader(`{"event":"auth_error","state":"ready","message":"x","fix_commands":[],"steps":[],"link":"https://x"}`))
 	if sch.Validate(v) == nil {
 		t.Fatal("schema accepted an auth_error in state ready")
 	}

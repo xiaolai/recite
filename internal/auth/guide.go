@@ -23,13 +23,22 @@ type Guide struct {
 }
 
 // Event is the --json form of a guide: the auth_error event of the events
-// schema (docs/schema/events.schema.json v1).
+// schema (docs/schema/events.schema.json v1). Steps keeps every line of the
+// guide, so a warning or a prerequisite travels with the commands it
+// qualifies; FixCommands lists the commands alone.
 type Event struct {
-	Event       string   `json:"event"`
-	State       State    `json:"state"`
-	Message     string   `json:"message"`
-	FixCommands []string `json:"fix_commands"`
-	Link        string   `json:"link"`
+	Event       string      `json:"event"`
+	State       State       `json:"state"`
+	Message     string      `json:"message"`
+	FixCommands []string    `json:"fix_commands"`
+	Steps       []EventStep `json:"steps"`
+	Link        string      `json:"link"`
+}
+
+// EventStep is one line of a guide in an auth_error event.
+type EventStep struct {
+	Text    string `json:"text,omitempty"`
+	Command string `json:"command,omitempty"`
 }
 
 // FixCommands lists the guide's commands in order.
@@ -45,7 +54,12 @@ func (g Guide) FixCommands() []string {
 
 // Event returns the auth_error event.
 func (g Guide) Event() Event {
-	return Event{Event: "auth_error", State: g.State, Message: g.Message, FixCommands: g.FixCommands(), Link: AuthURL}
+	steps := make([]EventStep, len(g.Steps))
+	for i, s := range g.Steps {
+		steps[i] = EventStep(s)
+	}
+	return Event{Event: "auth_error", State: g.State, Message: g.Message, FixCommands: g.FixCommands(), Steps: steps,
+		Link: AuthURL}
 }
 
 // Text renders the plain guide for stderr.
@@ -74,9 +88,11 @@ func (s *Status) Guide() (Guide, bool) {
 // executable's absolute path, shell-quoted, with CODEX_HOME=<home> in front
 // when a home is set: a bare `codex` would be looked up again by the user's
 // shell and could run another installation (A#6). Only no-codex, which has
-// no executable, uses plain commands.
+// no executable, uses plain commands. recite's own commands carry the same
+// context as flags (ReciteCommand).
 func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 	codex := CodexCommand(c)
+	recite := func(args string) string { return ReciteCommand(c, args) }
 	g := Guide{State: state}
 	switch state {
 	case StateReady:
@@ -108,7 +124,7 @@ func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 			{Text: "Sign in (opens a browser):", Command: codex + " login"},
 			{Text: "On a machine without a browser, such as over SSH:", Command: codex + " login --device-auth"},
 			{Text: "Device-code login must first be enabled in your ChatGPT security settings (or by your workspace admin); if it isn't available, sign in on a machine with a browser."},
-			{Text: "Or run `recite auth login`, which runs the same command for you."},
+			{Text: "Or run `" + recite("auth login") + "`, which runs the same command for you."},
 		}
 	case StateAPIKey:
 		g.Message = "Codex is signed in with an API key. recite works only with a ChatGPT sign-in, and never uses API keys."
@@ -126,19 +142,18 @@ func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 	case StateExpired:
 		g.Message = "Your ChatGPT sign-in for Codex has expired or is about to."
 		g.Steps = []Step{
-			{Text: "Run any Codex command to refresh it, for example:", Command: codex + " login status"},
-			{Text: "or sign in again:", Command: codex + " login"},
+			{Text: "Sign in again:", Command: codex + " login"},
 		}
 	case StateCodexError:
 		g.Message = "Codex could not report a usable sign-in."
 		g.Steps = []Step{
 			{Text: "See Codex's own message:", Command: codex + " login status"},
-			{Text: "For details:", Command: "recite doctor"},
+			{Text: "For details:", Command: recite("doctor")},
 		}
 	case StateNoSignInFile:
 		g.Message = "There is no auth.json to read the ChatGPT sign-in from. Codex may keep it in the system keychain, which only Codex can read."
 		g.Steps = []Step{
-			{Text: "Let recite ask Codex instead:", Command: "recite --auth-source codex auth status"},
+			{Text: "Let recite ask Codex instead:", Command: ReciteCommand(Context{CodexBin: c.CodexBin, CodexHome: c.CodexHome, Source: SourceCodex}, "auth status")},
 			{Text: "or sign in with Codex:", Command: codex + " login"},
 		}
 	case StateAppServerAuthUnavailable:
@@ -171,6 +186,24 @@ func CodexCommand(c Context) string {
 		return "CODEX_HOME=" + ShellQuote(c.CodexHome) + " " + bin
 	}
 	return bin
+}
+
+// ReciteCommand renders `recite <args>` for the context: the executable and
+// CODEX_HOME in force become --codex-bin and --codex-home, shell-quoted, so the
+// command inspects the same Codex sign-in. A context whose source is codex
+// adds --auth-source codex.
+func ReciteCommand(c Context, args string) string {
+	cmd := "recite"
+	if c.CodexBin != "" {
+		cmd += " --codex-bin " + ShellQuote(c.CodexBin)
+	}
+	if c.CodexHome != "" {
+		cmd += " --codex-home " + ShellQuote(c.CodexHome)
+	}
+	if c.Source == SourceCodex {
+		cmd += " --auth-source codex"
+	}
+	return cmd + " " + args
 }
 
 // ShellQuote quotes s for a POSIX shell, leaving it bare when that is safe.

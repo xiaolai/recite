@@ -2,5 +2,5 @@ Codex could not report a usable sign-in.
   See Codex's own message:
       CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' login status
   For details:
-      recite doctor
+      recite --codex-bin '/opt/codex tools/bin/codex' --codex-home /srv/codex-home --auth-source codex doctor
 More help: https://learn.chatgpt.com/docs/auth
