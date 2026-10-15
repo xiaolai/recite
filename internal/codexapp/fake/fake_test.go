@@ -438,3 +438,45 @@ func TestBuildToRelativeDir(t *testing.T) {
 		t.Fatalf("no executable at %s: %v", got, err)
 	}
 }
+
+// Like Codex, the fake answers nothing but initialize until the handshake is complete, so a
+// client that skips or reorders it fails here too.
+func TestHandshakeRequired(t *testing.T) {
+	c := start(t)
+	if r := c.mustCall("getAuthStatus", map[string]any{"includeToken": false}); r.Error == nil || r.Error.Code != -32002 {
+		t.Fatalf("getAuthStatus before initialize: %+v", r.Error)
+	}
+	if r := c.mustCall("initialize", map[string]any{"clientInfo": map[string]any{"name": "recite"}}); r.Error != nil {
+		t.Fatalf("initialize: %+v", r.Error)
+	}
+	if r := c.mustCall("getAuthStatus", map[string]any{"includeToken": false}); r.Error == nil || r.Error.Code != -32002 {
+		t.Fatalf("getAuthStatus before initialized: %+v", r.Error)
+	}
+	c.notify("initialized")
+	if _, r := c.status(false, false); r.Error != nil {
+		t.Fatalf("getAuthStatus after the handshake: %+v", r.Error)
+	}
+}
+
+// Params of the wrong type are refused, never read as the zero value.
+func TestMalformedParamsRefused(t *testing.T) {
+	c := start(t)
+	c.handshake()
+	r := c.mustCall("getAuthStatus", map[string]any{"includeToken": true, "refreshToken": "true"})
+	if r.Error == nil || r.Error.Code != -32602 {
+		t.Fatalf("a string refreshToken: error %+v", r.Error)
+	}
+}
+
+// FAKECODEX_REQUIRES_OPENAI_AUTH=false reports a provider that needs no OpenAI sign-in.
+func TestRequiresOpenAIAuthFalse(t *testing.T) {
+	c := start(t, "FAKECODEX_REQUIRES_OPENAI_AUTH=false")
+	c.handshake()
+	r := c.mustCall("getAuthStatus", map[string]any{"includeToken": false})
+	var res struct {
+		RequiresOpenaiAuth *bool `json:"requiresOpenaiAuth"`
+	}
+	if r.Error != nil || json.Unmarshal(r.Result, &res) != nil || res.RequiresOpenaiAuth == nil || *res.RequiresOpenaiAuth {
+		t.Fatalf("reply %+v", r)
+	}
+}

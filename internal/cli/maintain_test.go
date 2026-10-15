@@ -266,10 +266,30 @@ func TestCacheMaintenanceRefusesUnsafeRoots(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	if r := maintainRun(t, map[string]string{"RECITE_CACHE_DIR": link}, "cache", "clear", "--yes"); r.code != ExitUsage {
-		t.Fatalf("symlinked root: exit %d", r.code)
+	// "link/" and "link/." name the link too: the kernel would resolve it before any check.
+	for _, root := range []string{link, link + "/", link + "/."} {
+		if r := maintainRun(t, map[string]string{"RECITE_CACHE_DIR": root}, "cache", "clear", "--yes"); r.code != ExitUsage {
+			t.Fatalf("symlinked root %q: exit %d", root, r.code)
+		}
 	}
 	if items, _ := cache.Scan(target); len(items) != 1 {
 		t.Fatalf("the symlink's target lost takes: %d left", len(items))
+	}
+}
+
+// An omitted ordinaryUsageAllowed is reported as unknown, as JSON null and as "not reported",
+// never as a denial; an explicit false stays false.
+func TestUsagePlanPermissionUnknown(t *testing.T) {
+	for _, tc := range []struct{ usage, json, text string }{
+		{"omit", `"ordinary_usage_allowed":null`, "ordinary usage allowed: not reported"},
+		{"false", `"ordinary_usage_allowed":false`, "ordinary usage allowed: no"},
+	} {
+		t.Setenv("FAKECODEX_ORDINARY_USAGE", tc.usage)
+		if r := maintainRun(t, usageEnv(t), "--json", "usage"); r.code != 0 || !strings.Contains(r.stdout, tc.json) {
+			t.Fatalf("%s: code %d stdout %s", tc.usage, r.code, r.stdout)
+		}
+		if r := maintainRun(t, usageEnv(t), "usage"); r.code != 0 || !strings.Contains(r.stdout, tc.text) {
+			t.Fatalf("%s: code %d stdout %s", tc.usage, r.code, r.stdout)
+		}
 	}
 }

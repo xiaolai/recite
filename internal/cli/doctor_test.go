@@ -375,3 +375,32 @@ func TestDoctorConfigErrorStillChecksState(t *testing.T) {
 		t.Fatalf("state line %q", l)
 	}
 }
+
+// An omitted ordinaryUsageAllowed is not a denial: doctor reports the plan as ok, and only an
+// explicit false is the "not allowed" warning.
+func TestDoctorPlanOmittedPermissionIsNotADenial(t *testing.T) {
+	for _, tc := range []struct{ usage, status string }{{"omit", checkOK}, {"false", checkWarn}} {
+		t.Setenv("FAKECODEX_ORDINARY_USAGE", tc.usage)
+		r := newDoctorEnv(t).run()
+		if l := line(t, r.stdout, "plan"); !strings.HasPrefix(l, tc.status) {
+			t.Fatalf("ordinaryUsageAllowed %s: plan line %q", tc.usage, l)
+		}
+	}
+}
+
+// A stale --codex-bin is named, with the override to fix, not only "not found" and an install
+// command that cannot repair it.
+func TestDoctorNamesTheMissingOverride(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "no-such", "codex")
+	var out, errb bytes.Buffer
+	c := New(&out, &errb)
+	env := map[string]string{"RECITE_CACHE_DIR": filepath.Join(dir, "cache"), "XDG_STATE_HOME": filepath.Join(dir, "state")}
+	c.Getenv = func(k string) string { return env[k] }
+	c.Now = func() time.Time { return cliNow }
+	c.Run([]string{"--codex-bin", missing, "--codex-home", t.TempDir(), "--auth-source", "codex", "doctor"})
+	l := line(t, out.String(), "codex")
+	if !strings.Contains(l, missing) || !strings.Contains(out.String(), "--codex-bin") {
+		t.Fatalf("codex check:\n%s", out.String())
+	}
+}

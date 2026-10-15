@@ -26,7 +26,10 @@ func FormatPlan(rl codexapp.RateLimits) string {
 			strconv.FormatFloat(w.UsedPercent, 'f', -1, 64), reset)
 	}
 	allowed := "no"
-	if rl.OrdinaryUsageAllowed {
+	switch {
+	case !rl.OrdinaryUsageKnown: // Codex omitted the field: not a denial
+		allowed = "not reported"
+	case rl.OrdinaryUsageAllowed:
 		allowed = "yes"
 	}
 	fmt.Fprintf(&b, "  ordinary usage allowed: %s\n", allowed)

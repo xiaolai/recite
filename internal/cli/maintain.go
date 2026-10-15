@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -53,7 +54,13 @@ func setupUsage(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite usage: %d ledger lines could not be read and are left out", res.Bad)
 		}
 		rows := usage.Summarize(res.Entries, from)
-		rl, planErr := c.codexPlan()
+		ctx, interrupted, done := c.interruptible()
+		rl, planErr := c.codexPlan(ctx)
+		done()
+		if interrupted() {
+			c.errorf("recite: interrupted; no output was written")
+			return ExitInterrupted
+		}
 		if c.globals.JSON {
 			ev := usageEvent{Event: "usage", Rows: rows, PriceNote: usage.ListPrices.Label(), PlanError: planErr}
 			if planErr == "" {
@@ -83,7 +90,7 @@ type usageEvent struct {
 // planStatus is the Codex plan status of `usage --json`: plan type and windows only.
 type planStatus struct {
 	PlanType             string       `json:"plan_type"`
-	OrdinaryUsageAllowed bool         `json:"ordinary_usage_allowed"`
+	OrdinaryUsageAllowed *bool        `json:"ordinary_usage_allowed"` // null: Codex did not report it
 	Windows              []planWindow `json:"windows"`
 }
 
@@ -95,7 +102,11 @@ type planWindow struct {
 }
 
 func planJSON(rl codexapp.RateLimits) *planStatus {
-	p := &planStatus{PlanType: orUnknown(rl.PlanType), OrdinaryUsageAllowed: rl.OrdinaryUsageAllowed, Windows: []planWindow{}}
+	p := &planStatus{PlanType: orUnknown(rl.PlanType), Windows: []planWindow{}}
+	if rl.OrdinaryUsageKnown {
+		allowed := rl.OrdinaryUsageAllowed
+		p.OrdinaryUsageAllowed = &allowed
+	}
 	for _, w := range rl.Windows {
 		pw := planWindow{Name: w.Name, UsedPercent: w.UsedPercent, WindowMins: w.WindowMins}
 		if !w.ResetsAt.IsZero() {
@@ -109,8 +120,7 @@ func planJSON(rl codexapp.RateLimits) *planStatus {
 
 // codexPlan reads the plan status through the Codex app-server. A failure is reported in the
 // output, not as an exit code: the local summary is still the answer.
-func (c *CLI) codexPlan() (codexapp.RateLimits, string) {
-	ctx := context.Background()
+func (c *CLI) codexPlan(ctx context.Context) (codexapp.RateLimits, string) {
 	st := c.probe(ctx, false) // the plan status comes from PlanStatus
 	defer func() { _ = st.Close() }()
 	rl, ok, err := st.PlanStatus(ctx)
@@ -197,6 +207,8 @@ func (c *CLI) cacheRoot() (string, error) {
 	if err := absPath(root); err != nil {
 		return "", fmt.Errorf("%s: %w", from, err)
 	}
+	// One clean path from here on: "link/" or "link/." would resolve the link before any check.
+	root = filepath.Clean(root)
 	// The cache refuses a symlinked or foreign directory; maintenance must not follow one either.
 	if _, err := fsx.CheckPrivate(root, "takes"); err != nil {
 		return "", err
@@ -241,16 +253,18 @@ func (c *CLI) cacheRemove(root, verb string, pick func([]cache.Item) []cache.Ite
 		c.errorf("recite cache %s: %v", verb, err)
 		return exitcode.Internal
 	}
-	var n int
+	picked := pick(items)
+	keys := make([]string, len(picked))
 	var freed int64
-	for _, it := range pick(items) {
-		if err := cache.Remove(root, it.Key); err != nil {
-			c.errorf("recite cache %s: %v", verb, err)
-			return exitcode.Internal
-		}
-		n++
+	for i, it := range picked {
+		keys[i] = it.Key
 		freed += it.Size
 	}
+	if err := cache.RemoveKeys(root, keys); err != nil {
+		c.errorf("recite cache %s: %v", verb, err)
+		return exitcode.Internal
+	}
+	n := len(picked)
 	left := len(items) - n
 	if c.globals.JSON {
 		return c.emit(struct {

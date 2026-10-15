@@ -20,6 +20,12 @@
 //	FAKECODEX_LOGIN_SETS    the mode `login` writes into FAKECODEX_STATE_FILE
 //	FAKECODEX_CONFIG_STORE  when set, `config/read` reports it as cli_auth_credentials_store;
 //	                        unset, `config/read` is an unknown method
+//	FAKECODEX_REQUIRES_OPENAI_AUTH  "false" makes getAuthStatus report requiresOpenaiAuth: false
+//	FAKECODEX_ORDINARY_USAGE        "false" reports ordinaryUsageAllowed: false; "omit" leaves it out
+//
+// Like Codex, the app-server answers only initialize until the client has sent initialize and
+// then the initialized notification (-32002 otherwise), and refuses params of the wrong type
+// (-32602).
 package fake
 
 import (

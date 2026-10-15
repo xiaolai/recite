@@ -153,6 +153,11 @@ func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 		}
 	case StateNoSignInFile:
 		g.Message = "There is no auth.json to read the ChatGPT sign-in from. Codex may keep it in the system keychain, which only Codex can read."
+		if c.Source == SourceCodex {
+			// Codex was asked already and pointed at the file store: asking it again repeats this.
+			g.Steps = []Step{{Text: "Sign in with Codex:", Command: codex + " login"}}
+			break
+		}
 		g.Steps = []Step{
 			{Text: "Let recite ask Codex instead:", Command: ReciteCommand(Context{CodexBin: c.CodexBin, CodexHome: c.CodexHome, Source: SourceCodex}, "auth status")},
 			{Text: "or sign in with Codex:", Command: codex + " login"},

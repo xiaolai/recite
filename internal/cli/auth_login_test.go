@@ -191,3 +191,48 @@ func TestAuthLoginAfterConfigReadFileFallback(t *testing.T) {
 		t.Fatalf("--auth-source file: code %d stderr %q", code, errb.String())
 	}
 }
+
+// A login cannot lift a managed provider or a Codex that does not report its sign-in: the guide
+// is printed and Codex is not run.
+// accept: AUTH-08#4
+func TestAuthLoginLeavesUnrepairableStatesAlone(t *testing.T) {
+	for _, tc := range []struct{ mode, env, state string }{
+		{"chatgpt", "FAKECODEX_REQUIRES_OPENAI_AUTH=false", "provider-without-openai-auth"},
+		{"unknown-method", "", "app-server-auth-unavailable"},
+	} {
+		e := newLoginEnv(t, tc.mode, "chatgpt")
+		if k, v, ok := strings.Cut(tc.env, "="); ok {
+			t.Setenv(k, v)
+		}
+		r := e.run("auth", "login")
+		if r.code != exitcode.Auth {
+			t.Fatalf("%s: code %d stderr %q", tc.state, r.code, r.stderr)
+		}
+		if rec := e.loginRecord(); rec != "" {
+			t.Fatalf("%s: codex login or logout ran: %q", tc.state, rec)
+		}
+		if !strings.Contains(r.stderr, "More help: ") {
+			t.Fatalf("%s: no guide: %q", tc.state, r.stderr)
+		}
+	}
+}
+
+// The probe classifies a provider that needs no OpenAI sign-in from Codex's own reply, exits 3,
+// and never asks for the token.
+// accept: AUTH-07#1
+func TestProbeProviderWithoutOpenAIAuth(t *testing.T) {
+	t.Setenv("FAKECODEX_REQUIRES_OPENAI_AUTH", "false")
+	c, errb := gateCLI(t, "chatgpt")
+	rec := filepath.Join(t.TempDir(), "record")
+	t.Setenv("FAKECODEX_RECORD", rec)
+	if code := c.authStatus(); code != exitcode.Auth || !strings.Contains(errb.String(), "needs no OpenAI sign-in") {
+		t.Fatalf("code %d stderr %q", code, errb.String())
+	}
+	b, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"includeToken":true`) {
+		t.Fatal("the token was requested for a provider without OpenAI sign-in") // the record is never printed
+	}
+}

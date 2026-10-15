@@ -64,7 +64,13 @@ func setupDoctor(fs *flag.FlagSet, c *CLI) func([]string) int {
 			c.errorf("recite doctor: takes no arguments")
 			return ExitUsage
 		}
-		checks := c.doctor(context.Background(), deep)
+		ctx, interrupted, done := c.interruptible()
+		checks := c.doctor(ctx, deep)
+		done()
+		if interrupted() {
+			c.errorf("recite: interrupted; the checks were stopped and nothing was printed")
+			return ExitInterrupted
+		}
 		codes := make([]int, 0, len(checks))
 		for _, ch := range checks {
 			codes = append(codes, ch.Code)
@@ -78,7 +84,7 @@ func setupDoctor(fs *flag.FlagSet, c *CLI) func([]string) int {
 			if ch.Fix != "" {
 				line += fmt.Sprintf("%-4s  %-9s fix: %s\n", "", "", ch.Fix)
 			}
-			if _, err := io.WriteString(c.Stdout, secret.Scrub(line)); err != nil {
+			if _, err := io.WriteString(c.Stdout, terminalSafe(secret.Scrub(line))); err != nil {
 				return c.writeResult(err)
 			}
 		}
@@ -127,6 +133,10 @@ func (c *CLI) doctor(ctx context.Context, deep bool) []doctorCheck {
 // codexCheck is check 1: the executable and its version.
 func codexCheck(st *auth.Status) doctorCheck {
 	switch {
+	case st.State == auth.StateNoCodex && st.Context.MissingBin != "":
+		// Installing Codex cannot repair a stale override: say which one to fix.
+		return failCheck("codex", "the executable named by --codex-bin or RECITE_CODEX_BIN was not found: "+st.Context.MissingBin,
+			"correct or remove --codex-bin / RECITE_CODEX_BIN", st.ExitCode())
 	case st.State == auth.StateNoCodex:
 		g, _ := st.Guide()
 		return failCheck("codex", "not found", firstFix(g), st.ExitCode())
@@ -172,7 +182,7 @@ func planCheck(ctx context.Context, st *auth.Status) doctorCheck {
 		return warnCheck("plan", "Codex could not report the plan status: "+errMessage(err), auth.CodexCommand(st.Context)+" login status")
 	case !read:
 		return warnCheck("plan", "not checked: the plan status is read through the Codex app-server, and the auth source is file", "")
-	case !rl.OrdinaryUsageAllowed:
+	case rl.OrdinaryUsageKnown && !rl.OrdinaryUsageAllowed: // an omitted field is not a denial
 		return warnCheck("plan", "plan "+orUnknown(rl.PlanType)+": Codex reports that ordinary usage is not allowed now", "wait for the usage window to reset")
 	}
 	parts := []string{"plan " + orUnknown(rl.PlanType)}

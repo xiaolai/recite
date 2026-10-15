@@ -481,7 +481,10 @@
               "minLength": 1
             },
             "ordinary_usage_allowed": {
-              "type": "boolean"
+              "type": [
+                "boolean",
+                "null"
+              ]
             },
             "windows": {
               "type": "array",

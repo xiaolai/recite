@@ -153,6 +153,15 @@ func Probe(ctx context.Context, cfg ProbeConfig) *Status {
 	if home == "" {
 		home = cfg.Getenv("CODEX_HOME")
 	}
+	// codexauth reads auth.json only below an absolute home: "--codex-home ./profile" is resolved
+	// here, against recite's working directory, as the user meant it.
+	if home != "" && !filepath.IsAbs(home) {
+		abs, err := filepath.Abs(home)
+		if err != nil {
+			return &Status{Context: Context{CodexHome: home, Source: cfg.Source}, logger: cfg.Logger, State: StateCodexError, Err: fmt.Errorf("auth: resolve CODEX_HOME %q: %w", home, err)}
+		}
+		home = abs
+	}
 	st := &Status{Context: Context{CodexHome: home, Source: cfg.Source}, logger: cfg.Logger}
 	var source codexauth.Source
 	switch cfg.Source {

@@ -77,6 +77,27 @@ func (c *CLI) probe(ctx context.Context, withPlan bool) *auth.Status {
 // probeWatched is probe with SIGINT and SIGTERM handled as in withCredentials (RUN-03), so an
 // interrupt cancels the probe and its Codex children are reaped before recite exits. ok is
 // false when an interrupt arrived.
+// interruptible returns a context the first SIGINT or SIGTERM cancels, for a command with no
+// output worth draining (doctor, usage): cancelling ends any Codex child started under it.
+// interrupted reports whether a signal arrived; call done when the command is over.
+func (c *CLI) interruptible() (ctx context.Context, interrupted func() bool, done func()) {
+	sigs, unsubscribe := c.Signals()
+	intr, wctx, release := pipeline.WatchSignals(context.Background(), sigs, c.DrainTimeout, nil)
+	ctx, cancel := context.WithCancel(wctx)
+	go func() {
+		select {
+		case <-intr.Stop():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, intr.Interrupted, func() {
+		cancel()
+		release()
+		unsubscribe()
+	}
+}
+
 func (c *CLI) probeWatched(withPlan bool) (st *auth.Status, ok bool) {
 	sigs, unsubscribe := c.Signals()
 	defer unsubscribe()
@@ -147,9 +168,11 @@ func (c *CLI) authLogin(deviceAuth bool) int {
 		return ExitInterrupted
 	}
 	switch st.State {
-	case auth.StateAPIKey, auth.StateUnsupported, auth.StateNoCodex, auth.StateCodexTooOld:
+	case auth.StateAPIKey, auth.StateUnsupported, auth.StateNoCodex, auth.StateCodexTooOld,
+		auth.StateProviderWithoutOpenAIAuth, auth.StateAppServerAuthUnavailable:
 		// Changing how Codex itself signs in is the user's decision (api-key, unsupported-auth),
-		// and without a usable Codex there is nothing to run: print the guide instead.
+		// without a usable Codex there is nothing to run, and a login cannot lift a managed
+		// provider or a Codex that does not report its sign-in: print the guide instead.
 		defer func() { _ = st.Close() }()
 		g, _ := st.Guide()
 		_, _ = io.WriteString(c.Stderr, secret.Scrub(g.Text()))

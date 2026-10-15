@@ -118,7 +118,13 @@ func TestProbeEveryStateWithGolden(t *testing.T) {
 	for _, s := range []State{StateNoCodex, StateCodexTooOld, StateNotSignedIn, StateAPIKey, StateUnsupported, StateExpired, StateCodexError,
 		StateNoSignInFile, StateAppServerAuthUnavailable, StateProviderWithoutOpenAIAuth} {
 		t.Run("golden-"+string(s), func(t *testing.T) {
-			g, ok := GuideFor(s, fixed, "headers", "0.150.0")
+			ctx := fixed
+			if s == StateNoSignInFile {
+				// Under --auth-source codex this guide only says to sign in
+				// (TestNoSignInFileGuideUnderCodexSource); the golden keeps the file-source text.
+				ctx.Source = SourceFile
+			}
+			g, ok := GuideFor(s, ctx, "headers", "0.150.0")
 			if !ok {
 				t.Fatal("no guide")
 			}

@@ -137,3 +137,31 @@ func TestFileSourceNeverReadsAPIKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", fileKeyCanary)
 	wantState(t, probeFile(t, t.TempDir(), nil), StateNoSignInFile)
 }
+
+// A relative --codex-home is resolved against the working directory, not refused by codexauth.
+func TestFileSourceRelativeHome(t *testing.T) {
+	dir := writeAuth(t, chatgptFile(1800000000))
+	t.Chdir(filepath.Dir(dir))
+	st := probeFile(t, "./"+filepath.Base(dir), nil)
+	wantState(t, st, StateReady)
+	if !filepath.IsAbs(st.Context.CodexHome) {
+		t.Fatalf("CodexHome %q, want absolute", st.Context.CodexHome)
+	}
+}
+
+// Under --auth-source codex the missing-file guide does not send the user back to the same probe.
+func TestNoSignInFileGuideUnderCodexSource(t *testing.T) {
+	g, _ := GuideFor(StateNoSignInFile, Context{CodexBin: "codex", Source: SourceCodex}, "", "")
+	for _, s := range g.Steps {
+		if strings.Contains(s.Command, "auth status") {
+			t.Fatalf("guide repeats the probe: %+v", g.Steps)
+		}
+	}
+	if len(g.Steps) == 0 || !strings.HasSuffix(g.Steps[0].Command, " login") {
+		t.Fatalf("guide %+v, want a sign-in", g.Steps)
+	}
+	g, _ = GuideFor(StateNoSignInFile, Context{CodexBin: "codex", Source: SourceFile}, "", "")
+	if !strings.Contains(g.Steps[0].Command, "auth status") {
+		t.Fatalf("file-source guide %+v, want the Codex probe", g.Steps)
+	}
+}

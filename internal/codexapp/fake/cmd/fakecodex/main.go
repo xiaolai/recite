@@ -219,6 +219,9 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 	}
 	refreshed := false
 	leak := os.Getenv("FAKECODEX_LEAK")
+	// Codex answers nothing but initialize until the client has sent initialize and then the
+	// initialized notification; a client that skips or reorders them is refused here too.
+	initializeSeen, initialized := false, false
 	for sc.Scan() {
 		if err := recordRequest(sc.Bytes()); err != nil {
 			fmt.Fprintln(os.Stderr, "fakecodex: record:", err)
@@ -237,6 +240,13 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 			time.Sleep(delay())
 		}
 		if len(req.ID) == 0 { // notification, e.g. initialized
+			if req.Method == "initialized" && initializeSeen {
+				initialized = true
+			}
+			continue
+		}
+		if req.Method != "initialize" && !initialized {
+			reply(req.ID, nil, &rpcError{Code: -32002, Message: "Not initialized"})
 			continue
 		}
 		switch req.Method {
@@ -245,13 +255,17 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 			if version == "" {
 				version = "0.162.1"
 			}
+			initializeSeen = true
 			reply(req.ID, map[string]any{"userAgent": "fakecodex/" + version + " (fake; test)"}, nil)
 		case "getAuthStatus":
 			var p struct {
 				IncludeToken bool `json:"includeToken"`
 				RefreshToken bool `json:"refreshToken"`
 			}
-			_ = json.Unmarshal(req.Params, &p)
+			if len(req.Params) > 0 && json.Unmarshal(req.Params, &p) != nil {
+				reply(req.ID, nil, &rpcError{Code: -32602, Message: "Invalid params"})
+				continue
+			}
 			switch leak {
 			case "rpc-error":
 				reply(req.ID, nil, &rpcError{Code: -32000, Message: "store failed for " + canary()})
@@ -278,7 +292,9 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 				}
 			}
 			m, ok := authMethod(mode)
-			res := map[string]any{"authMethod": nil, "authToken": nil, "requiresOpenaiAuth": true}
+			// FAKECODEX_REQUIRES_OPENAI_AUTH=false is a managed provider that needs no OpenAI sign-in.
+			res := map[string]any{"authMethod": nil, "authToken": nil,
+				"requiresOpenaiAuth": os.Getenv("FAKECODEX_REQUIRES_OPENAI_AUTH") != "false"}
 			if ok {
 				res["authMethod"] = m
 				switch {
@@ -319,8 +335,16 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 				"credits":         map[string]any{"hasCredits": true, "unlimited": false, "balance": "1000.0000000000"},
 				"individualLimit": nil, "spendControlReached": false, "planType": "pro", "rateLimitReachedType": nil,
 			}
-			reply(req.ID, map[string]any{"ordinaryUsageAllowed": true, "rateLimits": limit,
-				"rateLimitsByLimitId": map[string]any{"codex": limit}}, nil)
+			res := map[string]any{"ordinaryUsageAllowed": true, "rateLimits": limit,
+				"rateLimitsByLimitId": map[string]any{"codex": limit}}
+			// FAKECODEX_ORDINARY_USAGE: "false" reports a denial, "omit" leaves the field out.
+			switch os.Getenv("FAKECODEX_ORDINARY_USAGE") {
+			case "false":
+				res["ordinaryUsageAllowed"] = false
+			case "omit":
+				delete(res, "ordinaryUsageAllowed")
+			}
+			reply(req.ID, res, nil)
 		case "config/read":
 			store := os.Getenv("FAKECODEX_CONFIG_STORE")
 			if store == "" {
