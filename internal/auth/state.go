@@ -292,8 +292,12 @@ func (s *Status) ExitCode() int {
 }
 
 // PlanStatus reads the Codex plan status (design §12.4 check 3, OBS-04) through a Codex child.
-// The file source has no app-server, so the call is skipped with a warning and ok is false.
+// Only a ready sign-in is asked (AUTH-07: nothing reaches Codex's account methods otherwise), and
+// the file source has no app-server, so the call is skipped with a warning; ok is false in both.
 func (s *Status) PlanStatus(ctx context.Context) (rl codexapp.RateLimits, ok bool, err error) {
+	if s.State != StateReady {
+		return codexapp.RateLimits{}, false, nil
+	}
 	if s.Context.Source != SourceCodex || s.Context.CodexBin == "" {
 		if s.logger != nil {
 			s.logger.Warn("Codex plan status skipped: it is read through the Codex app-server, and the auth source is file")

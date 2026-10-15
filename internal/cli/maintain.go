@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/cache"
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/fsx"
@@ -116,6 +117,8 @@ func (c *CLI) codexPlan() (codexapp.RateLimits, string) {
 	switch {
 	case err != nil:
 		return rl, "not read: " + errMessage(err)
+	case !ok && st.State != auth.StateReady:
+		return rl, "not read: the Codex sign-in is " + string(st.State)
 	case !ok:
 		return rl, "not read: it comes from the Codex app-server, which the current sign-in does not use (" + string(st.State) + ")"
 	}

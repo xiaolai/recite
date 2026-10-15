@@ -53,3 +53,17 @@ func TestPlanStatusSkippedForFileSource(t *testing.T) {
 		t.Fatalf("no warning: %q", logs.String())
 	}
 }
+
+// A sign-in that is not ready is never asked for its plan: no child, no account method.
+func TestPlanStatusSkippedWhenNotReady(t *testing.T) {
+	st, _, _ := run(t, 10*time.Second, "apikey")
+	wantState(t, st, StateAPIKey)
+	before := readRecord(t, getenvT(t, "FAKECODEX_RECORD"))
+	rl, ok, err := st.PlanStatus(context.Background())
+	if err != nil || ok || len(rl.Windows) != 0 {
+		t.Fatalf("not ready: %+v %v %v", rl, ok, err)
+	}
+	if after := readRecord(t, getenvT(t, "FAKECODEX_RECORD")); after != before {
+		t.Fatal("PlanStatus started Codex for a sign-in that is not ready")
+	}
+}
