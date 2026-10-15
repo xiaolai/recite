@@ -3,6 +3,7 @@ package fsx
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -37,6 +38,32 @@ func MkdirPrivate(root string, elems ...string) (string, error) {
 		}
 	}
 	return path, nil
+}
+
+// CheckPrivate checks, without creating or changing anything, that root and each of elems
+// below it is a directory owned by the user and not a symlink, the rule MkdirPrivate enforces.
+// A missing level ends the check: exists is false and err nil, since there is nothing below it.
+func CheckPrivate(root string, elems ...string) (exists bool, err error) {
+	path := root
+	for i := -1; i < len(elems); i++ {
+		if i >= 0 {
+			path = filepath.Join(path, elems[i])
+		}
+		fi, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("fsx: stat %s: %w", path, err)
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 || !fi.IsDir() {
+			return false, fmt.Errorf("fsx: %s is a symlink or not a directory: %w", path, ErrUnsafePath)
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
+			return false, fmt.Errorf("fsx: %s is owned by uid %d, not by you: %w", path, st.Uid, ErrUnsafePath)
+		}
+	}
+	return true, nil
 }
 
 // ensureDir creates path as 0700 if absent, opens it without following a

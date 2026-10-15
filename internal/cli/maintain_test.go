@@ -202,3 +202,74 @@ func TestParseSize(t *testing.T) {
 		}
 	}
 }
+
+// --since keeps the usage at or after the cutoff and drops what came before it.
+func TestUsageSinceCutoff(t *testing.T) {
+	state := t.TempDir()
+	dir := filepath.Join(state, "recite")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := cliNow.Add(-24 * time.Hour).UTC()
+	var ledger strings.Builder
+	for _, at := range []time.Time{cutoff.Add(-time.Second), cutoff, cutoff.Add(time.Hour)} {
+		fmt.Fprintf(&ledger, `{"time":%q,"command":"say","kind":"render","model":"gpt-realtime-2.1","chunk":"c0001","attempt":1,"output_tokens":100,"output_audio_tokens":100,"estimate_usd":0.0064,"price_note":"list price, not billed"}`+"\n",
+			at.Format(time.RFC3339))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "usage.jsonl"), []byte(ledger.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	renders := func(args ...string) int {
+		r := maintainRun(t, map[string]string{"XDG_STATE_HOME": state}, append([]string{"--json", "usage"}, args...)...)
+		var ev usageEvent
+		if r.code != ExitOK || json.Unmarshal([]byte(r.stdout), &ev) != nil {
+			t.Fatalf("exit %d: %s %s", r.code, r.stdout, r.stderr)
+		}
+		n := 0
+		for _, row := range ev.Rows {
+			n += row.Renders
+		}
+		return n
+	}
+	if n := renders(); n != 3 {
+		t.Fatalf("all usage: %d renders, want 3", n)
+	}
+	if n := renders("--since", "1d"); n != 2 {
+		t.Fatalf("--since 1d: %d renders, want 2 (the one before the cutoff dropped, the one at it kept)", n)
+	}
+}
+
+// clear takes no prune limits: it would remove every take whatever they said.
+func TestCacheClearRefusesPruneFlags(t *testing.T) {
+	env, root := cacheEnv(t)
+	putTake(t, root, 1, 100, cliNow)
+	for _, args := range [][]string{{"cache", "clear", "--yes", "--older-than", "30d"}, {"cache", "clear", "--yes", "--max-size", "1GB"}} {
+		if r := maintainRun(t, env, args...); r.code != ExitUsage {
+			t.Errorf("%v: exit %d", args, r.code)
+		}
+	}
+	if items, _ := cache.Scan(root); len(items) != 1 {
+		t.Fatalf("%d takes left, want 1", len(items))
+	}
+}
+
+// Maintenance refuses a relative root from any variable, and a symlinked cache, as the cache does.
+func TestCacheMaintenanceRefusesUnsafeRoots(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	if r := maintainRun(t, map[string]string{"XDG_CACHE_HOME": "rel"}, "cache", "clear", "--yes"); r.code != ExitUsage {
+		t.Fatalf("relative XDG_CACHE_HOME: exit %d", r.code)
+	}
+	target := t.TempDir()
+	putTake(t, target, 1, 100, cliNow)
+	link := filepath.Join(t.TempDir(), "cache-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if r := maintainRun(t, map[string]string{"RECITE_CACHE_DIR": link}, "cache", "clear", "--yes"); r.code != ExitUsage {
+		t.Fatalf("symlinked root: exit %d", r.code)
+	}
+	if items, _ := cache.Scan(target); len(items) != 1 {
+		t.Fatalf("the symlink's target lost takes: %d left", len(items))
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/xiaolai/recite/internal/cache"
 	"github.com/xiaolai/recite/internal/exitcode"
+	"github.com/xiaolai/recite/internal/fsx"
 	"github.com/xiaolai/recite/internal/usage"
 	"github.com/xiaolai/sayso/go/codexapp"
 	"github.com/xiaolai/sayso/go/secret"
@@ -164,6 +165,10 @@ func setupCache(fs *flag.FlagSet, c *CLI) func([]string) int {
 			}
 			return c.cacheRemove(root, "prune", func(items []cache.Item) []cache.Item { return cache.PrunePlan(items, cutoff, limit) })
 		case "clear":
+			if olderThan != "" || maxSize != "" {
+				c.errorf("recite cache clear: removes every take; --older-than and --max-size belong to prune")
+				return ExitUsage
+			}
 			if !yes {
 				c.errorf("recite cache clear: removes every take; run it again with --yes to confirm")
 				return ExitUsage
@@ -177,14 +182,21 @@ func setupCache(fs *flag.FlagSet, c *CLI) func([]string) int {
 
 // cacheRoot is the take cache root: RECITE_CACHE_DIR, else the platform default.
 func (c *CLI) cacheRoot() (string, error) {
-	root := c.Getenv("RECITE_CACHE_DIR")
+	root, from := c.Getenv("RECITE_CACHE_DIR"), "RECITE_CACHE_DIR"
 	if root == "" {
-		root = defaultCacheDir(c.Getenv)
-	} else if err := absPath(root); err != nil {
-		return "", fmt.Errorf("RECITE_CACHE_DIR: %w", err)
+		root, from = defaultCacheDir(c.Getenv), "the cache directory from HOME or XDG_CACHE_HOME"
 	}
 	if root == "" {
 		return "", errors.New("no cache directory: set HOME, XDG_CACHE_HOME or RECITE_CACHE_DIR")
+	}
+	// A relative root would make prune and clear delete under the working directory; the cache
+	// itself refuses one (cache.Open), so maintenance refuses it too, whichever variable gave it.
+	if err := absPath(root); err != nil {
+		return "", fmt.Errorf("%s: %w", from, err)
+	}
+	// The cache refuses a symlinked or foreign directory; maintenance must not follow one either.
+	if _, err := fsx.CheckPrivate(root, "takes"); err != nil {
+		return "", err
 	}
 	return root, nil
 }
