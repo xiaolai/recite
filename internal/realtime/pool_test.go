@@ -173,3 +173,21 @@ func TestPoolDiscardsSessionAfterServerError(t *testing.T) {
 		t.Fatalf("sessions %d %d %d, want 1 2 2", calls[0].Session, calls[1].Session, calls[2].Session)
 	}
 }
+
+// A fatal error ends the session whatever its class: session_expired as invalid-request too.
+func TestPoolDiscardsSessionAfterFatalError(t *testing.T) {
+	synth := fake.NewScriptedSynthesizer()
+	synth.On("c1", fake.Fail(&openai.Error{Class: openai.ClassInvalidRequest, Code: "session_expired", Fatal: true}))
+	p := newPool(t, synth, 1, nil)
+	for _, c := range []string{"c1", "c2"} {
+		l, err := p.Acquire(context.Background(), voiceSpec("marin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = l.Render(context.Background(), realtime.RenderRequest{ChunkID: c, Text: "hi"})
+		l.Release()
+	}
+	if calls := synth.Calls(); calls[0].Session != 1 || calls[1].Session != 2 {
+		t.Fatalf("sessions %d %d, want 1 2", calls[0].Session, calls[1].Session)
+	}
+}

@@ -190,37 +190,72 @@ func (ss *liveSession) render(ctx context.Context, req RenderRequest, attempt in
 	var take Take
 	var said []byte
 	gotAudio := false
+	// respID is the response this render started, once the server names it; responding is set
+	// from its first event on, after which the server is still streaming it if we stop reading.
+	respID, responding := "", false
+	other := func(id string) error {
+		if id == "" || respID == "" || id == respID {
+			return nil
+		}
+		ss.broken = &openai.Error{Class: openai.ClassProtocol,
+			Message: fmt.Sprintf("realtime: an event of response %q while rendering response %q", id, respID)}
+		return ss.broken
+	}
 	for {
 		ectx, ecancel := context.WithTimeoutCause(rctx, ss.idle, errIdle)
 		ev, err := ss.conn.Next(ectx)
-		cause := context.Cause(ectx)
+		// Read the deadline before ecancel, which would make every context look expired.
+		timedOut, cause := ectx.Err() != nil, context.Cause(ectx)
 		ecancel()
 		if err != nil {
-			if ev == nil && ectx.Err() != nil {
+			if ev == nil && timedOut {
 				return Take{}, ss.abandon(ctx, rctx, cause)
 			}
-			var oe *openai.Error
-			if errors.As(err, &oe) && oe.Class == openai.ClassProtocol {
-				ss.broken = err // a malformed event mid-response leaves its state unknown
-			}
+			// A malformed event leaves the response's state unknown, and a closed connection
+			// ends the session: neither may be reused.
+			ss.broken = err
 			return Take{}, err
 		}
 		switch e := ev.(type) {
+		case ResponseCreated:
+			if respID == "" {
+				respID = e.ResponseID
+			}
+			responding = true
 		case AudioDelta:
+			if err := other(e.ResponseID); err != nil {
+				return Take{}, err
+			}
+			responding = true
+			if len(e.PCM) == 0 {
+				continue // an empty delta is not audio
+			}
 			if !gotAudio {
 				take.FirstAudio = ss.now().Sub(start)
 				gotAudio = true
 			}
 			take.PCM = append(take.PCM, e.PCM...)
 		case TranscriptDelta:
+			if err := other(e.ResponseID); err != nil {
+				return Take{}, err
+			}
+			responding = true
 			said = append(said, e.Delta...)
 		case RateLimitsUpdated:
 			if ss.onRateLimits != nil {
 				ss.onRateLimits(e)
 			}
 		case ErrorEvent:
+			// A fatal error ends the session; one during a response the server is still
+			// streaming would leave its events for the next render to read.
+			if e.Err.Fatal || responding {
+				ss.broken = e.Err
+			}
 			return Take{}, e.Err
 		case ResponseDone:
+			if err := other(e.ResponseID); err != nil {
+				return Take{}, err
+			}
 			if got := e.Metadata["chunk"]; got != req.ChunkID {
 				return Take{}, &openai.Error{Class: openai.ClassProtocol,
 					Message: fmt.Sprintf("response.done for chunk %q while rendering %q", got, req.ChunkID)}

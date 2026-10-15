@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -354,4 +355,52 @@ func TestEstimateDuration(t *testing.T) {
 	if a, b := realtime.EstimateDuration("abcdefghijklmn", 1.5), realtime.EstimateDuration("abcdefghijklmn", 1); a >= b {
 		t.Errorf("speed 1.5 estimate %v not shorter than %v", a, b)
 	}
+}
+
+// A connection that drops mid-response fails the render and the session; it is never an empty
+// successful take.
+func TestRenderDisconnectMidResponseFails(t *testing.T) {
+	ss := open(t, newSynth(t, fake.NewServer(t, loadScenario(t, "speak"), fake.WithCloseAfter(2)), newStatic()))
+	take, err := ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "Hello from recite."})
+	if err == nil {
+		t.Fatalf("a dropped connection returned a take of %d bytes and no error", len(take.PCM))
+	}
+	if _, err := ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "again"}); err == nil {
+		t.Fatal("the session stayed usable after its connection dropped")
+	}
+}
+
+// An error event while the response streams leaves the session unusable, so a retry on it
+// cannot read the abandoned response's events.
+func TestRenderErrorMidResponseRetiresTheSession(t *testing.T) {
+	ss := open(t, newSynth(t, fake.NewServer(t, loadScenario(t, "speak"), fake.WithErrorEvent(3, "rate_limit_exceeded")), newStatic()))
+	_, err := ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "Hello from recite."})
+	wantClass(t, err, openai.ClassRateLimited)
+	if _, err := ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "again"}); err == nil ||
+		!strings.Contains(err.Error(), "unusable") {
+		t.Fatalf("second render on the same session: %v", err)
+	}
+}
+
+// An empty audio delta is not audio: a response that completes with only empty deltas is the
+// "completed without audio" protocol fault.
+func TestRenderEmptyAudioDeltaIsNoAudio(t *testing.T) {
+	sc, err := fake.ParseScenarioFile(filepath.Join("testdata", "render-empty-audio.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss := open(t, newSynth(t, fake.NewServer(t, sc), newStatic()))
+	_, err = ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "Hello."})
+	wantClass(t, err, openai.ClassProtocol)
+}
+
+// An event of another response inside a render is a protocol fault, not audio of this one.
+func TestRenderOtherResponseIsProtocol(t *testing.T) {
+	sc, err := fake.ParseScenarioFile(filepath.Join("testdata", "render-other-response.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss := open(t, newSynth(t, fake.NewServer(t, sc), newStatic()))
+	_, err = ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "Hello."})
+	wantClass(t, err, openai.ClassProtocol)
 }

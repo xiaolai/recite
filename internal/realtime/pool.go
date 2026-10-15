@@ -192,8 +192,11 @@ func (l *Lease) Render(ctx context.Context, req RenderRequest) (Take, error) {
 	l.s.renders++
 	l.p.mu.Unlock()
 	if err != nil {
-		switch openai.Classify(err) {
-		case openai.ClassRateLimited, openai.ClassInvalidRequest:
+		var oe *openai.Error
+		switch fatal := errors.As(err, &oe) && oe.Fatal; {
+		case fatal:
+			l.discard = true // session_expired, session_not_found and the like end it whatever the class
+		case openai.Classify(err) == openai.ClassRateLimited, openai.Classify(err) == openai.ClassInvalidRequest:
 			// The session itself is fine.
 		default:
 			l.discard = true
