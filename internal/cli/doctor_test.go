@@ -339,3 +339,39 @@ func TestDoctorRejectsSymlinkedCacheDir(t *testing.T) {
 		t.Fatal("the cache accepted the symlinked directory too; the test no longer pins the shared rule")
 	}
 }
+
+// The auth line names what Codex actually did, not only the state.
+func TestDoctorAuthLineNamesTheCause(t *testing.T) {
+	e := newDoctorEnv(t)
+	e.mode = "rpc-error"
+	r := e.run()
+	l := line(t, r.stdout, "auth")
+	if !strings.HasPrefix(l, checkFail) || !strings.Contains(l, "-32000") {
+		t.Fatalf("auth line %q, want the JSON-RPC failure", l)
+	}
+}
+
+// A sign-in refused at the mint after the probe passed gets the login guide, not a network hint.
+func TestDoctorRouteSignInFailureGetsTheGuide(t *testing.T) {
+	e := newDoctorEnv(t)
+	e.srv = rtfake.NewServer(t, speakScenario(t), rtfake.WithMintError(401))
+	r := e.run()
+	l := line(t, r.stdout, "route")
+	if !strings.HasPrefix(l, checkFail) || strings.Contains(r.stdout, "check the network connection") ||
+		!strings.Contains(r.stdout, auth.ShellQuote(fakeCodex)+" login") {
+		t.Fatalf("route line %q:\n%s", l, r.stdout)
+	}
+}
+
+// A config error fails the cache line and still checks the state directory.
+func TestDoctorConfigErrorStillChecksState(t *testing.T) {
+	e := newDoctorEnv(t)
+	e.env["RECITE_JOBS"] = "0"
+	r := e.run()
+	if l := line(t, r.stdout, "cache"); !strings.HasPrefix(l, checkFail) {
+		t.Fatalf("cache line %q", l)
+	}
+	if l := line(t, r.stdout, "state"); !strings.HasPrefix(l, checkOK) {
+		t.Fatalf("state line %q", l)
+	}
+}

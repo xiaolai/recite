@@ -92,6 +92,8 @@ func setupDoctor(fs *flag.FlagSet, c *CLI) func([]string) int {
 func (c *CLI) doctor(ctx context.Context, deep bool) []doctorCheck {
 	st := c.probe(ctx, true) // the auth line shows the plan
 	defer func() { _ = st.Close() }()
+	c.authCtx = &st.Context // a sign-in failure in a later check gets the guide for this Codex
+	defer func() { c.authCtx = nil }()
 	checks := []doctorCheck{codexCheck(st)}
 	authCheck := c.authCheck(st)
 	checks = append(checks, authCheck)
@@ -145,7 +147,11 @@ func (c *CLI) authCheck(st *auth.Status) doctorCheck {
 		return warnCheck("auth", "not checked: Codex is not usable (see the codex line)", "")
 	default:
 		g, _ := st.Guide()
-		return failCheck("auth", string(st.State)+": "+g.Message, guideFix(g), st.ExitCode())
+		detail := string(st.State) + ": " + g.Message
+		if st.Err != nil { // what Codex or the file actually did: a timeout, malformed data, an unusable file
+			detail += " (" + secret.Scrub(st.Err.Error()) + ")"
+		}
+		return failCheck("auth", detail, guideFix(g), st.ExitCode())
 	}
 	if st.Expires.IsZero() { // the token carries no expiry; the API decides
 		return okCheck("auth", "chatgpt, plan "+orUnknown(st.Plan)+", token expiry unknown")
@@ -190,12 +196,12 @@ func (c *CLI) routeCheck(ctx context.Context, creds *auth.Credentials) (doctorCh
 	start := time.Now() // timing only; never asserted
 	sess, err := synth.Open(ctx, spec)
 	if err != nil {
-		return failCheck("route", routeFailure(err), routeFix(err), openai.ExitCode(err)), nil
+		return failCheck("route", routeFailure(err), c.routeFix(err), openai.ExitCode(err)), nil
 	}
 	if a, ok := sess.(realtime.CreatedAwaiter); ok {
 		if err := a.AwaitCreated(ctx); err != nil {
 			_ = sess.Close()
-			return failCheck("route", routeFailure(err), routeFix(err), openai.ExitCode(err)), nil
+			return failCheck("route", routeFailure(err), c.routeFix(err), openai.ExitCode(err)), nil
 		}
 	}
 	return okCheck("route", fmt.Sprintf("speech secret minted, session opened (%s, %s)", spec.Model, time.Since(start).Round(time.Millisecond))), sess
@@ -209,8 +215,12 @@ func routeFailure(err error) string {
 	return "the speech session could not be opened: " + err.Error() // the cause names the refusal; output is scrubbed
 }
 
-// routeFix never suggests signing in for a route denial: the sign-in works (AUTH-07).
-func routeFix(err error) string {
+// routeFix never suggests signing in for a route denial: the sign-in works (AUTH-07). A sign-in
+// that failed after the probe passed gets the login guide for the probed Codex.
+func (c *CLI) routeFix(err error) string {
+	if g, ok := c.runtimeGuide(err); ok {
+		return guideFix(g)
+	}
 	switch openai.Classify(err) {
 	case openai.ClassRouteDenied:
 		return "the route may have closed; check for a newer recite"
@@ -227,7 +237,7 @@ func (c *CLI) deepCheck(ctx context.Context, creds *auth.Credentials, sess realt
 	take, err := sess.Render(ctx, realtime.RenderRequest{ChunkID: "doctor", Text: doctorSentence,
 		Effort: realtime.DefaultEffort, Attempt: 1, Estimate: estimate})
 	if err != nil {
-		return failCheck("deep", "render failed: "+errMessage(err), routeFix(err), openai.ExitCode(err))
+		return failCheck("deep", "render failed: "+errMessage(err), c.routeFix(err), openai.ExitCode(err))
 	}
 	rendered := time.Since(start)
 	// The audio guards (status, empty, duration) need no STT: a take they reject is a speech
@@ -253,7 +263,7 @@ func (c *CLI) deepCheck(ctx context.Context, creds *auth.Credentials, sess realt
 	defer func() { _ = closeTr() }()
 	t, err := tr.Transcribe(ctx, take.PCM, stt.Hint{Languages: []string{"en"}})
 	if err != nil {
-		return sttProblem("transcription failed: "+errMessage(err), routeFix(err), openai.ExitCode(err))
+		return sttProblem("transcription failed: "+errMessage(err), c.routeFix(err), openai.ExitCode(err))
 	}
 	res := verify.Score(doctorSentence, t.Text, verify.ScriptMetric(doctorSentence))
 	detail := fmt.Sprintf("score %.3f, render %s, transcription %s", res.Score,
@@ -305,7 +315,9 @@ func (c *CLI) dirChecks() []doctorCheck {
 	if st, err := c.resolveSettings(newFlagSet("doctor-settings"), nil); err == nil {
 		cacheDir = st.Get("cache_dir").Raw
 	} else {
-		return []doctorCheck{failCheck("cache", "config: "+err.Error(), "fix the config file (recite config path)", exitcode.Usage)}
+		// The state directory does not depend on the config: still check it.
+		return []doctorCheck{failCheck("cache", "config: "+err.Error(), "fix the config file (recite config path)", exitcode.Usage),
+			dirCheck("state", c.stateDir())}
 	}
 	return []doctorCheck{dirCheck("cache", cacheDir), dirCheck("state", c.stateDir())}
 }
