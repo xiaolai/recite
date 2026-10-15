@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
+	"github.com/xiaolai/recite/internal/cache"
 	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
@@ -318,5 +319,23 @@ func TestDoctorAuthFixKeepsTheWholeGuide(t *testing.T) {
 		if !strings.Contains(r.stdout, want) {
 			t.Fatalf("doctor output lacks %q:\n%s", want, r.stdout)
 		}
+	}
+}
+
+// A symlinked cache directory fails doctor, as it fails the cache itself (fsx.MkdirPrivate).
+func TestDoctorRejectsSymlinkedCacheDir(t *testing.T) {
+	e := newDoctorEnv(t)
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "cache-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	e.env["RECITE_CACHE_DIR"] = link
+	r := e.run()
+	if l := line(t, r.stdout, "cache"); !strings.HasPrefix(l, checkFail) || !strings.Contains(l, "symlink") {
+		t.Fatalf("cache line %q, want a failure naming the symlink", l)
+	}
+	if _, err := cache.Open(link, nil); err == nil {
+		t.Fatal("the cache accepted the symlinked directory too; the test no longer pins the shared rule")
 	}
 }

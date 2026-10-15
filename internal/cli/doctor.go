@@ -13,6 +13,7 @@ import (
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/exitcode"
+	"github.com/xiaolai/recite/internal/fsx"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/stt"
@@ -319,9 +320,11 @@ func dirCheck(name, dir string) doctorCheck {
 	return okCheck(name, dir+" writable")
 }
 
-// writable creates dir when missing (0700, like the cache) and writes and removes a probe file.
+// writable checks dir the way the cache and the usage ledger open it (fsx.MkdirPrivate: created
+// 0700 when missing, never a symlink, owned by the user), then writes, syncs and removes a probe
+// file with data in it, so a filesystem that creates files but refuses their data fails here.
 func writable(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if _, err := fsx.MkdirPrivate(dir); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(dir, ".doctor-*")
@@ -329,11 +332,17 @@ func writable(dir string) error {
 		return err
 	}
 	name := f.Name()
-	cerr := f.Close()
-	if rerr := os.Remove(name); cerr == nil {
-		cerr = rerr
+	_, err = f.Write([]byte("recite doctor write probe\n"))
+	if err == nil {
+		err = f.Sync()
 	}
-	return cerr
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if rerr := os.Remove(name); err == nil {
+		err = rerr
+	}
+	return err
 }
 
 // guideFix is the whole guide on one line: every step's explanation and command, in order, so a
