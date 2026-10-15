@@ -19,6 +19,7 @@ import (
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/sayso/go/codexapp"
+	"github.com/xiaolai/sayso/go/codexauth"
 	"github.com/xiaolai/sayso/go/secret"
 )
 
@@ -73,11 +74,27 @@ func (c *CLI) probe(ctx context.Context, withPlan bool) *auth.Status {
 	return st
 }
 
+// probeWatched is probe with SIGINT and SIGTERM handled as in withCredentials (RUN-03), so an
+// interrupt cancels the probe and its Codex children are reaped before recite exits. ok is
+// false when an interrupt arrived.
+func (c *CLI) probeWatched(withPlan bool) (st *auth.Status, ok bool) {
+	sigs, unsubscribe := c.Signals()
+	defer unsubscribe()
+	intr, ctx, release := pipeline.WatchSignals(context.Background(), sigs, c.DrainTimeout, nil)
+	defer release()
+	st = c.probe(ctx, withPlan)
+	return st, !intr.Interrupted()
+}
+
 // authStatus is `recite auth status` (AUTH-06). It prints the state, never the
 // token, email or account ID; exit 0 only when ready.
 func (c *CLI) authStatus() int {
-	st := c.probe(context.Background(), true)
+	st, ok := c.probeWatched(true)
 	defer func() { _ = st.Close() }()
+	if !ok {
+		c.errorf("recite: interrupted; no output was written")
+		return ExitInterrupted
+	}
 	if c.globals.JSON {
 		if g, ok := st.Guide(); ok {
 			return c.emit(g.Event(), st.ExitCode())
@@ -121,7 +138,14 @@ func (c *CLI) authLogin(deviceAuth bool) int {
 		c.errorf("recite auth login: stdin is not a terminal; the Codex sign-in is interactive. Run it in a terminal")
 		return ExitUsage
 	}
-	st := c.probe(context.Background(), false) // the status printed after the login reads the plan
+	// The signal handling ends with the probe: the interactive login that follows is Codex's own,
+	// attached to the terminal, which delivers the user's Ctrl-C to it.
+	st, ok := c.probeWatched(false) // the status printed after the login reads the plan
+	if !ok {
+		_ = st.Close()
+		c.errorf("recite: interrupted; Codex was not started")
+		return ExitInterrupted
+	}
 	switch st.State {
 	case auth.StateAPIKey, auth.StateUnsupported, auth.StateNoCodex, auth.StateCodexTooOld:
 		// Changing how Codex itself signs in is the user's decision (api-key, unsupported-auth),
@@ -250,6 +274,8 @@ func (c *CLI) withCredentials(fn func(ctx context.Context, creds *auth.Credentia
 	defer func() { c.intr = nil }()
 	st := c.probe(ctx, false)
 	defer func() { _ = st.Close() }()
+	c.authCtx = &st.Context
+	defer func() { c.authCtx = nil }()
 	if intr.Interrupted() {
 		// A probe the interrupt cut short is not a sign-in problem: exit 130, not a login guide.
 		c.errorf("recite: interrupted; no output was written")
@@ -284,6 +310,36 @@ func notifySignals() (<-chan os.Signal, func()) {
 	return ch, func() { signal.Stop(ch) }
 }
 
+// runtimeGuide is the login guide for a sign-in failure that comes after the probe passed: a
+// refresh that did not renew the token, or a Codex that failed mid-run. It is rendered from the
+// probed context, as the probe's own guide is (AUTH-07), so its commands name the Codex in use.
+func (c *CLI) runtimeGuide(err error) (auth.Guide, bool) {
+	if c.authCtx == nil {
+		return auth.Guide{}, false
+	}
+	var ce *codexauth.Error
+	if errors.As(err, &ce) && ce.State != auth.StateReady {
+		return auth.GuideFor(ce.State, *c.authCtx, ce.Mode, ce.CodexVersion)
+	}
+	switch openai.Classify(err) {
+	case openai.ClassAuthExpired:
+		return auth.GuideFor(auth.StateExpired, *c.authCtx, "", "")
+	case openai.ClassCodexError:
+		return auth.GuideFor(auth.StateCodexError, *c.authCtx, "", "")
+	}
+	return auth.Guide{}, false
+}
+
+// reportGuide prints a runtime login guide, or emits it as an auth_error event with --json, and
+// returns the auth exit code.
+func (c *CLI) reportGuide(g auth.Guide) int {
+	if c.globals.JSON {
+		return c.emit(g.Event(), exitcode.Auth)
+	}
+	_, _ = io.WriteString(c.Stderr, secret.Scrub(g.Text()))
+	return exitcode.Auth
+}
+
 // reportFailure prints err for the user and returns its exit code. Messages
 // come from openai.Error.Message, not Error(), which carries a prefix. Route
 // denial is not a login problem, so it never suggests signing in (AUTH-07).
@@ -314,10 +370,20 @@ func (c *CLI) reportFailure(err error) int {
 			return coded.ExitCode()
 		}
 	}
+	// The message below is the user's wording; the whole chain (chunk, cause, status, provider
+	// code, request id) goes to the debug log, scrubbed, so --verbose can still diagnose it.
+	c.Logger.Debug("failure", "err", secret.Scrub(err.Error()))
 	var e *openai.Error
 	if !errors.As(err, &e) {
 		c.errorf("recite: %v", err)
+		if g, ok := c.runtimeGuide(err); ok {
+			return c.reportGuide(g)
+		}
 		return openai.ExitCode(err)
+	}
+	if g, ok := c.runtimeGuide(err); ok {
+		c.errorf("recite: %s: %s", e.Class, e.Message)
+		return c.reportGuide(g)
 	}
 	switch e.Class {
 	case openai.ClassRouteDenied:

@@ -55,6 +55,7 @@ type CLI struct {
 
 	globals Globals
 	intr    *pipeline.Interrupt // set while a command with credentials runs
+	authCtx *auth.Context       // the probed Codex context, set while a command with credentials runs
 	written *manifest.Output    // the output `say` published, for the done event
 	project *config.File        // the project layer of the output `render` is running (RUN-07)
 }

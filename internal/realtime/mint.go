@@ -170,7 +170,8 @@ func (m *Minter) MintTranscription(ctx context.Context, model string) (auth.Clie
 }
 
 // MsgSignInRefused is recite's message when the sign-in is refused and a refresh did not renew it.
-const MsgSignInRefused = "the ChatGPT sign-in was refused and could not be renewed; run any `codex` command to refresh it, or run `codex login`"
+// It names no command: the CLI follows it with the login guide, rendered for the Codex in use.
+const MsgSignInRefused = "the ChatGPT sign-in was refused and could not be renewed"
 
 // mint refreshes once through Creds on auth-expired and retries once (AUTH-04).
 func (m *Minter) mint(ctx context.Context, session any, route openai.Route) (auth.ClientSecret, error) {

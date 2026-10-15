@@ -83,7 +83,7 @@ func (h *HTTP) Transcribe(ctx context.Context, pcm []byte, hint Hint) (Transcrip
 	}
 	t, err = h.post(ctx, fresh, body, contentType)
 	if openai.Classify(err) == openai.ClassAuthExpired {
-		return Transcript{}, &openai.Error{Class: openai.ClassAuthExpired, Message: "the refreshed ChatGPT sign-in was refused too; run `codex login`", Err: err}
+		return Transcript{}, &openai.Error{Class: openai.ClassAuthExpired, Message: "the refreshed ChatGPT sign-in was refused too", Err: err}
 	}
 	return t, err
 }

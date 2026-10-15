@@ -249,7 +249,9 @@ func TestMintRefreshFailsExit3(t *testing.T) {
 	}
 	srv := fake.NewServer(t, loadScenario(t, "speak"), fake.WithMintRejectBearer(old.Bearer()))
 	_, err = minter(t, srv, creds).MintSpeech(context.Background(), speechSpec("low", 1))
-	if openai.ExitCode(err) != 3 || !strings.Contains(err.Error(), "run `codex login`") {
+	// The CLI follows this message with the login guide for the Codex in use
+	// (cli.TestRuntimeSignInFailureShowsTheGuide).
+	if openai.ExitCode(err) != 3 || !strings.Contains(err.Error(), realtime.MsgSignInRefused) {
 		t.Fatalf("err = %v", err)
 	}
 }

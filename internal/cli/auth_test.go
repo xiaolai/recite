@@ -339,6 +339,80 @@ func TestInterruptDuringProbeExits130(t *testing.T) {
 	}
 }
 
+// auth status and the probe before auth login handle an interrupt too: exit 130, no guide.
+func TestInterruptDuringAuthStatusProbeExits130(t *testing.T) {
+	for _, run := range []func(c *CLI) int{
+		func(c *CLI) int { return c.authStatus() },
+		func(c *CLI) int { return c.authLogin(false) },
+	} {
+		c, errb := gateCLI(t, "slow")
+		c.StdinIsTTY = func() bool { return true }
+		t.Setenv("FAKECODEX_DELAY_MS", "3000")
+		sigs := make(chan os.Signal, 2)
+		c.Signals = func() (<-chan os.Signal, func()) { return sigs, func() {} }
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			sigs <- os.Interrupt
+			sigs <- os.Interrupt
+		}()
+		if code := run(c); code != ExitInterrupted || strings.Contains(errb.String(), "More help:") {
+			t.Fatalf("code %d, stderr %q", code, errb.String())
+		}
+	}
+}
+
+// A sign-in that fails after the probe passed, such as a refresh that did not renew it, gets the
+// login guide for the probed Codex, as text and as an auth_error event.
+// accept: AUTH-04#2
+func TestRuntimeSignInFailureShowsTheGuide(t *testing.T) {
+	refused := func(context.Context, *auth.Credentials) error {
+		return &openai.Error{Class: openai.ClassAuthExpired, Message: realtime.MsgSignInRefused}
+	}
+	c, errb := gateCLI(t, "chatgpt")
+	if code := c.withCredentials(refused); code != exitcode.Auth {
+		t.Fatalf("code %d", code)
+	}
+	for _, want := range []string{realtime.MsgSignInRefused, auth.ShellQuote(fakeCodex) + " login\n", auth.AuthURL} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errb.String())
+		}
+	}
+	c, _ = gateCLI(t, "chatgpt")
+	var out bytes.Buffer
+	c.Stdout, c.globals.JSON = &out, true
+	if code := c.withCredentials(refused); code != exitcode.Auth {
+		t.Fatalf("json: code %d", code)
+	}
+	var ev auth.Event
+	if err := json.Unmarshal(out.Bytes(), &ev); err != nil || ev.Event != "auth_error" || ev.State != auth.StateExpired {
+		t.Fatalf("json: %v %+v", err, ev)
+	}
+	// Outside a command with credentials there is no probed context, and no guide.
+	c, errb = gateCLI(t, "chatgpt")
+	if code := c.reportFailure(&openai.Error{Class: openai.ClassAuthExpired, Message: "x"}); code != exitcode.Auth ||
+		strings.Contains(errb.String(), auth.AuthURL) {
+		t.Fatalf("no context: code %d stderr %q", code, errb.String())
+	}
+}
+
+// The user sees recite's wording; the debug log keeps the whole chain, scrubbed.
+func TestFailureDetailsReachTheDebugLog(t *testing.T) {
+	c, errb := gateCLI(t, "chatgpt")
+	var logs bytes.Buffer
+	c.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	err := fmt.Errorf("chunk c-7: %w", &openai.Error{Class: openai.ClassNetwork, Message: "realtime: mint",
+		Err: errors.New("dial tcp: lookup api.openai.com: no such host"), RequestID: "req_123"})
+	c.reportFailure(err)
+	if !strings.Contains(errb.String(), "network: realtime: mint") {
+		t.Fatalf("stderr %q", errb.String())
+	}
+	for _, want := range []string{"chunk c-7", "no such host", "req_123"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("debug log lacks %q: %s", want, logs.String())
+		}
+	}
+}
+
 // A subprocess's exit status is not a recite exit code: ffmpeg exiting 3 is not an auth failure.
 func TestSubprocessExitStatusIsNotAnExitCode(t *testing.T) {
 	err := exec.Command("/bin/sh", "-c", "exit 3").Run()
