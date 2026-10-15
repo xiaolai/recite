@@ -106,6 +106,14 @@ func (ss *liveSession) Age() time.Duration { return ss.now().Sub(ss.opened) }
 
 func (ss *liveSession) Close() error { return ss.conn.Close() }
 
+// Unusable reports a session a render left broken, whatever the class of the error: the pool
+// discards it (Pool.Unusable).
+func (ss *liveSession) Unusable() bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.broken != nil
+}
+
 // CreatedAwaiter is a session that can wait for the server's session.created. A WebSocket
 // upgrade alone does not prove the session exists: the server may answer it with an error event
 // or close at once.
@@ -190,11 +198,20 @@ func (ss *liveSession) render(ctx context.Context, req RenderRequest, attempt in
 	var take Take
 	var said []byte
 	gotAudio := false
-	// respID is the response this render started, once the server names it; responding is set
-	// from its first event on, after which the server is still streaming it if we stop reading.
+	// respID is the response this render started: named by response.created, or by the first
+	// event that carries an id when response.created is missing. Every later response event must
+	// carry the same id, so a take never mixes two responses. responding is set from the first
+	// event on, after which the server is still streaming the response if we stop reading.
 	respID, responding := "", false
 	other := func(id string) error {
-		if id == "" || respID == "" || id == respID {
+		if id == "" {
+			ss.broken = &openai.Error{Class: openai.ClassProtocol, Message: "realtime: a response event without a response id"}
+			return ss.broken
+		}
+		if respID == "" {
+			respID = id
+		}
+		if id == respID {
 			return nil
 		}
 		ss.broken = &openai.Error{Class: openai.ClassProtocol,
@@ -218,8 +235,8 @@ func (ss *liveSession) render(ctx context.Context, req RenderRequest, attempt in
 		}
 		switch e := ev.(type) {
 		case ResponseCreated:
-			if respID == "" {
-				respID = e.ResponseID
+			if err := other(e.ResponseID); err != nil {
+				return Take{}, err // a second response, or one without an id
 			}
 			responding = true
 		case AudioDelta:

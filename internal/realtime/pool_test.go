@@ -191,3 +191,196 @@ func TestPoolDiscardsSessionAfterFatalError(t *testing.T) {
 		t.Fatalf("sessions %d %d, want 1 2", calls[0].Session, calls[1].Session)
 	}
 }
+
+// ctlSession is a session whose Close can be held open and that can report itself unusable.
+type ctlSession struct {
+	id       int
+	err      error
+	unusable bool
+	hold     chan struct{} // Close waits on it when non-nil
+	entered  chan struct{} // closed when Close starts, if non-nil
+	closed   chan struct{}
+	onClose  func() // the synth's count, updated before Close returns
+}
+
+func (s *ctlSession) Render(context.Context, realtime.RenderRequest) (realtime.Take, error) {
+	return realtime.Take{}, s.err
+}
+func (s *ctlSession) Age() time.Duration { return 0 }
+func (s *ctlSession) Unusable() bool     { return s.unusable }
+func (s *ctlSession) Close() error {
+	if s.entered != nil {
+		close(s.entered)
+	}
+	if s.hold != nil {
+		<-s.hold
+	}
+	close(s.closed)
+	if s.onClose != nil {
+		s.onClose()
+	}
+	return nil
+}
+
+// ctlSynth opens ctlSessions and counts the connections open at once.
+type ctlSynth struct {
+	mu       sync.Mutex
+	next     func(id int) *ctlSession
+	opened   []*ctlSession
+	open     int
+	maxOpen  int
+	lastSpec realtime.SessionSpec
+}
+
+func (y *ctlSynth) Open(_ context.Context, spec realtime.SessionSpec) (realtime.SpeechSession, error) {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	s := &ctlSession{id: len(y.opened) + 1, closed: make(chan struct{})}
+	if y.next != nil {
+		s = y.next(len(y.opened) + 1)
+		s.closed = make(chan struct{})
+	}
+	y.opened = append(y.opened, s)
+	y.open++
+	y.maxOpen = max(y.maxOpen, y.open)
+	y.lastSpec = spec
+	s.onClose = func() {
+		y.mu.Lock()
+		y.open--
+		y.mu.Unlock()
+	}
+	return s, nil
+}
+
+func (y *ctlSynth) count() int {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	return len(y.opened)
+}
+
+// A session broken mid-response is discarded even when its error is a rate limit (audit: a
+// rate-limited session kept by the pool replayed its stored error to every retry).
+func TestPoolDiscardsUnusableSessionWhateverTheClass(t *testing.T) {
+	synth := &ctlSynth{next: func(id int) *ctlSession {
+		if id == 1 {
+			return &ctlSession{id: id, err: &openai.Error{Class: openai.ClassRateLimited}, unusable: true}
+		}
+		return &ctlSession{id: id}
+	}}
+	p := newPool(t, synth, 1, nil)
+	for range 2 {
+		l, err := p.Acquire(context.Background(), voiceSpec("marin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = l.Render(context.Background(), realtime.RenderRequest{ChunkID: "c1", Text: "hi"})
+		l.Release()
+	}
+	if n := synth.count(); n != 2 {
+		t.Fatalf("%d sessions opened, want 2: the unusable session was reused", n)
+	}
+}
+
+// A session being closed is never lent again, and it counts against Max until its Close
+// returns, so no more than Max connections are ever open.
+func TestPoolNeverLendsOrOverfillsWhileClosing(t *testing.T) {
+	hold, entered := make(chan struct{}), make(chan struct{})
+	synth := &ctlSynth{next: func(id int) *ctlSession {
+		if id == 1 {
+			return &ctlSession{id: id, err: &openai.Error{Class: openai.ClassServer}, hold: hold, entered: entered}
+		}
+		return &ctlSession{id: id}
+	}}
+	p := newPool(t, synth, 1, nil)
+	l, err := p.Acquire(context.Background(), voiceSpec("marin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = l.Render(context.Background(), realtime.RenderRequest{ChunkID: "c1", Text: "hi"})
+	released := make(chan struct{})
+	go func() { l.Release(); close(released) }() // blocks in Close
+	<-entered
+	got := make(chan *realtime.Lease, 1)
+	go func() {
+		l2, err := p.Acquire(context.Background(), voiceSpec("marin"))
+		if err != nil {
+			t.Error(err)
+		}
+		got <- l2
+	}()
+	select {
+	case <-got:
+		t.Fatal("Acquire returned while the only slot's session was still closing")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(hold)
+	<-released
+	l2 := <-got
+	if _, err := l2.Render(context.Background(), realtime.RenderRequest{ChunkID: "c2", Text: "hi"}); err != nil {
+		t.Fatalf("the new lease rendered on a closed session: %v", err)
+	}
+	l2.Release()
+	synth.mu.Lock()
+	defer synth.mu.Unlock()
+	if synth.maxOpen > 1 || len(synth.opened) != 2 {
+		t.Fatalf("max %d open at once over %d opens, want 1 over 2", synth.maxOpen, len(synth.opened))
+	}
+}
+
+// Expired sessions closing in one Acquire still count against Max for a concurrent one.
+func TestPoolCountsClosingExpiredSessions(t *testing.T) {
+	hold := make(chan struct{})
+	clock := &fakeClock{now: time.Unix(1_800_000_000, 0)}
+	synth := &ctlSynth{next: func(id int) *ctlSession {
+		if id <= 2 {
+			return &ctlSession{id: id, hold: hold}
+		}
+		return &ctlSession{id: id}
+	}}
+	p := newPool(t, synth, 2, clock)
+	a, _ := p.Acquire(context.Background(), voiceSpec("marin"))
+	b, _ := p.Acquire(context.Background(), voiceSpec("cedar"))
+	a.Release()
+	b.Release()
+	clock.Advance(realtime.DefaultSessionMaxAge)
+	done := make(chan struct{}, 2)
+	for _, v := range []string{"marin", "cedar"} {
+		go func() {
+			l, err := p.Acquire(context.Background(), voiceSpec(v))
+			if err != nil {
+				t.Error(err)
+			} else {
+				l.Release()
+			}
+			done <- struct{}{}
+		}()
+	}
+	time.Sleep(200 * time.Millisecond)
+	close(hold)
+	<-done
+	<-done
+	synth.mu.Lock()
+	defer synth.mu.Unlock()
+	if synth.maxOpen > 2 {
+		t.Fatalf("%d connections open at once, Max 2", synth.maxOpen)
+	}
+}
+
+// A session is reused only for the instructions it was opened with: instructions are sent with
+// each response from the session's spec.
+func TestPoolDoesNotReuseAcrossInstructions(t *testing.T) {
+	synth := &ctlSynth{}
+	p := newPool(t, synth, 2, nil)
+	for _, instr := range []string{"a", "b"} {
+		spec := voiceSpec("marin")
+		spec.Instructions = instr
+		l, err := p.Acquire(context.Background(), spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.Release()
+	}
+	if n := synth.count(); n != 2 {
+		t.Fatalf("%d sessions opened, want 2", n)
+	}
+}

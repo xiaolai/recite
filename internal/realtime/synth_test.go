@@ -404,3 +404,18 @@ func TestRenderOtherResponseIsProtocol(t *testing.T) {
 	_, err = ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "Hello."})
 	wantClass(t, err, openai.ClassProtocol)
 }
+
+// Without response.created, the first event's response id is the render's: a take of audio from
+// one response, a transcript from another and response.done from a third is a protocol fault.
+func TestRenderMixedResponsesWithoutCreatedIsProtocol(t *testing.T) {
+	sc, err := fake.ParseScenarioFile(filepath.Join("testdata", "render-mixed-without-created.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss := open(t, newSynth(t, fake.NewServer(t, sc), newStatic()))
+	_, err = ss.Render(context.Background(), realtime.RenderRequest{ChunkID: "c0001", Text: "Hello."})
+	wantClass(t, err, openai.ClassProtocol)
+	if u, ok := ss.(realtime.Unusable); !ok || !u.Unusable() {
+		t.Fatal("a session that mixed responses was not reported unusable")
+	}
+}

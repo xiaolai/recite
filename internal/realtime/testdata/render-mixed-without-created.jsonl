@@ -1,0 +1,6 @@
+{"dir": "meta", "scenario": "render-mixed-without-created", "model": "gpt-realtime-2.1", "mint_status": 200, "mint_response": {"value": "ek_canary", "expires_at": 1800000000}}
+{"dir": "server", "event": {"type": "session.created", "event_id": "event_0001", "session": {"type": "realtime", "model": "gpt-realtime-2.1"}}}
+{"dir": "client", "event": {"type": "response.create", "response": {"conversation": "none", "metadata": {"chunk": "c0001", "attempt": "1"}}}}
+{"dir": "server", "event": {"type": "response.output_audio.delta", "event_id": "event_0003", "response_id": "resp_A", "delta": "AAAA"}}
+{"dir": "server", "event": {"type": "response.output_audio_transcript.delta", "event_id": "event_0004", "response_id": "resp_B", "delta": "Hello."}}
+{"dir": "server", "event": {"type": "response.done", "event_id": "event_0005", "response": {"id": "resp_C", "status": "completed", "metadata": {"chunk": "c0001", "attempt": "1"}, "usage": {"input_tokens": 1, "output_tokens": 1}}}}

@@ -44,13 +44,16 @@ type Pool struct {
 
 	mu       sync.Mutex
 	sessions []*pooled // open or opening
-	tick     uint64    // LRU clock
+	closing  int       // detached sessions whose Close has not returned; they count against Max
+	drained  *sync.Cond
+	tick     uint64 // LRU clock
 	closed   bool
 }
 
 type pooled struct {
 	sess    SpeechSession // nil while opening
 	key     string
+	instr   string // a session is reused only for the instructions it was opened with
 	opened  time.Time
 	renders int
 	busy    bool
@@ -78,7 +81,15 @@ func NewPool(cfg PoolConfig) (*Pool, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
-	return &Pool{cfg: cfg}, nil
+	p := &Pool{cfg: cfg}
+	p.drained = sync.NewCond(&p.mu)
+	return p, nil
+}
+
+// Unusable is a session that knows it can no longer render, whatever the class of the error
+// that broke it: a response abandoned mid-stream, a malformed event, a closed connection.
+type Unusable interface {
+	Unusable() bool
 }
 
 // Lease is one borrowed session. Render on it, then Release it exactly once.
@@ -88,55 +99,70 @@ type Lease struct {
 	discard bool
 }
 
-// Acquire borrows a session for spec: an idle one with the same key, else a new one while the
-// pool has room, else it closes the least-recently-used idle session of another key and opens
-// a replacement. It never waits for a session to become idle.
+// Acquire borrows a session for spec: an idle one with the same key and instructions, else a new
+// one while the pool has room, else it closes the least-recently-used idle session and opens a
+// replacement. It never waits for a session to become idle; it waits only for sessions already
+// being closed, which count against Max until their Close returns (NET-07: Max open at once).
 func (p *Pool) Acquire(ctx context.Context, spec SessionSpec) (*Lease, error) {
 	key := PoolKey(spec)
-	var victims []SpeechSession
 	p.mu.Lock()
-	if p.closed {
-		p.mu.Unlock()
-		return nil, errors.New("realtime: pool closed")
-	}
 	var slot *pooled
-	for _, s := range p.sessions {
-		if !s.busy && s.key == key {
-			if p.expired(s) {
+	var victims []SpeechSession
+	for {
+		if p.closed {
+			p.mu.Unlock()
+			p.closeDetached(victims)
+			return nil, errors.New("realtime: pool closed")
+		}
+		for _, s := range p.sessions {
+			if !s.busy && s.key == key && s.instr == spec.Instructions && !p.expired(s) {
+				slot = s
+				break
+			}
+		}
+		// Expired idle sessions are closed whatever their key.
+		keep := p.sessions[:0]
+		for _, s := range p.sessions {
+			if !s.busy && s != slot && p.expired(s) {
+				victims = append(victims, s.sess)
+				p.closing++
 				continue
 			}
-			slot = s
+			keep = append(keep, s)
+		}
+		p.sessions = keep
+		if slot != nil || len(p.sessions)+p.closing < p.cfg.Max {
 			break
 		}
-	}
-	// Expired idle sessions are closed whatever their key.
-	keep := p.sessions[:0]
-	for _, s := range p.sessions {
-		if !s.busy && s != slot && p.expired(s) {
-			victims = append(victims, s.sess)
-			continue
-		}
-		keep = append(keep, s)
-	}
-	p.sessions = keep
-	if slot == nil && len(p.sessions) >= p.cfg.Max {
 		lru := -1
 		for i, s := range p.sessions {
 			if !s.busy && (lru < 0 || s.used < p.sessions[lru].used) {
 				lru = i
 			}
 		}
-		if lru < 0 {
+		if lru >= 0 {
+			// The replacement is dialled only after this close returns (closeDetached below).
+			victims = append(victims, p.sessions[lru].sess)
+			p.closing++
+			p.sessions = append(p.sessions[:lru], p.sessions[lru+1:]...)
+			break
+		}
+		if p.closing == 0 {
 			p.mu.Unlock()
-			closeAll(victims, p.cfg.Logger)
 			return nil, ErrPoolExhausted
 		}
-		victims = append(victims, p.sessions[lru].sess)
-		p.sessions = append(p.sessions[:lru], p.sessions[lru+1:]...)
+		if len(victims) > 0 {
+			p.mu.Unlock()
+			p.closeDetached(victims)
+			victims = nil
+			p.mu.Lock()
+			continue
+		}
+		p.drained.Wait() // a close in flight releases its capacity
 	}
 	opening := slot == nil
 	if opening {
-		slot = &pooled{key: key}
+		slot = &pooled{key: key, instr: spec.Instructions}
 		p.sessions = append(p.sessions, slot)
 	}
 	slot.busy = true
@@ -144,7 +170,7 @@ func (p *Pool) Acquire(ctx context.Context, spec SessionSpec) (*Lease, error) {
 	slot.used = p.tick
 	p.mu.Unlock()
 
-	closeAll(victims, p.cfg.Logger)
+	p.closeDetached(victims)
 	if !opening {
 		return &Lease{p: p, s: slot}, nil
 	}
@@ -168,12 +194,31 @@ func (p *Pool) expired(s *pooled) bool {
 func (p *Pool) remove(slot *pooled) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.detachLocked(slot)
+	p.drained.Broadcast() // a failed open frees its place
+}
+
+// detachLocked removes slot from p.sessions. Callers hold p.mu.
+func (p *Pool) detachLocked(slot *pooled) {
 	for i, s := range p.sessions {
 		if s == slot {
 			p.sessions = append(p.sessions[:i], p.sessions[i+1:]...)
 			return
 		}
 	}
+}
+
+// closeDetached closes sessions already removed from p.sessions and counted in p.closing, then
+// releases their capacity.
+func (p *Pool) closeDetached(ss []SpeechSession) {
+	if len(ss) == 0 {
+		return
+	}
+	closeAll(ss, p.cfg.Logger)
+	p.mu.Lock()
+	p.closing -= len(ss)
+	p.drained.Broadcast()
+	p.mu.Unlock()
 }
 
 func closeAll(ss []SpeechSession, logger *slog.Logger) {
@@ -184,13 +229,18 @@ func closeAll(ss []SpeechSession, logger *slog.Logger) {
 	}
 }
 
-// Render renders req on the leased session. A server, network or protocol failure, or a
-// cancelled render, marks the session for closing on Release.
+// Render renders req on the leased session. A server, network or protocol failure, a cancelled
+// render, or a session that reports itself unusable marks the session for closing on Release.
 func (l *Lease) Render(ctx context.Context, req RenderRequest) (Take, error) {
 	take, err := l.s.sess.Render(ctx, req)
 	l.p.mu.Lock()
 	l.s.renders++
 	l.p.mu.Unlock()
+	if u, ok := l.s.sess.(Unusable); ok && u.Unusable() {
+		// A rate limit or an invalid request in the middle of a response leaves that response
+		// streaming: the class says the request was refused, not that the session can go on.
+		l.discard = true
+	}
 	if err != nil {
 		var oe *openai.Error
 		switch fatal := errors.As(err, &oe) && oe.Fatal; {
@@ -210,14 +260,16 @@ func (l *Lease) Render(ctx context.Context, req RenderRequest) (Take, error) {
 func (l *Lease) Release() {
 	p := l.p
 	p.mu.Lock()
-	l.s.busy = false
-	recycle := l.discard || p.closed || p.expired(l.s)
-	p.mu.Unlock()
-	if !recycle {
+	if !(l.discard || p.closed || p.expired(l.s)) {
+		l.s.busy = false
+		p.mu.Unlock()
 		return
 	}
-	p.remove(l.s)
-	closeAll([]SpeechSession{l.s.sess}, p.cfg.Logger)
+	// Detached under the lock that would free it, so no Acquire can borrow a session being closed.
+	p.detachLocked(l.s)
+	p.closing++
+	p.mu.Unlock()
+	p.closeDetached([]SpeechSession{l.s.sess})
 }
 
 // Open returns how many sessions are open or opening.
@@ -241,7 +293,9 @@ func (p *Pool) Close() error {
 		keep = append(keep, s)
 	}
 	p.sessions = keep
+	p.closing += len(idle)
+	p.drained.Broadcast() // a waiting Acquire sees the pool closed
 	p.mu.Unlock()
-	closeAll(idle, p.cfg.Logger)
+	p.closeDetached(idle)
 	return nil
 }
