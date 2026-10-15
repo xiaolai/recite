@@ -159,6 +159,13 @@ func TestDoctorFailureModes(t *testing.T) {
 			e.srv = rtfake.NewServer(t, speakScenario(t), rtfake.WithMintError(403))
 		}},
 		{"WebSocket refused", "route", checkFail, "connection refused", exitcode.Failure, func(e *doctorEnv) { e.wsRefused = true }},
+		// The upgrade alone is not a working session: doctor waits for session.created.
+		{"error before session.created", "route", checkFail, "could not be opened", exitcode.Failure, func(e *doctorEnv) {
+			e.srv = rtfake.NewServer(t, speakScenario(t), rtfake.WithErrorEvent(0, "server_error"))
+		}},
+		{"closed before session.created", "route", checkFail, "could not be opened", exitcode.Failure, func(e *doctorEnv) {
+			e.srv = rtfake.NewServer(t, speakScenario(t), rtfake.WithCloseAfter(0))
+		}},
 		// Design §12.4 check 6: the encoders warn only.
 		{"no ffmpeg", "ffmpeg", checkWarn, "not found", exitcode.OK, func(e *doctorEnv) { e.missing["ffmpeg"] = true }},
 	} {

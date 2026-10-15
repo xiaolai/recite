@@ -106,6 +106,43 @@ func (ss *liveSession) Age() time.Duration { return ss.now().Sub(ss.opened) }
 
 func (ss *liveSession) Close() error { return ss.conn.Close() }
 
+// CreatedAwaiter is a session that can wait for the server's session.created. A WebSocket
+// upgrade alone does not prove the session exists: the server may answer it with an error event
+// or close at once.
+type CreatedAwaiter interface {
+	AwaitCreated(ctx context.Context) error
+}
+
+// AwaitCreated waits, within the idle timeout, for session.created. An error event, a closed
+// connection or the timeout fails it and leaves the session unusable.
+func (ss *liveSession) AwaitCreated(ctx context.Context) error {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if ss.broken != nil {
+		return ss.broken
+	}
+	wctx, cancel := context.WithTimeout(ctx, ss.idle)
+	defer cancel()
+	for {
+		ev, err := ss.conn.Next(wctx)
+		if err != nil {
+			if ev == nil && wctx.Err() != nil && ctx.Err() == nil {
+				err = &openai.Error{Class: openai.ClassNetwork, Message: "realtime: no session.created within the idle timeout", Err: err}
+			}
+			ss.broken = err
+			return err
+		}
+		switch e := ev.(type) {
+		case SessionCreated:
+			return nil
+		case ErrorEvent:
+			ss.broken = e.Err
+			return e.Err
+		}
+		// Anything else before session.created (session.updated, an unknown type) is skipped.
+	}
+}
+
 // Render sends one out-of-band response.create and collects its audio and
 // transcript until response.done (design §6.2). With Dumps, the response's events are
 // written as OBS-02 says.

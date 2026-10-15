@@ -191,6 +191,12 @@ func (c *CLI) routeCheck(ctx context.Context, creds *auth.Credentials) (doctorCh
 	if err != nil {
 		return failCheck("route", routeFailure(err), routeFix(err), openai.ExitCode(err)), nil
 	}
+	if a, ok := sess.(realtime.CreatedAwaiter); ok {
+		if err := a.AwaitCreated(ctx); err != nil {
+			_ = sess.Close()
+			return failCheck("route", routeFailure(err), routeFix(err), openai.ExitCode(err)), nil
+		}
+	}
 	return okCheck("route", fmt.Sprintf("speech secret minted, session opened (%s, %s)", spec.Model, time.Since(start).Round(time.Millisecond))), sess
 }
 
