@@ -11,9 +11,11 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/config"
+	"github.com/xiaolai/recite/internal/fsx"
 	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/manifest"
 	"github.com/xiaolai/recite/internal/pipeline"
@@ -74,7 +76,6 @@ func New(stdout, stderr io.Writer) *CLI {
 // Run executes recite with args (without the program name) and returns the exit code.
 func (c *CLI) Run(args []string) int {
 	c.globals = defaultGlobals()
-	args = expandVerbose(args)
 	// --version leads like the version command; -v stays the verbosity flag.
 	if len(args) > 0 && (args[0] == "--version" || args[0] == "-version") {
 		return c.runCommand(c.mustLookup("version"), args[1:])
@@ -84,19 +85,21 @@ func (c *CLI) Run(args []string) int {
 	// (`recite -f x.md`), so the whole line goes to `say`.
 	gfs := newFlagSet("recite")
 	c.globals.register(gfs)
+	c.globals.registerStacked(gfs)
 	if err := gfs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			c.writeHelp(c.Stdout)
 			return ExitOK
 		}
 		if !strings.Contains(err.Error(), "flag provided but not defined") {
-			return c.usageErr("recite", err)
+			// A say or render run still ends its --json stream with its final event (CLI-06).
+			return c.commandDone(c.commandOf(args), c.usageErr("recite", err))
 		}
 		c.globals = defaultGlobals()
 		return c.runCommand(c.mustLookup("say"), args)
 	}
 	rest := gfs.Args()
-	if consumed := len(args) - len(rest); consumed > 0 && args[consumed-1] == "--" {
+	if endedByTerminator(gfs, args) {
 		return c.runCommand(c.mustLookup("say"), append([]string{"--"}, rest...))
 	}
 	if len(rest) == 0 {
@@ -122,6 +125,7 @@ func (c *CLI) mustLookup(name string) command {
 func (c *CLI) runCommand(cmd command, args []string) int {
 	fs := newFlagSet("recite " + cmd.name)
 	c.globals.register(fs)
+	c.globals.registerStacked(fs)
 	run := cmd.setup(fs, c)
 	positional, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -140,23 +144,48 @@ func (c *CLI) runCommand(cmd command, args []string) int {
 	return run(positional)
 }
 
-// expandVerbose rewrites stacked verbosity flags (-vv, -vvv) into repeated -v,
-// which the flag package parses as a counter. Arguments after "--" are text.
-func expandVerbose(args []string) []string {
-	out := make([]string, 0, len(args))
-	for i, a := range args {
+// commandOf is the command a line that failed to parse would have run: the first registered
+// command name among its arguments, else say, the default.
+func (c *CLI) commandOf(args []string) command {
+	for _, a := range args {
 		if a == "--" {
-			return append(out, args[i:]...)
+			break
 		}
-		if len(a) > 2 && strings.Trim(a[1:], "v") == "" && a[0] == '-' {
-			for range len(a) - 1 {
-				out = append(out, "-v")
+		if !strings.HasPrefix(a, "-") {
+			if cmd, ok := c.lookup(a); ok {
+				return cmd
 			}
+		}
+	}
+	return c.mustLookup("say")
+}
+
+// endedByTerminator reports whether fs.Parse(args) stopped at a "--" terminator, as opposed to a
+// "--" consumed as a flag's value (`--style -- Hello`). It walks args the way the flag package
+// does: a flag either carries "=value", is boolean, or takes the next argument.
+func endedByTerminator(fs *flag.FlagSet, args []string) bool {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return true
+		}
+		if len(a) < 2 || a[0] != '-' {
+			return false
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-")
+		if strings.Contains(name, "=") {
 			continue
 		}
-		out = append(out, a)
+		f := fs.Lookup(name)
+		if f == nil {
+			return false
+		}
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+			continue
+		}
+		i++ // the value, whatever it looks like
 	}
-	return out
+	return false
 }
 
 // parseInterspersed parses flags anywhere among the positional arguments.
@@ -164,12 +193,12 @@ func expandVerbose(args []string) []string {
 func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	for {
+		terminated := endedByTerminator(fs, args)
 		if err := fs.Parse(args); err != nil {
 			return nil, fmt.Errorf("parse flags: %w", err)
 		}
 		rest := fs.Args()
-		consumed := len(args) - len(rest)
-		if consumed > 0 && args[consumed-1] == "--" {
+		if terminated {
 			return append(positional, rest...), nil
 		}
 		if len(rest) == 0 {
@@ -222,7 +251,9 @@ func (c *CLI) setupLogging() (closeFn func(), err error) {
 		c.Logger = logx.New(c.Stderr, level, false)
 		return func() {}, nil
 	}
-	f, err := os.OpenFile(c.globals.LogFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	// The debug log holds input-derived text: an existing world-readable file is tightened, and a
+	// symlink, a foreign file or a hard link is refused (fsx.AppendPrivate).
+	f, err := fsx.AppendPrivate(c.globals.LogFile)
 	if err != nil {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
@@ -238,7 +269,29 @@ func (c *CLI) setupLogging() (closeFn func(), err error) {
 // secret embedded in a wrapped error never reaches the terminal (AUTH-05).
 func (c *CLI) errorf(format string, a ...any) {
 	// A failed write to stderr has nowhere left to be reported.
-	_, _ = io.WriteString(c.Stderr, secret.Scrub(fmt.Sprintf(format, a...))+"\n")
+	_, _ = io.WriteString(c.Stderr, terminalSafe(secret.Scrub(fmt.Sprintf(format, a...)))+"\n")
+}
+
+// terminalSafe escapes the characters a terminal would act on rather than show: C0 and C1
+// controls other than newline and tab, and the bidirectional overrides. Provider text (an error
+// message, a code) reaches the terminal through errors; a decoded "\u001b[2J" in it must
+// print as text, not clear the screen.
+func terminalSafe(s string) string {
+	unsafe := func(r rune) bool {
+		return (unicode.IsControl(r) && r != '\n' && r != '\t') || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069)
+	}
+	if !strings.ContainsFunc(s, unsafe) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if unsafe(r) {
+			fmt.Fprintf(&b, "\\u%04x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (c *CLI) writeResult(err error) int {

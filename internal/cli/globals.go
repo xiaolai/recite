@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Globals holds the global flags of design §12.2. They are registered on every
@@ -40,7 +41,35 @@ func (g *Globals) register(fs *flag.FlagSet) {
 	fs.BoolVar(&g.NoColor, "no-color", g.NoColor, "disable colour")
 }
 
+// registerStacked adds -vv through -vvvvvvvvv as verbosity flags of their own. Registering them,
+// instead of rewriting the argument list first, keeps a value that happens to look like one
+// (`-f -vv` reads the file "-vv") a value. Help lists only -v.
+func (g *Globals) registerStacked(fs *flag.FlagSet) {
+	for n := 2; n <= 9; n++ {
+		fs.Var(&stacked{&g.Verbose, n}, strings.Repeat("v", n), "")
+	}
+}
+
 func defaultGlobals() Globals { return Globals{AuthSource: "auto"} }
+
+// stacked is -vv, -vvv, …: one flag adding its number of v's to the verbosity.
+type stacked struct {
+	p *int
+	n int
+}
+
+func (s *stacked) String() string   { return "" }
+func (s *stacked) IsBoolFlag() bool { return true }
+func (s *stacked) Set(v string) error {
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fmt.Errorf("parse %q: %w", v, err)
+	}
+	if b {
+		*s.p += s.n
+	}
+	return nil
+}
 
 // counter is a repeatable boolean flag: each -v adds one.
 type counter int
