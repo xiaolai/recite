@@ -354,3 +354,25 @@ func TestBuildHelper(t *testing.T) {
 		t.Fatal("empty path")
 	}
 }
+
+// A relative directory gives an absolute path the caller can run.
+func TestBuildToRelativeDir(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(wd, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := BuildTo(rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(got) {
+		t.Fatalf("path %q is not absolute", got)
+	}
+	if fi, err := os.Stat(got); err != nil || fi.Mode()&0o111 == 0 {
+		t.Fatalf("no executable at %s: %v", got, err)
+	}
+}

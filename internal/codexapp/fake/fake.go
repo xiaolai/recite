@@ -43,18 +43,21 @@ var Modes = append(append([]string(nil), AuthModes...),
 	"bad-jwt",        // chatgpt, but authToken is not a JWT
 )
 
-// BuildTo builds fakecodex into dir and returns its path; for use in TestMain.
+// cmdPackage is fakecodex's import path. Building by import path from the test's own directory
+// (always inside this module) needs no source location, which -trimpath would hide.
+const cmdPackage = "github.com/xiaolai/recite/internal/codexapp/fake/cmd/fakecodex"
+
+// BuildTo builds fakecodex into dir and returns its absolute path; for use in TestMain.
 func BuildTo(dir string) (string, error) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("fakecodex: runtime.Caller failed")
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("build fakecodex: %w", err)
 	}
-	bin := filepath.Join(dir, "codex")
+	bin := filepath.Join(abs, "codex")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/fakecodex")
-	cmd.Dir = filepath.Dir(file)
+	cmd := exec.Command("go", "build", "-o", bin, cmdPackage)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("build fakecodex: %w", err)
