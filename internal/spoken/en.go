@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/xiaolai/recite/internal/numwords"
+	"github.com/xiaolai/sayso/go/numwords"
 )
 
 // English is the English column of design §7.7. Order matters where two

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiaolai/recite/internal/logx"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 const (
@@ -44,7 +44,7 @@ func TestSecretsNeverFormat(t *testing.T) {
 func TestConstructorsRegisterOpaqueSecrets(t *testing.T) {
 	_ = NewToken("opaque-canary-token-77", time.Time{}, "", "")
 	_ = NewClientSecret("opaque-canary-secret-88", time.Time{})
-	got := logx.Scrub("a opaque-canary-token-77 b opaque-canary-secret-88")
+	got := secret.Scrub("a opaque-canary-token-77 b opaque-canary-secret-88")
 	if got != "a <redacted> b <redacted>" {
 		t.Fatalf("Scrub = %q", got)
 	}

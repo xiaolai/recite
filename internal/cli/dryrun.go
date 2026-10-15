@@ -5,10 +5,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/stt"
 	"github.com/xiaolai/recite/internal/usage"
 	"github.com/xiaolai/recite/internal/verify"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // realtimePerWorker is the throughput one render worker reaches, in seconds of audio per second
@@ -68,6 +68,6 @@ func (c *CLI) writePlan(ev planEvent, model string) int {
 	fmt.Fprintf(&b, "audio:      about %s\n", clock(ev.EstSeconds))
 	fmt.Fprintf(&b, "wall time:  about %s at --jobs %d\n", clock(ev.EstWallSeconds), ev.Jobs)
 	fmt.Fprintf(&b, "price:      %s\n", price)
-	_, err := io.WriteString(c.Stdout, logx.Scrub(b.String()))
+	_, err := io.WriteString(c.Stdout, secret.Scrub(b.String()))
 	return c.writeResult(err)
 }

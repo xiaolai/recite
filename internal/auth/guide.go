@@ -135,6 +135,24 @@ func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 			{Text: "See Codex's own message:", Command: codex + " login status"},
 			{Text: "For details:", Command: "recite doctor"},
 		}
+	case StateNoSignInFile:
+		g.Message = "There is no auth.json to read the ChatGPT sign-in from. Codex may keep it in the system keychain, which only Codex can read."
+		g.Steps = []Step{
+			{Text: "Let recite ask Codex instead:", Command: "recite --auth-source codex auth status"},
+			{Text: "or sign in with Codex:", Command: codex + " login"},
+		}
+	case StateAppServerAuthUnavailable:
+		g.Message = "This Codex does not report its sign-in to other programs, and keeps it outside auth.json."
+		g.Steps = []Step{
+			{Text: "Update Codex:", Command: codex + " update"},
+			{Text: "or upgrade it the way it was installed."},
+		}
+	case StateProviderWithoutOpenAIAuth:
+		g.Message = "Codex is configured with a model provider that needs no OpenAI sign-in (pinned by managed settings), so it has no ChatGPT sign-in to share."
+		g.Steps = []Step{
+			{Text: "See the current sign-in:", Command: codex + " login status"},
+			{Text: "Changing a managed Codex configuration is your administrator's decision, so recite prints no command for it."},
+		}
 	default:
 		g.Message = "recite could not determine the Codex sign-in."
 	}

@@ -10,8 +10,8 @@ import (
 
 	"github.com/xiaolai/recite/internal/config"
 	"github.com/xiaolai/recite/internal/exitcode"
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/usage"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // renderExcluded are the `say` flags `render` does not take: the project names each output's
@@ -236,7 +236,7 @@ func (c *CLI) renderDone(ev renderEvent) int {
 		fmt.Fprintf(&b, "price:      %s\n", price)
 	}
 	fmt.Fprintf(&b, "exit:       %d\n", ev.Exit)
-	if _, err := io.WriteString(c.Stdout, logx.Scrub(b.String())); err != nil {
+	if _, err := io.WriteString(c.Stdout, secret.Scrub(b.String())); err != nil {
 		c.errorf("recite: write output: %v", err)
 		return exitcode.Worst(ev.Exit, ExitInternal)
 	}

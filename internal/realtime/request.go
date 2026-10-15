@@ -1,6 +1,8 @@
 package realtime
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 )
@@ -68,4 +70,16 @@ func ResponseCreate(r ChunkRequest) ([]byte, error) {
 		body.Reasoning = &reasoning{Effort: r.Effort}
 	}
 	return marshal(responseCreate{Type: "response.create", Response: body})
+}
+
+// marshal is json.Marshal without HTML escaping: instructions carry the <<< >>> markers, and the
+// wire body should show them as written.
+func marshal(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, fmt.Errorf("realtime: encode: %w", err)
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }

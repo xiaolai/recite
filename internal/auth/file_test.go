@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/xiaolai/recite/internal/logx"
-	"github.com/xiaolai/recite/internal/openai"
 )
 
 const fileKeyCanary = "sk-canary-filekey-opaque"
@@ -30,6 +29,13 @@ func chatgptFile(exp int64) string {
 		fileKeyCanary, jwt(exp))
 }
 
+// probeFile probes the file source in home.
+func probeFile(t *testing.T, home string, logger *slog.Logger) *Status {
+	t.Helper()
+	st, _ := probeFake(t, probeCase{source: SourceFile, bin: "-", home: home, logger: logger})
+	return st
+}
+
 // accept: AUTH-02#1
 func TestFileSourceReadOnlyDirectory(t *testing.T) {
 	dir := writeAuth(t, chatgptFile(1800000000))
@@ -45,20 +51,22 @@ func TestFileSourceReadOnlyDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewFileSource(dir)
-	tok, err := s.Token(context.Background())
+	st := probeFile(t, dir, nil)
+	wantState(t, st, StateReady)
+	tok, err := st.Creds.Token(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tok.Expires.Unix() != 1800000000 || tok.Source != "file" {
+	if tok.Expires.Unix() != 1800000000 || tok.Source != "file" || st.SourceName() != "file" {
 		t.Fatalf("token exp %v source %q", tok.Expires, tok.Source)
 	}
 	after, err := os.Stat(path)
 	if err != nil || !after.ModTime().Equal(before.ModTime()) || after.Mode() != before.Mode() {
 		t.Fatal("auth.json was modified")
 	}
-	if _, err := s.Refresh(context.Background()); openai.ExitCode(err) != 3 {
-		t.Fatalf("Refresh = %v", err)
+	// The file source cannot refresh: a refused token is expired.
+	if _, err := st.Creds.RefreshAfter(context.Background(), tok); err == nil {
+		t.Fatal("the file source refreshed")
 	}
 }
 
@@ -69,41 +77,42 @@ func TestFileSourceOversizedOrMalformed(t *testing.T) {
 		"oversized": big,
 		"malformed": `{"auth_mode":"chatgpt",`,
 		"no token":  `{"auth_mode":"chatgpt","tokens":{}}`,
-		"bad jwt":   `{"auth_mode":"chatgpt","tokens":{"access_token":"not-a-jwt"}}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewFileSource(writeAuth(t, body)).Token(context.Background())
-			if openai.ExitCode(err) != 3 {
-				t.Fatalf("err = %v, want exit 3", err)
-			}
-			if name == "oversized" && !strings.Contains(err.Error(), "larger than 64 KiB") {
-				t.Fatalf("unclear message: %v", err)
-			}
-			if name == "malformed" && !strings.Contains(err.Error(), "not valid JSON") {
-				t.Fatalf("unclear message: %v", err)
+			st := probeFile(t, writeAuth(t, body), nil)
+			wantState(t, st, StateCodexError)
+			if name == "oversized" && !strings.Contains(st.Err.Error(), "64 KiB") {
+				t.Fatalf("unclear message: %v", st.Err)
 			}
 		})
 	}
-	// Exactly at the cap is accepted.
+	// One byte under the cap is accepted; 64 KiB itself is refused.
 	body := chatgptFile(1800000000)
-	body = body[:len(body)-1] + `,"pad":"` + strings.Repeat("x", 64<<10-len(body)-9) + `"}`
-	if len(body) != 64<<10 {
-		t.Fatalf("fixture is %d bytes", len(body))
+	pad := func(n int) string {
+		return body[:len(body)-1] + `,"pad":"` + strings.Repeat("x", n-len(body)-9) + `"}`
 	}
-	if _, err := NewFileSource(writeAuth(t, body)).Token(context.Background()); err != nil {
-		t.Fatalf("64 KiB file refused: %v", err)
+	if under := pad(64<<10 - 1); len(under) != 64<<10-1 {
+		t.Fatalf("fixture is %d bytes", len(under))
+	} else {
+		wantState(t, probeFile(t, writeAuth(t, under), nil), StateReady)
+	}
+	wantState(t, probeFile(t, writeAuth(t, pad(64<<10)), nil), StateCodexError)
+	// A token that is not a JWT has an unknown expiry; the API decides.
+	st := probeFile(t, writeAuth(t, `{"auth_mode":"chatgpt","tokens":{"access_token":"not-a-jwt"}}`), nil)
+	wantState(t, st, StateReady)
+	if !st.Expires.IsZero() {
+		t.Fatalf("expiry %v, want unknown", st.Expires)
 	}
 }
 
 func TestFileSourceGuard(t *testing.T) {
 	apikey := fmt.Sprintf(`{"OPENAI_API_KEY":%q,"auth_mode":"apikey"}`, fileKeyCanary)
-	_, err := NewFileSource(writeAuth(t, apikey)).Token(context.Background())
-	if e := wantClass(t, err, openai.ClassAuthMode); e.Message != MsgAPIKey {
-		t.Fatalf("message = %q", e.Message)
-	}
-	_, err = NewFileSource(t.TempDir()).Token(context.Background())
-	_ = wantClass(t, err, openai.ClassAuthMode)
+	wantState(t, probeFile(t, writeAuth(t, apikey), nil), StateAPIKey)
+	// Without auth_mode a non-null OPENAI_API_KEY wins over leftover tokens, as in Codex.
+	leftover := fmt.Sprintf(`{"OPENAI_API_KEY":%q,"tokens":{"access_token":%q}}`, fileKeyCanary, jwt(1800000000))
+	wantState(t, probeFile(t, writeAuth(t, leftover), nil), StateAPIKey)
+	wantState(t, probeFile(t, t.TempDir(), nil), StateNoSignInFile)
 }
 
 // accept: AUTH-02#3
@@ -111,10 +120,13 @@ func TestFileSourceNeverReadsAPIKey(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(logx.NewHandler(slog.NewTextHandler(&logs, nil)))
 	for _, body := range []string{chatgptFile(1800000000), fmt.Sprintf(`{"OPENAI_API_KEY":%q,"auth_mode":"apikey"}`, fileKeyCanary)} {
-		s := NewFileSource(writeAuth(t, body))
-		tok, err := s.Token(context.Background())
-		logger.Error("token", "tok", tok, "src", s, "err", err)
-		dumps := fmt.Sprintf("%v %+v %#v %s | %v %+v %#v | %v", tok, tok, tok, tok, s, s, s, err)
+		st := probeFile(t, writeAuth(t, body), logger)
+		var tok Token
+		if st.Creds != nil {
+			tok, _ = st.Creds.Token(context.Background())
+		}
+		logger.Error("token", "tok", tok, "status", st, "err", st.Err)
+		dumps := fmt.Sprintf("%v %+v %#v %s | %v %+v %#v | %v", tok, tok, tok, tok, st, st, st, st.Err)
 		for _, out := range []string{dumps, logs.String(), tok.Bearer()} {
 			if strings.Contains(out, fileKeyCanary) {
 				t.Fatalf("OPENAI_API_KEY canary surfaced: %q", out)
@@ -123,7 +135,5 @@ func TestFileSourceNeverReadsAPIKey(t *testing.T) {
 	}
 	// The env variable is not consulted either.
 	t.Setenv("OPENAI_API_KEY", fileKeyCanary)
-	if _, err := NewFileSource(t.TempDir()).Token(context.Background()); openai.ExitCode(err) != 3 {
-		t.Fatalf("missing auth.json with OPENAI_API_KEY set: %v", err)
-	}
+	wantState(t, probeFile(t, t.TempDir(), nil), StateNoSignInFile)
 }

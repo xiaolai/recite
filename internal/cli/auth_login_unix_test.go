@@ -28,8 +28,10 @@ func TestAuthLoginReclassifiesWithNewChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Fields(string(b))
-	if len(lines) != 3 { // app-server, login, app-server
-		t.Fatalf("codex ran %d times, want 3: %q", len(lines), lines)
+	// app-server (the probe), login, app-server (the second probe), app-server (the plan, read
+	// by its own child because Codex runs only for one call at a time).
+	if len(lines) != 4 {
+		t.Fatalf("codex ran %d times, want 4: %q", len(lines), lines)
 	}
 	for _, l := range lines {
 		pid, err := strconv.Atoi(l)

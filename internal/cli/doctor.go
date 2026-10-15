@@ -13,11 +13,11 @@ import (
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/exitcode"
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/stt"
 	"github.com/xiaolai/recite/internal/verify"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // Check outcomes of `doctor` (design §12.4).
@@ -77,7 +77,7 @@ func setupDoctor(fs *flag.FlagSet, c *CLI) func([]string) int {
 			if ch.Fix != "" {
 				line += fmt.Sprintf("%-4s  %-9s fix: %s\n", "", "", ch.Fix)
 			}
-			if _, err := io.WriteString(c.Stdout, logx.Scrub(line)); err != nil {
+			if _, err := io.WriteString(c.Stdout, secret.Scrub(line)); err != nil {
 				return c.writeResult(err)
 			}
 		}
@@ -145,6 +145,9 @@ func (c *CLI) authCheck(st *auth.Status) doctorCheck {
 	default:
 		g, _ := st.Guide()
 		return failCheck("auth", string(st.State)+": "+g.Message, firstFix(g), st.ExitCode())
+	}
+	if st.Expires.IsZero() { // the token carries no expiry; the API decides
+		return okCheck("auth", "chatgpt, plan "+orUnknown(st.Plan)+", token expiry unknown")
 	}
 	left := st.Expires.Sub(c.Now())
 	detail := "chatgpt, plan " + orUnknown(st.Plan) + ", token expires " + relative(left)

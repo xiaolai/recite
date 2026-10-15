@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/cache"
-	"github.com/xiaolai/recite/internal/codexapp"
 	"github.com/xiaolai/recite/internal/exitcode"
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/usage"
+	"github.com/xiaolai/sayso/go/codexapp"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // setupUsage is `recite usage` (CLI-09): the ledger summary by day and model, then the Codex
@@ -65,7 +65,7 @@ func setupUsage(fs *flag.FlagSet, c *CLI) func([]string) int {
 		} else {
 			out += usage.FormatPlan(rl)
 		}
-		_, err := io.WriteString(c.Stdout, logx.Scrub(out))
+		_, err := io.WriteString(c.Stdout, secret.Scrub(out))
 		return c.writeResult(err)
 	}
 }

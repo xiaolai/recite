@@ -2,80 +2,217 @@ package auth
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
-	"strings"
+	"os"
+	"path/filepath"
 	"time"
-	"unicode"
 
-	"github.com/xiaolai/recite/internal/codexapp"
+	"github.com/xiaolai/sayso/go/codexapp"
+	"github.com/xiaolai/sayso/go/codexauth"
+	"github.com/xiaolai/sayso/go/secret"
+
 	"github.com/xiaolai/recite/internal/exitcode"
-	"github.com/xiaolai/recite/internal/logx"
-	"github.com/xiaolai/recite/internal/openai"
+	"github.com/xiaolai/recite/internal/testguard"
 )
 
 // State is the login state of design §5.1a (AUTH-07). Exactly one applies.
-type State string
+type State = codexauth.State
 
-// The eight login states.
+// The login states (github.com/xiaolai/sayso/go/codexauth).
 const (
-	StateReady       State = "ready"
-	StateNoCodex     State = "no-codex"
-	StateCodexTooOld State = "codex-too-old"
-	StateNotSignedIn State = "not-signed-in"
-	StateAPIKey      State = "api-key"
-	StateUnsupported State = "unsupported-auth"
-	StateExpired     State = "expired"
-	StateCodexError  State = "codex-error"
+	StateReady                     = codexauth.StateReady
+	StateNoCodex                   = codexauth.StateNoCodex
+	StateCodexTooOld               = codexauth.StateCodexTooOld
+	StateNotSignedIn               = codexauth.StateNotSignedIn
+	StateNoSignInFile              = codexauth.StateNoSignInFile
+	StateAPIKey                    = codexauth.StateAPIKey
+	StateUnsupported               = codexauth.StateUnsupported
+	StateExpired                   = codexauth.StateExpired
+	StateCodexError                = codexauth.StateCodexError
+	StateAppServerAuthUnavailable  = codexauth.StateAppServerAuthUnavailable
+	StateProviderWithoutOpenAIAuth = codexauth.StateProviderWithoutOpenAIAuth
 )
 
-const (
-	modeAPIKey = "apikey"
-	maxModeLen = 64
+// MinCodexVersion is the oldest Codex recite is tested against.
+const MinCodexVersion = codexauth.MinCodexVersion
+
+// RefreshMargin is how much lifetime a token must have left; below it, recite asks Codex to
+// refresh (AUTH-04).
+const RefreshMargin = 10 * time.Minute
+
+// DefaultTimeout bounds every app-server call (design §5.1a, AUTH-01#2).
+const DefaultTimeout = 10 * time.Second
+
+// Token is the ChatGPT bearer; ClientSecret a minted `ek_` secret. Every formatting path of
+// both prints <redacted> (AUTH-05).
+type (
+	Token        = secret.Token
+	ClientSecret = secret.ClientSecret
 )
 
-// MinCodexVersion is the oldest Codex recite is tested against (E27 measured 0.162.1).
-const MinCodexVersion = "0.162.0"
+// NewToken returns a Token and registers its bearer with the scrubber.
+func NewToken(bearer string, expires time.Time, plan, source string) Token {
+	return secret.NewToken(bearer, expires, plan, source)
+}
 
-// ProbeConfig is the input of the login-state probe: the raw flags, resolved
-// once into a Context.
+// NewClientSecret returns a ClientSecret and registers it with the scrubber.
+func NewClientSecret(value string, expiresAt time.Time) ClientSecret {
+	return secret.NewClientSecret(value, expiresAt)
+}
+
+// Credentials hands out the bearer and owns the refresh policy (AUTH-04): single-flight, a
+// refresh succeeds when the token it returns is fresh, and a failed refresh backs off.
+type Credentials = codexauth.Credentials
+
+// Source values of --auth-source.
+const (
+	SourceAuto  = "auto"
+	SourceCodex = "codex"
+	SourceFile  = "file"
+)
+
+// Context is the invocation context the probe resolved (design §5.1a step 1).
+type Context struct {
+	CodexBin  string // absolute path; "" when no executable was found
+	CodexHome string // the CODEX_HOME in force; "" means Codex's default
+	Source    string // codex or file: where the token came from, or was looked for
+	// MissingBin is the executable the user named (--codex-bin or RECITE_CODEX_BIN) when it
+	// was not found, so the guide can point at the path rather than say Codex is missing.
+	MissingBin string
+}
+
+// CodexConfig is the configuration of a Codex child for this context, with recite's test guard.
+func (c Context) CodexConfig(logger *slog.Logger) codexapp.Config {
+	return codexapp.Config{Bin: c.CodexBin, CodexHome: c.CodexHome, Timeout: DefaultTimeout, Logger: logger,
+		ClientName: "recite", Guard: guard}
+}
+
+// ProbeConfig is the input of the login-state probe: the raw flags.
 type ProbeConfig struct {
 	CodexBin, CodexHome string // --codex-bin, --codex-home
 	Source              string // --auth-source: auto, codex or file
 	Getenv              func(string) string
 	Now                 func() time.Time // nil means time.Now
-	Timeout             time.Duration    // per app-server call; 0 means 10 s
+	Timeout             time.Duration    // per app-server call; 0 means DefaultTimeout
 	Logger              *slog.Logger
 	// WithPlan also reads the plan type (account/read). Only `auth status` shows it, and the
 	// call costs about 1 s over the network, so every other command leaves it off.
 	WithPlan bool
 }
 
-// Status is the outcome of the probe. It never holds the token in a printable
-// field; Creds hands it out only when the state is ready.
+// Status is the outcome of the probe. It never holds the token in a printable field; Creds
+// hands it out only when the state is ready.
 type Status struct {
 	State        State
 	Context      Context   // the resolved invocation context; every fix command uses it
 	Mode         string    // the reported sign-in mode, scrubbed; "" when none
 	CodexVersion string    // "" when unknown
 	Plan         string    // "" when unknown
-	Expires      time.Time // zero when no token was read
+	Expires      time.Time // zero when no token was read, or its expiry is unknown
 	Err          error     // the underlying failure of a non-ready state, for the debug log
 
-	// Creds is non-nil only when State is ready. Close releases it.
-	Creds *Credentials
-	src   Source
+	// Creds is non-nil only when State is ready.
+	Creds  *Credentials
+	logger *slog.Logger
 }
 
-// Close releases the source (the Codex child). Safe on any Status.
-func (s *Status) Close() error {
-	if s.src == nil {
+// Probe runs design §5.1a through github.com/xiaolai/sayso/go/codexauth: Codex first, the file
+// when no Codex runs or Codex says its store is a file, only a ChatGPT sign-in, and the refresh
+// decision. It makes no network call of its own. The exit code of `codex login status` is never
+// used.
+func Probe(ctx context.Context, cfg ProbeConfig) *Status {
+	if cfg.Getenv == nil {
+		cfg.Getenv = func(string) string { return "" }
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = DefaultTimeout
+	}
+	bin := cfg.CodexBin
+	if bin == "" {
+		bin = cfg.Getenv("RECITE_CODEX_BIN")
+	}
+	home := cfg.CodexHome
+	if home == "" {
+		home = cfg.Getenv("CODEX_HOME")
+	}
+	st := &Status{Context: Context{CodexHome: home, Source: cfg.Source}, logger: cfg.Logger}
+	var source codexauth.Source
+	switch cfg.Source {
+	case SourceAuto, "":
+		source = codexauth.SourceAuto
+	case SourceCodex:
+		source = codexauth.SourceCodex
+	case SourceFile:
+		source = codexauth.SourceFile
+	default:
+		st.State, st.Err = StateCodexError, fmt.Errorf("auth: unknown source %q", cfg.Source)
+		return st
+	}
+	// The process environment, minus CODEX_HOME: recite decides CODEX_HOME from its flags and
+	// Getenv, and codexauth sets it on the child when one is in force.
+	var env []string
+	for _, kv := range os.Environ() {
+		if len(kv) < 11 || kv[:11] != "CODEX_HOME=" {
+			env = append(env, kv)
+		}
+	}
+	cst, err := codexauth.Probe(ctx, codexauth.Config{
+		Source: source, Bin: bin, CodexHome: home, Env: env, Candidates: candidates(),
+		Margin: RefreshMargin, Timeout: cfg.Timeout, Now: cfg.Now, Logger: cfg.Logger,
+		ClientName: "recite", Guard: guard,
+	})
+	if err != nil {
+		st.State, st.Err = StateCodexError, err
+		return st
+	}
+	st.State, st.Err = cst.State, cst.Err
+	st.Mode, st.CodexVersion, st.Expires = cst.Mode, cst.Info.CodexVersion, cst.Expires
+	st.Context = Context{CodexBin: cst.Info.Bin, CodexHome: cst.Info.CodexHome, Source: string(cst.Info.Source),
+		MissingBin: cst.Info.MissingBin}
+	if st.State != StateReady {
+		return st
+	}
+	st.Creds = cst.Creds
+	if cfg.WithPlan && st.Context.Source == SourceCodex {
+		st.Plan = st.plan(ctx)
+	}
+	return st
+}
+
+// candidates are the folders searched after PATH: Codex's GUI install locations, except in a
+// non-live test, which must never discover the machine's real Codex.
+func candidates() []string {
+	if testguard.Active() {
+		return []string{}
+	}
+	return nil
+}
+
+// guard keeps a non-live test away from the real Codex and the real sign-in file.
+func guard(path string) error {
+	if !testguard.Active() || testguard.TempPath(path) {
 		return nil
 	}
-	err := s.src.Close()
-	s.src = nil
-	return err
+	if filepath.Base(path) == "auth.json" {
+		return fmt.Errorf("a non-live test tried to read %s; tests must use a temporary CODEX_HOME", path)
+	}
+	return fmt.Errorf("a non-live test tried to run %s; tests must use the fake codex", path)
 }
+
+// plan returns the plan type for display; a failure leaves it unknown ("").
+func (s *Status) plan(ctx context.Context) string {
+	c, err := codexapp.Start(ctx, s.Context.CodexConfig(s.logger))
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = c.Close() }()
+	p, _ := c.PlanType(ctx) // display only
+	return p
+}
+
+// Close is kept for callers' lifecycles: the probe no longer keeps a Codex child.
+func (s *Status) Close() error { return nil }
 
 // SourceName is how auth status names the credential source.
 func (s *Status) SourceName() string {
@@ -88,181 +225,6 @@ func (s *Status) SourceName() string {
 	return "none"
 }
 
-// Probe runs design §5.1a: resolve the context once, choose the source, ask for
-// metadata, request the token only for chatgpt, apply the refresh decision, and
-// classify. It makes no network call of its own. The exit code of `codex login
-// status` is never used.
-func Probe(ctx context.Context, cfg ProbeConfig) *Status {
-	if cfg.Getenv == nil {
-		cfg.Getenv = func(string) string { return "" }
-	}
-	if cfg.Now == nil {
-		cfg.Now = time.Now
-	}
-	st := &Status{}
-	rc, err := ResolveContext(cfg.CodexBin, cfg.CodexHome, cfg.Source, cfg.Getenv)
-	if err != nil {
-		st.Context = Context{CodexHome: cfg.CodexHome, Source: cfg.Source}
-		if st.Context.CodexHome == "" {
-			st.Context.CodexHome = cfg.Getenv("CODEX_HOME")
-		}
-		if errors.Is(err, codexapp.ErrNotFound) {
-			st.Context.MissingBin = cfg.CodexBin
-			if st.Context.MissingBin == "" {
-				st.Context.MissingBin = cfg.Getenv("RECITE_CODEX_BIN")
-			}
-			return st.set(StateNoCodex, err)
-		}
-		return st.set(StateCodexError, err)
-	}
-	st.Context = rc
-	if rc.Source == SourceCodex {
-		probeCodex(ctx, st, cfg)
-	} else {
-		probeFile(ctx, st, cfg)
-	}
-	if st.State != StateReady {
-		_ = st.Close()
-	}
-	return st
-}
-
-func (s *Status) set(state State, err error) *Status {
-	s.State, s.Err = state, err
-	return s
-}
-
-func probeCodex(ctx context.Context, st *Status, cfg ProbeConfig) {
-	src := NewCodexSource(st.Context.CodexBin, st.Context.CodexHome, cfg.Timeout, cfg.Logger)
-	st.src = src
-	version, err := src.start(ctx)
-	if err != nil {
-		st.set(StateCodexError, err)
-		return
-	}
-	st.CodexVersion = version
-	if version != "" && codexapp.VersionLess(version, MinCodexVersion) {
-		st.set(StateCodexTooOld, nil)
-		return
-	}
-	method, err := src.method(ctx)
-	if err != nil {
-		var rpc *codexapp.RPCError
-		if errors.As(err, &rpc) && rpc.Code == codexapp.CodeMethodNotFound {
-			st.set(StateCodexTooOld, err)
-			return
-		}
-		st.set(StateCodexError, err)
-		return
-	}
-	if !classifyMode(st, method) {
-		return
-	}
-	tok, err := src.fetch(ctx)
-	if err != nil {
-		st.set(StateCodexError, err)
-		return
-	}
-	if cfg.WithPlan {
-		st.Plan = src.plan(ctx)
-	}
-	decide(ctx, st, src, tok, cfg.Now)
-}
-
-func probeFile(ctx context.Context, st *Status, cfg ProbeConfig) {
-	src, err := NewSource(st.Context, cfg.Timeout, cfg.Logger)
-	if err != nil {
-		st.set(StateCodexError, err)
-		return
-	}
-	fs, ok := src.(*FileSource)
-	if !ok {
-		st.set(StateCodexError, errors.New("auth: file source expected"))
-		return
-	}
-	probeFileSource(ctx, st, fs, cfg)
-}
-
-func probeFileSource(ctx context.Context, st *Status, fs *FileSource, cfg ProbeConfig) {
-	st.src = fs
-	// Under auto, the file source is the fallback for a missing executable: with no
-	// usable auth.json either, the fix is to install Codex (design §5.1a step 2).
-	fallback := cfg.Source == SourceAuto || cfg.Source == ""
-	mode, bearer, err := fs.load()
-	if err != nil {
-		switch {
-		case fallback:
-			st.set(StateNoCodex, err)
-		case errors.Is(err, errNoFile):
-			st.set(StateNotSignedIn, err)
-		default:
-			st.set(StateCodexError, err)
-		}
-		return
-	}
-	if !classifyMode(st, mode) {
-		return
-	}
-	tok, err := fs.bearer(bearer)
-	if err != nil {
-		st.set(StateCodexError, err)
-		return
-	}
-	decide(ctx, st, fs, tok, cfg.Now)
-}
-
-// classifyMode sets the state for every mode but chatgpt and reports whether
-// the probe may go on to request the token.
-func classifyMode(st *Status, mode string) bool {
-	st.Mode = cleanMode(mode)
-	switch mode {
-	case modeChatGPT:
-		return true
-	case "":
-		st.set(StateNotSignedIn, nil)
-	case modeAPIKey:
-		st.set(StateAPIKey, nil)
-	default:
-		st.set(StateUnsupported, nil)
-	}
-	return false
-}
-
-// decide applies the refresh decision (AUTH-04) and classifies the outcome.
-func decide(ctx context.Context, st *Status, src TokenSource, tok Token, now func() time.Time) {
-	creds := NewCredentials(src, now)
-	creds.seed(tok)
-	st.Expires = tok.Expires
-	fresh, err := creds.Token(ctx)
-	if err != nil {
-		if openai.Classify(err) == openai.ClassAuthExpired {
-			st.set(StateExpired, err)
-		} else {
-			st.set(StateCodexError, err)
-		}
-		return
-	}
-	st.Expires = fresh.Expires
-	st.Creds = creds
-	st.set(StateReady, nil)
-}
-
-// cleanMode makes a Codex-reported mode safe to print: scrubbed, printable,
-// and bounded, since a future Codex controls the string.
-func cleanMode(m string) string {
-	m = logx.Scrub(m)
-	m = strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
-		}
-		return -1
-	}, m)
-	if len(m) > maxModeLen {
-		m = m[:maxModeLen]
-	}
-	return m
-}
-
 // ExitCode is 0 for ready and 3 (auth) for every other state (AUTH-06, AUTH-07).
 func (s *Status) ExitCode() int {
 	if s.State == StateReady {
@@ -271,11 +233,23 @@ func (s *Status) ExitCode() int {
 	return exitcode.Auth
 }
 
-// PlanStatus reads the Codex plan status (design §12.4 check 3) over the probe's source, as
-// the package-level PlanStatus does. Call it only before Close.
+// PlanStatus reads the Codex plan status (design §12.4 check 3, OBS-04) through a Codex child.
+// The file source has no app-server, so the call is skipped with a warning and ok is false.
 func (s *Status) PlanStatus(ctx context.Context) (rl codexapp.RateLimits, ok bool, err error) {
-	if s.src == nil {
+	if s.Context.Source != SourceCodex || s.Context.CodexBin == "" {
+		if s.logger != nil {
+			s.logger.Warn("Codex plan status skipped: it is read through the Codex app-server, and the auth source is file")
+		}
 		return codexapp.RateLimits{}, false, nil
 	}
-	return PlanStatus(ctx, s.src, nil)
+	c, err := codexapp.Start(ctx, s.Context.CodexConfig(s.logger))
+	if err != nil {
+		return codexapp.RateLimits{}, false, err
+	}
+	defer func() { _ = c.Close() }()
+	rl, err = c.PlanStatus(ctx)
+	if err != nil {
+		return codexapp.RateLimits{}, false, err
+	}
+	return rl, true, nil
 }

@@ -8,13 +8,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 const opaque = "opaque-canary-123"
 
 var canaries = []string{"eyJcanary.canary.canary", "ek_canary", opaque}
 
-func init() { RegisterSecret(opaque) }
+func init() { secret.Register(opaque) }
 
 // noTime keeps log lines deterministic.
 func noTime(groups []string, a slog.Attr) slog.Attr {
@@ -65,7 +67,7 @@ func TestHandlerScrubsMessageGroupsAndErrors(t *testing.T) {
 		l.With(slog.String("with", opaque)).WithGroup("g").Info("x", "k", opaque)
 		out := buf.String()
 		assertClean(t, out)
-		if strings.Count(out, Redacted) < 9 {
+		if strings.Count(out, secret.Redacted) < 9 {
 			t.Errorf("expected redaction markers, got:\n%s", out)
 		}
 		if !strings.Contains(out, "mint failed") || !strings.Contains(out, "inner") {
@@ -83,22 +85,6 @@ func TestHandlerDropsSecretKeys(t *testing.T) {
 	out := buf.String()
 	if strings.Contains(out, "plain") || !strings.Contains(out, "keep=1") {
 		t.Fatalf("got %s", out)
-	}
-}
-
-func TestScrubPatternsAndRegistry(t *testing.T) {
-	RegisterSecret("")
-	RegisterSecret(opaque + "-longer")
-	cases := map[string]string{
-		"a eyJx.y-z.w_1 b":               "a <redacted> b",
-		"key=ek_ab-c_9":                  "key=<redacted>",
-		opaque + "-longer and " + opaque: "<redacted> and <redacted>",
-		"plain":                          "plain",
-	}
-	for in, want := range cases {
-		if got := Scrub(in); got != want {
-			t.Errorf("Scrub(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 

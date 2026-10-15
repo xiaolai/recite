@@ -1,0 +1,5 @@
+This Codex does not report its sign-in to other programs, and keeps it outside auth.json.
+  Update Codex:
+      CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' update
+  or upgrade it the way it was installed.
+More help: https://learn.chatgpt.com/docs/auth

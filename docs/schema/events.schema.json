@@ -49,7 +49,10 @@
         "api-key",
         "unsupported-auth",
         "expired",
-        "codex-error"
+        "codex-error",
+        "no-sign-in-file",
+        "app-server-auth-unavailable",
+        "provider-without-openai-auth"
       ]
     },
     "auth_error": {
@@ -137,7 +140,11 @@
           "type": "string"
         },
         "token_expires_in_s": {
-          "type": "integer"
+          "description": "Seconds until the token expires; null when the token carries no expiry (the API decides).",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     },

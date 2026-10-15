@@ -1,0 +1,5 @@
+Codex is configured with a model provider that needs no OpenAI sign-in (pinned by managed settings), so it has no ChatGPT sign-in to share.
+  See the current sign-in:
+      CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' login status
+  Changing a managed Codex configuration is your administrator's decision, so recite prints no command for it.
+More help: https://learn.chatgpt.com/docs/auth

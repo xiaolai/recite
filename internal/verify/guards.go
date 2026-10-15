@@ -8,11 +8,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaolai/recite/internal/audio"
-	"github.com/xiaolai/recite/internal/numwords"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/spoken"
 	"github.com/xiaolai/recite/internal/stt"
 	"github.com/xiaolai/recite/internal/text"
+	"github.com/xiaolai/sayso/go/numwords"
 )
 
 // Reason names the guard or threshold that rejected a take (VER-05, VER-06, design §8).

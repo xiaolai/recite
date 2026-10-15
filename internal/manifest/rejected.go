@@ -8,9 +8,9 @@ import (
 
 	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/fsx"
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/verify"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // RejectedSchema identifies a rejected-take report (OUT-06).
@@ -66,12 +66,12 @@ func WriteRejected(dir string, c verify.Chunk, a verify.Attempt, take realtime.T
 		return fmt.Errorf("manifest: %s attempt %d was not rejected", c.ID, a.N)
 	}
 	r := RejectedReport{
-		Schema: RejectedSchema, Chunk: c.ID, Attempt: a.N, Expected: logx.Scrub(c.Spoken), Said: logx.Scrub(take.Said),
+		Schema: RejectedSchema, Chunk: c.ID, Attempt: a.N, Expected: secret.Scrub(c.Spoken), Said: secret.Scrub(take.Said),
 		Status: string(a.Status), Eligible: a.Eligible, Reason: string(a.Rejection.Reason),
-		Detail: logx.Scrub(a.Rejection.Detail), Score: a.Score, Transcriptions: []RejectedTranscript{},
+		Detail: secret.Scrub(a.Rejection.Detail), Score: a.Score, Transcriptions: []RejectedTranscript{},
 	}
 	for _, tr := range a.Transcriptions {
-		rt := RejectedTranscript{Text: logx.Scrub(tr.Text), Language: tr.Language, Metric: string(tr.Result.Metric),
+		rt := RejectedTranscript{Text: secret.Scrub(tr.Text), Language: tr.Language, Metric: string(tr.Result.Metric),
 			Score: tr.Result.Score, Errors: tr.Result.Errors, RefLen: tr.Result.RefLen, Alignment: []Alignment{}}
 		low := map[int]bool{}
 		for _, sc := range tr.Confidence {
@@ -80,8 +80,8 @@ func WriteRejected(dir string, c verify.Chunk, a verify.Attempt, take realtime.T
 			}
 		}
 		for _, e := range tr.Result.Edits {
-			rt.Alignment = append(rt.Alignment, Alignment{Kind: string(e.Kind), Expected: logx.Scrub(e.Expected),
-				Heard: logx.Scrub(e.Heard), RefStart: e.RefStart, RefEnd: e.RefEnd, LowConfidence: low[e.RefStart]})
+			rt.Alignment = append(rt.Alignment, Alignment{Kind: string(e.Kind), Expected: secret.Scrub(e.Expected),
+				Heard: secret.Scrub(e.Heard), RefStart: e.RefStart, RefEnd: e.RefEnd, LowConfidence: low[e.RefStart]})
 		}
 		r.Transcriptions = append(r.Transcriptions, rt)
 	}

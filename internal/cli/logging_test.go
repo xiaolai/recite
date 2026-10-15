@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xiaolai/recite/internal/logx"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 func TestLoggingFromGlobals(t *testing.T) {
@@ -64,7 +64,7 @@ func TestLoggingFromGlobals(t *testing.T) {
 
 // accept: AUTH-05#3
 func TestUserErrorsScrubbed(t *testing.T) {
-	logx.RegisterSecret("opaque-canary-cli")
+	secret.Register("opaque-canary-cli")
 	var errb bytes.Buffer
 	c := New(&bytes.Buffer{}, &errb)
 	err := fmt.Errorf("mint: %w", errors.New("bad opaque-canary-cli eyJcanary.canary.canary"))

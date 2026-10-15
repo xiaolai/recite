@@ -3,7 +3,7 @@ package spoken
 import (
 	"strings"
 
-	"github.com/xiaolai/recite/internal/numwords"
+	"github.com/xiaolai/sayso/go/numwords"
 )
 
 // usStates maps USPS state codes to the names said aloud.

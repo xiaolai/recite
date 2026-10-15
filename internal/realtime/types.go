@@ -49,26 +49,3 @@ type Take struct {
 	Usage            TokenUsage
 	FirstAudio, Wall time.Duration
 }
-
-// ResponseStatus is response.done.status: "completed" | "failed" | "incomplete" | "cancelled".
-type ResponseStatus string
-
-// Response statuses reported by response.done.
-const (
-	StatusCompleted  ResponseStatus = "completed"
-	StatusFailed     ResponseStatus = "failed"
-	StatusIncomplete ResponseStatus = "incomplete"
-	StatusCancelled  ResponseStatus = "cancelled"
-)
-
-// TokenUsage is the response.done usage: the totals and, when the server sends
-// input_token_details / output_token_details, their text and audio parts (the manifest's
-// text_in, text_out and audio_out, design §11.2).
-type TokenUsage struct {
-	InputTokens, OutputTokens int
-	InputTextTokens           int
-	OutputTextTokens          int
-	OutputAudioTokens         int
-	// Detailed is set when output_token_details was present, so a zero audio count is real.
-	Detailed bool
-}

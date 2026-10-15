@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/xiaolai/sayso/go/canon"
 )
 
 // MaxKeywords bounds the STT prompt (VER-10).
@@ -149,10 +151,7 @@ func joins(word string, r rune, rest string) bool {
 }
 
 // isAbbreviation reports a word the canonicaliser expands ("Mrs", "Dr", "St", "etc").
-func isAbbreviation(w string) bool {
-	lw := strings.ToLower(w)
-	return abbreviations[lw] != "" || lw == "st"
-}
+func isAbbreviation(w string) bool { return canon.IsAbbreviation(w) }
 
 // isPronounI reports "I" and its contractions, capitalised everywhere and never names.
 func isPronounI(w string) bool {

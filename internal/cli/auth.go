@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/xiaolai/recite/internal/auth"
-	"github.com/xiaolai/recite/internal/codexapp"
 	"github.com/xiaolai/recite/internal/exitcode"
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/pipeline"
+	"github.com/xiaolai/sayso/go/codexapp"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 func setupAuth(fs *flag.FlagSet, c *CLI) func([]string) int {
@@ -91,11 +91,15 @@ func (c *CLI) authStatus() int {
 	}
 	if st.State == auth.StateReady {
 		row("plan", orUnknown(st.Plan))
-		row("expires", relative(st.Expires.Sub(c.Now())))
+		if st.Expires.IsZero() {
+			row("expires", "unknown") // the token carries no expiry; the API decides
+		} else {
+			row("expires", relative(st.Expires.Sub(c.Now())))
+		}
 	}
-	_, _ = io.WriteString(c.Stdout, logx.Scrub(b.String())) // stdout has no error channel worth more than the exit code
+	_, _ = io.WriteString(c.Stdout, secret.Scrub(b.String())) // stdout has no error channel worth more than the exit code
 	if g, ok := st.Guide(); ok {
-		_, _ = io.WriteString(c.Stderr, logx.Scrub(g.Text()))
+		_, _ = io.WriteString(c.Stderr, secret.Scrub(g.Text()))
 	}
 	return st.ExitCode()
 }
@@ -119,7 +123,7 @@ func (c *CLI) authLogin(deviceAuth bool) int {
 		// and without a usable Codex there is nothing to run: print the guide instead.
 		defer func() { _ = st.Close() }()
 		g, _ := st.Guide()
-		_, _ = io.WriteString(c.Stderr, logx.Scrub(g.Text()))
+		_, _ = io.WriteString(c.Stderr, secret.Scrub(g.Text()))
 		return st.ExitCode()
 	}
 	rc := st.Context
@@ -131,7 +135,7 @@ func (c *CLI) authLogin(deviceAuth bool) int {
 		c.errorf("recite auth login: needs the Codex executable; --auth-source file cannot sign in")
 		return ExitUsage
 	}
-	err := codexapp.Login(codexapp.Config{Bin: rc.CodexBin, Home: rc.CodexHome}, deviceAuth,
+	err := codexapp.Login(rc.CodexConfig(c.Logger), deviceAuth,
 		codexapp.Streams{Stdin: c.Stdin, Stdout: c.Stdout, Stderr: c.Stderr})
 	if err != nil {
 		c.errorf("recite auth login: %v", err)
@@ -149,7 +153,7 @@ type statusJSON struct {
 	CodexVersion  string `json:"codex_version"`
 	AuthMethod    string `json:"auth_method"`
 	PlanType      string `json:"plan_type"`
-	ExpiresInSecs int64  `json:"token_expires_in_s"`
+	ExpiresInSecs *int64 `json:"token_expires_in_s"` // nil when the token carries no expiry
 }
 
 func statusEvent(st *auth.Status, now time.Time) statusJSON {
@@ -161,8 +165,16 @@ func statusEvent(st *auth.Status, now time.Time) statusJSON {
 		CodexVersion:  orUnknown(st.CodexVersion),
 		AuthMethod:    st.Mode,
 		PlanType:      orUnknown(st.Plan),
-		ExpiresInSecs: int64(st.Expires.Sub(now) / time.Second),
+		ExpiresInSecs: expiresIn(st.Expires, now),
 	}
+}
+
+func expiresIn(exp, now time.Time) *int64 {
+	if exp.IsZero() {
+		return nil
+	}
+	s := int64(exp.Sub(now) / time.Second)
+	return &s
 }
 
 // emit writes one NDJSON event to stdout and returns code.
@@ -172,7 +184,7 @@ func (c *CLI) emit(v any, code int) int {
 		c.errorf("recite: encode event: %v", err)
 		return exitcode.Internal
 	}
-	if _, err := io.WriteString(c.Stdout, logx.Scrub(string(b))+"\n"); err != nil {
+	if _, err := io.WriteString(c.Stdout, secret.Scrub(string(b))+"\n"); err != nil {
 		return c.writeResult(err)
 	}
 	return code
@@ -231,7 +243,7 @@ func (c *CLI) withCredentials(fn func(ctx context.Context, creds *auth.Credentia
 		if c.globals.JSON {
 			return c.emit(g.Event(), st.ExitCode())
 		}
-		_, _ = io.WriteString(c.Stderr, logx.Scrub(g.Text()))
+		_, _ = io.WriteString(c.Stderr, secret.Scrub(g.Text()))
 		return st.ExitCode()
 	}
 	err := fn(ctx, st.Creds)

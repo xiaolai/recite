@@ -21,14 +21,12 @@ func TestLiveAuth(t *testing.T) {
 	if os.Getenv("RECITE_LIVE") == "" {
 		t.Skip("set RECITE_LIVE=1 to run against the real Codex")
 	}
-	c, err := ResolveContext("", "", SourceCodex, os.Getenv)
-	if err != nil {
-		t.Fatal(err)
+	st := Probe(context.Background(), ProbeConfig{Source: SourceCodex, Getenv: os.Getenv})
+	if st.State != StateReady {
+		t.Fatalf("state %s (err %v)", st.State, st.Err)
 	}
-	s := NewCodexSource(c.CodexBin, c.CodexHome, 0, nil)
-	defer func() { _ = s.Close() }()
 	start := time.Now()
-	tok, err := s.Token(context.Background())
+	tok, err := st.Creds.Token(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,23 +101,23 @@ func TestLiveRefreshIsolatedHome(t *testing.T) {
 	if home == "" {
 		t.Fatal("set RECITE_LIVE_CODEX_HOME to a throwaway CODEX_HOME with its own ChatGPT login")
 	}
-	c, err := ResolveContext("", home, SourceCodex, os.Getenv)
+	st := Probe(context.Background(), ProbeConfig{CodexHome: home, Source: SourceCodex, Getenv: os.Getenv})
+	if st.State != StateReady {
+		t.Fatalf("state %s (err %v)", st.State, st.Err)
+	}
+	c := st.Context
+	before, err := st.Creds.Token(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewCodexSource(c.CodexBin, c.CodexHome, 0, nil)
-	defer func() { _ = s.Close() }()
-	creds := NewCredentials(s, nil)
-	before, err := creds.Token(context.Background())
+	after, err := st.Creds.RefreshAfter(context.Background(), before)
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := creds.RefreshAfter(context.Background(), before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.Bearer() == before.Bearer() {
-		t.Fatal("refresh returned the same token")
+	// Upstream may return the unchanged token when it is still fresh (D-4): a refresh succeeds when
+	// the token it returns has the margin left.
+	if !after.Expires.IsZero() && time.Until(after.Expires) < RefreshMargin {
+		t.Fatalf("refreshed token expires in %v", time.Until(after.Expires))
 	}
 	// Codex itself still works with the refreshed sign-in.
 	cmd := exec.Command(c.CodexBin, "login", "status")

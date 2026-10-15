@@ -19,6 +19,7 @@ import (
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/realtime"
 	"github.com/xiaolai/recite/internal/stt"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // CLI is one invocation of recite. Say is injectable so tests can observe how
@@ -236,7 +237,7 @@ func (c *CLI) setupLogging() (closeFn func(), err error) {
 // secret embedded in a wrapped error never reaches the terminal (AUTH-05).
 func (c *CLI) errorf(format string, a ...any) {
 	// A failed write to stderr has nowhere left to be reported.
-	_, _ = io.WriteString(c.Stderr, logx.Scrub(fmt.Sprintf(format, a...))+"\n")
+	_, _ = io.WriteString(c.Stderr, secret.Scrub(fmt.Sprintf(format, a...))+"\n")
 }
 
 func (c *CLI) writeResult(err error) int {

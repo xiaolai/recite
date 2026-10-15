@@ -178,9 +178,12 @@ func codexCreds(t *testing.T, mode string) (*auth.Credentials, string) {
 	t.Setenv("FAKECODEX_RECORD", rec)
 	t.Setenv("FAKECODEX_TOKEN_EXP", "1800000000")
 	t.Setenv("FAKECODEX_REFRESHED_EXP", "1900000000")
-	src := auth.NewCodexSource(codexBin, t.TempDir(), 0, nil)
-	t.Cleanup(func() { _ = src.Close() })
-	return auth.NewCredentials(src, func() time.Time { return time.Unix(1_700_000_000, 0) }), rec
+	st := auth.Probe(context.Background(), auth.ProbeConfig{CodexBin: codexBin, CodexHome: t.TempDir(),
+		Source: auth.SourceCodex, Now: func() time.Time { return time.Unix(1_700_000_000, 0) }})
+	if st.State != auth.StateReady {
+		t.Fatalf("probe: %s %v", st.State, st.Err)
+	}
+	return st.Creds, rec
 }
 
 // accept: AUTH-04#1

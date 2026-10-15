@@ -156,7 +156,7 @@ func TestAuthStatusPrintsNoSecret(t *testing.T) {
 func TestAuthStatusExitCodes(t *testing.T) {
 	for mode, state := range map[string]auth.State{
 		"chatgpt": auth.StateReady, "logged-out": auth.StateNotSignedIn, "apikey": auth.StateAPIKey,
-		"headers": auth.StateUnsupported, "rpc-error": auth.StateCodexError, "unknown-method": auth.StateCodexTooOld,
+		"headers": auth.StateUnsupported, "rpc-error": auth.StateCodexError, "unknown-method": auth.StateAppServerAuthUnavailable,
 		"null-token": auth.StateCodexError,
 	} {
 		t.Run(mode, func(t *testing.T) {

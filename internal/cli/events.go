@@ -6,8 +6,8 @@ import (
 	"math"
 
 	"github.com/xiaolai/recite/internal/audio"
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/verify"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // The `say --json` events of design §12.5 (CLI-06). docs/schema/events.schema.json is their
@@ -57,7 +57,7 @@ const (
 func (c *CLI) event(v any) {
 	b, err := json.Marshal(v)
 	if err == nil {
-		_, err = io.WriteString(c.Stdout, logx.Scrub(string(b))+"\n")
+		_, err = io.WriteString(c.Stdout, secret.Scrub(string(b))+"\n")
 	}
 	if err != nil {
 		c.Logger.Warn("event not written", "err", err)

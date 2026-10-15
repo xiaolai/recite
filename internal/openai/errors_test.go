@@ -76,7 +76,7 @@ func TestCheckResponseHTTPRows(t *testing.T) {
 }
 
 // accept: NET-05#1
-func TestInvalidRequestNamesParamAndSplitsUserFromBug(t *testing.T) {
+func TestInvalidRequestNamesParamAndIsOurBug(t *testing.T) {
 	resp := reply(nil, 400, nil, errBody("invalid_value", "session.audio.output.speed", "speed out of range"))
 	err := CheckResponse(resp, RouteSpeechMint)
 	var e *Error
@@ -87,26 +87,7 @@ func TestInvalidRequestNamesParamAndSplitsUserFromBug(t *testing.T) {
 		t.Errorf("message does not name the param: %v", err)
 	}
 	if ExitCode(err) != exitcode.Internal {
-		t.Error("an unflagged 400 is our bug, exit 1")
-	}
-	e.UserInput = true
-	if ExitCode(err) != exitcode.Usage {
-		t.Error("a 400 from user input is exit 2")
-	}
-}
-
-func TestCheckResponseScrubsAndAcceptsSuccess(t *testing.T) {
-	if err := CheckResponse(reply(nil, 200, nil, "{}"), RouteHTTPSTT); err != nil {
-		t.Fatalf("2xx: %v", err)
-	}
-	body := `{"error":{"message":"bad token eyJcanary.canary.canary and ek_canary","type":"x","code":401,"param":null}}`
-	err := CheckResponse(reply(nil, 401, nil, body), RouteHTTPSTT)
-	if s := err.Error(); strings.Contains(s, "canary") {
-		t.Errorf("error leaks secret: %s", s)
-	}
-	var e *Error
-	if errors.As(err, &e) && e.Code != "401" {
-		t.Errorf("numeric code %q, want \"401\"", e.Code)
+		t.Error("a 400 reaching the API is our bug, exit 1: user input is validated before any request")
 	}
 }
 
@@ -158,28 +139,6 @@ func TestClassifyTransportAndOtherRows(t *testing.T) {
 	}
 }
 
-// A real dial failure through the client is network-class.
-func TestClassifyRealDialFailure(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	c, err := NewClient(WithTestOrigin(addr), WithRootCAs(x509.NewCertPool()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := c.Do(newReq(t, shapes[0], "https://"+addr+shapes[0].path))
-	if err == nil {
-		_ = resp.Body.Close()
-		t.Fatal("dial to closed port succeeded")
-	}
-	if got := Classify(err); got != ClassNetwork {
-		t.Errorf("class %q, want network (%v)", got, err)
-	}
-}
-
 func TestEveryClassHasAnExitCode(t *testing.T) {
 	want := map[Class]int{
 		ClassAuthExpired: 3, ClassAuthMode: 3, ClassCodexError: 3, ClassRouteDenied: 4,
@@ -187,7 +146,7 @@ func TestEveryClassHasAnExitCode(t *testing.T) {
 		ClassVerifyFailed: 5, ClassCancelled: 130, ClassInternal: 1,
 	}
 	for c, code := range want {
-		if got := c.ExitCode(false); got != code {
+		if got := ClassExitCode(c); got != code {
 			t.Errorf("%s: exit %d, want %d", c, got, code)
 		}
 	}

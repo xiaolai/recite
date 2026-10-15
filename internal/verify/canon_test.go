@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -87,7 +88,7 @@ func FuzzCanon(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, s string) {
 		c := Canon(s)
-		if again := Canon(strings.Join(c, " ")); !equalTokens(again, c) {
+		if again := Canon(strings.Join(c, " ")); !slices.Equal(again, c) {
 			t.Fatalf("not idempotent: %q -> %q -> %q", s, c, again)
 		}
 		if !Equivalent(s, s) {

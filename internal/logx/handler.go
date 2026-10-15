@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // droppedKeys are attribute names whose values are secrets by construction.
@@ -23,7 +25,7 @@ func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle scrubs the message and every attribute, then delegates.
 func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
-	out := slog.NewRecord(r.Time, r.Level, Scrub(r.Message), r.PC)
+	out := slog.NewRecord(r.Time, r.Level, secret.Scrub(r.Message), r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		if s, ok := scrubAttr(a); ok {
 			out.AddAttrs(s)
@@ -43,7 +45,7 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 // WithGroup scrubs the group name, which is user-visible text too.
 func (h *Handler) WithGroup(name string) slog.Handler {
-	return &Handler{inner: h.inner.WithGroup(Scrub(name))}
+	return &Handler{inner: h.inner.WithGroup(secret.Scrub(name))}
 }
 
 func scrubAttrs(attrs []slog.Attr) []slog.Attr {
@@ -63,18 +65,18 @@ func scrubAttr(a slog.Attr) (slog.Attr, bool) {
 	if droppedKeys[strings.ToLower(a.Key)] {
 		return slog.Attr{}, false
 	}
-	key := Scrub(a.Key)
+	key := secret.Scrub(a.Key)
 	v := a.Value.Resolve()
 	switch v.Kind() {
 	case slog.KindGroup:
 		return slog.Attr{Key: key, Value: slog.GroupValue(scrubAttrs(v.Group())...)}, true
 	case slog.KindString:
-		return slog.String(key, Scrub(v.String())), true
+		return slog.String(key, secret.Scrub(v.String())), true
 	case slog.KindInt64, slog.KindUint64, slog.KindFloat64, slog.KindBool, slog.KindDuration, slog.KindTime:
 		return slog.Attr{Key: key, Value: v}, true
 	}
 	if err, ok := v.Any().(error); ok {
-		return slog.String(key, Scrub(err.Error())), true
+		return slog.String(key, secret.Scrub(err.Error())), true
 	}
-	return slog.String(key, Scrub(fmt.Sprintf("%+v", v.Any()))), true
+	return slog.String(key, secret.Scrub(fmt.Sprintf("%+v", v.Any()))), true
 }

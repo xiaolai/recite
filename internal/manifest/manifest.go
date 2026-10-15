@@ -11,9 +11,9 @@ import (
 
 	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/buildinfo"
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/pipeline"
 	"github.com/xiaolai/recite/internal/verify"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // Schema identifies manifest v1 (design §11.2; docs/schema/manifest.schema.json).
@@ -275,7 +275,7 @@ func Build(r Run) (Manifest, error) {
 		UsageEstimate: r.EstimateUSD, UsageNote: r.PriceNote,
 	}
 	if f := m.Verifier.Fallback; f != nil {
-		f.Cause = logx.Scrub(f.Cause)
+		f.Cause = secret.Scrub(f.Cause)
 	}
 	for i, pc := range r.Plan.Chunks {
 		c := Chunk{
@@ -351,7 +351,7 @@ func fill(c *Chunk, res verify.ChunkResult) {
 			c.Usage.STTSeconds += tr.Seconds
 		}
 		if a.Rejection != nil {
-			rec.Rejection = &Rejection{Reason: string(a.Rejection.Reason), Detail: logx.Scrub(a.Rejection.Detail)}
+			rec.Rejection = &Rejection{Reason: string(a.Rejection.Reason), Detail: secret.Scrub(a.Rejection.Detail)}
 		}
 		c.AttemptLog = append(c.AttemptLog, rec)
 		if res.Cached {

@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/xiaolai/recite/internal/logx"
 	"github.com/xiaolai/recite/internal/openai"
+	"github.com/xiaolai/sayso/go/secret"
 )
 
 // Dumps configures the event dumps of OBS-02.
@@ -42,7 +42,7 @@ func (l *eventLog) record(dir string, raw []byte) {
 		return
 	}
 	l.mu.Lock()
-	l.lines = append(l.lines, []byte(logx.Scrub(string(line))))
+	l.lines = append(l.lines, []byte(secret.Scrub(string(line))))
 	l.mu.Unlock()
 }
 

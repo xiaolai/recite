@@ -1,0 +1,6 @@
+There is no auth.json to read the ChatGPT sign-in from. Codex may keep it in the system keychain, which only Codex can read.
+  Let recite ask Codex instead:
+      recite --auth-source codex auth status
+  or sign in with Codex:
+      CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' login
+More help: https://learn.chatgpt.com/docs/auth

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,6 +30,7 @@ type probeCase struct {
 	home    string            // --codex-home; "" = a temp dir, "-" = none
 	getenv  map[string]string // what recite sees as its environment
 	timeout time.Duration
+	logger  *slog.Logger
 }
 
 // probeFake runs the probe against the fake and returns the status and the fake's record.
@@ -59,7 +61,7 @@ func probeFake(t *testing.T, pc probeCase) (*Status, string) {
 	getenv := func(k string) string { return pc.getenv[k] }
 	st := Probe(context.Background(), ProbeConfig{
 		CodexBin: pc.bin, CodexHome: pc.home, Source: pc.source,
-		Getenv: getenv, Now: fixedNow, Timeout: pc.timeout,
+		Getenv: getenv, Now: fixedNow, Timeout: pc.timeout, Logger: pc.logger,
 	})
 	t.Cleanup(func() { _ = st.Close() })
 	b, _ := os.ReadFile(rec) // absent when the fake never ran
@@ -96,7 +98,9 @@ func TestProbeEveryStateWithGolden(t *testing.T) {
 	}{
 		{StateReady, probeCase{mode: "chatgpt"}},
 		{StateNoCodex, probeCase{mode: "chatgpt", bin: filepath.Join(t.TempDir(), "missing", "codex")}},
-		{StateCodexTooOld, probeCase{mode: "unknown-method"}},
+		{StateCodexTooOld, probeCase{mode: "chatgpt", env: map[string]string{"FAKECODEX_VERSION": "0.150.3"}}},
+		{StateAppServerAuthUnavailable, probeCase{mode: "unknown-method"}},
+		{StateNoSignInFile, probeCase{source: SourceFile, bin: "-"}},
 		{StateNotSignedIn, probeCase{mode: "logged-out"}},
 		{StateAPIKey, probeCase{mode: "apikey"}},
 		{StateUnsupported, probeCase{mode: "headers"}},
@@ -111,7 +115,8 @@ func TestProbeEveryStateWithGolden(t *testing.T) {
 	}
 	// Goldens are rendered from a fixed context, so they do not depend on temp paths.
 	fixed := Context{CodexBin: "/opt/codex tools/bin/codex", CodexHome: "/srv/codex-home", Source: SourceCodex}
-	for _, s := range []State{StateNoCodex, StateCodexTooOld, StateNotSignedIn, StateAPIKey, StateUnsupported, StateExpired, StateCodexError} {
+	for _, s := range []State{StateNoCodex, StateCodexTooOld, StateNotSignedIn, StateAPIKey, StateUnsupported, StateExpired, StateCodexError,
+		StateNoSignInFile, StateAppServerAuthUnavailable, StateProviderWithoutOpenAIAuth} {
 		t.Run("golden-"+string(s), func(t *testing.T) {
 			g, ok := GuideFor(s, fixed, "headers", "0.150.0")
 			if !ok {
@@ -193,12 +198,18 @@ func TestProbeTokenOutcomes(t *testing.T) {
 		st, _ := probeFake(t, probeCase{mode: "refresh-ok", env: map[string]string{"FAKECODEX_TOKEN_EXP": soon(), "FAKECODEX_REFRESHED_EXP": soon()}})
 		wantState(t, st, StateExpired)
 	})
-	for _, mode := range []string{"null-token", "bad-jwt"} {
-		t.Run(mode, func(t *testing.T) {
-			st, _ := probeFake(t, probeCase{mode: mode})
-			wantState(t, st, StateCodexError)
-		})
-	}
+	t.Run("null-token", func(t *testing.T) {
+		st, _ := probeFake(t, probeCase{mode: "null-token"})
+		wantState(t, st, StateCodexError)
+	})
+	t.Run("bad-jwt", func(t *testing.T) {
+		// A token that is not a JWT has an unknown expiry: it is used, and the API decides.
+		st, _ := probeFake(t, probeCase{mode: "bad-jwt"})
+		wantState(t, st, StateReady)
+		if !st.Expires.IsZero() {
+			t.Fatalf("expiry %v, want unknown", st.Expires)
+		}
+	})
 }
 
 // accept: AUTH-07#4
@@ -218,9 +229,9 @@ func TestProbeSourceResolution(t *testing.T) {
 	wantState(t, st, StateNoCodex)
 	st, _ = probeFake(t, probeCase{source: SourceAuto, bin: "-", home: writeHome(t, "{not json")})
 	wantState(t, st, StateNoCodex)
-	// Under file, a missing auth.json means not signed in.
+	// Under file, a missing auth.json may mean a sign-in kept in the keychain.
 	st, _ = probeFake(t, probeCase{source: SourceFile, bin: "-", home: t.TempDir()})
-	wantState(t, st, StateNotSignedIn)
+	wantState(t, st, StateNoSignInFile)
 }
 
 // accept: AUTH-07#5
@@ -312,8 +323,10 @@ func TestProbeSlowChildIsCodexError(t *testing.T) {
 func TestProbeRPCErrors(t *testing.T) {
 	st, _ := probeFake(t, probeCase{mode: "rpc-error"})
 	wantState(t, st, StateCodexError)
+	// Without getAuthStatus, and without config/read to confirm the store is the file, the file
+	// is not Codex's authority (D-3).
 	st, _ = probeFake(t, probeCase{mode: "unknown-method"})
-	wantState(t, st, StateCodexTooOld)
+	wantState(t, st, StateAppServerAuthUnavailable)
 	st, _ = probeFake(t, probeCase{mode: "chatgpt", env: map[string]string{"FAKECODEX_VERSION": "0.150.3"}})
 	wantState(t, st, StateCodexTooOld)
 	if g, _ := st.Guide(); !strings.HasPrefix(g.Text(), "Codex 0.150.3 is too old for recite (needs ≥ 0.162.0).") {

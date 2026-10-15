@@ -15,8 +15,9 @@ import (
 // email or account ID.
 // accept: OBS-04#1
 func TestPlanStatusFromFakeAppServer(t *testing.T) {
-	s, logs, rec := run(t, 10*time.Second, "chatgpt")
-	rl, ok, err := PlanStatus(context.Background(), s, nil)
+	st, logs, _ := run(t, 10*time.Second, "chatgpt")
+	wantState(t, st, StateReady)
+	rl, ok, err := st.PlanStatus(context.Background())
 	if err != nil || !ok {
 		t.Fatalf("PlanStatus: ok %v err %v", ok, err)
 	}
@@ -27,7 +28,7 @@ func TestPlanStatusFromFakeAppServer(t *testing.T) {
 	if got != want {
 		t.Fatalf("plan status:\n%s\nwant:\n%s", got, want)
 	}
-	if !strings.Contains(record(t, rec), `"account/rateLimits/read"`) {
+	if !strings.Contains(readRecord(t, getenvT(t, "FAKECODEX_RECORD")), `"account/rateLimits/read"`) {
 		t.Fatal("account/rateLimits/read was not called")
 	}
 	for _, leak := range []string{"canary@example.invalid", "acct-canary-0000", "eyJcanary"} {
@@ -42,7 +43,9 @@ func TestPlanStatusFromFakeAppServer(t *testing.T) {
 func TestPlanStatusSkippedForFileSource(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
-	rl, ok, err := PlanStatus(context.Background(), NewFileSource(t.TempDir()), logger)
+	st := probeFile(t, homeWith(t, 1800000000), logger)
+	wantState(t, st, StateReady)
+	rl, ok, err := st.PlanStatus(context.Background())
 	if err != nil || ok || len(rl.Windows) != 0 {
 		t.Fatalf("file source: %+v %v %v", rl, ok, err)
 	}

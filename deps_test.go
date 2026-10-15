@@ -17,6 +17,8 @@ var (
 		"github.com/BurntSushi/toml",
 		"github.com/yuin/goldmark",
 		"golang.org/x/text",
+		// The shared Codex sign-in, Realtime and said-guard module, split out of recite itself.
+		"github.com/xiaolai/sayso/go",
 	}
 	testOnlyModules = []string{
 		"go.uber.org/goleak",

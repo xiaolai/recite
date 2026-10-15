@@ -2,42 +2,26 @@ package realtime
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"log/slog"
-	"maps"
-	"net"
 	"net/http"
-	"net/url"
-	"strings"
-	"sync"
-	"time"
 
-	"github.com/coder/websocket"
+	sr "github.com/xiaolai/sayso/go/realtime"
 
 	"github.com/xiaolai/recite/internal/auth"
 	"github.com/xiaolai/recite/internal/openai"
 )
 
-const (
-	// ReadLimit is the largest message accepted (design §5.2).
-	ReadLimit = 16 << 20
-	// closeGrace is how long Close waits for the library's close handshake
-	// before dropping the connection; the library alone may block for 10 s.
-	closeGrace = 2 * time.Second
-)
+// ReadLimit is the largest message accepted (design §5.2).
+const ReadLimit = 16 << 20
 
 // ErrClosed is returned by Next and Send after Close.
-var ErrClosed = errors.New("realtime: session closed")
+var ErrClosed = sr.ErrClosed
 
-// WebSocketURL is the realtime endpoint for model under base (openai.APIBase
-// in production). The https scheme is kept: the library upgrades it, and the
-// origin policy only knows https.
-func WebSocketURL(base, model string) string {
-	return strings.TrimSuffix(base, "/") + "/v1/realtime?model=" + url.QueryEscape(model)
-}
+// Session is one realtime WebSocket (NET-03): one reader, serialised writes, no client pings.
+type Session = sr.Session
+
+// WebSocketURL is the realtime endpoint for model under base (openai.APIBase in production).
+func WebSocketURL(base, model string) string { return sr.WebSocketURL(base, model) }
 
 // DialConfig describes one WebSocket session.
 type DialConfig struct {
@@ -51,236 +35,11 @@ type DialConfig struct {
 	Trace func(dir string, raw []byte)
 }
 
-// Session is one realtime WebSocket (NET-03): one reader goroutine feeds a
-// channel, writes are serialised, and no client pings are ever sent: liveness
-// comes from the caller's idle timer (design §5.2).
-type Session struct {
-	conn   *websocket.Conn
-	raw    io.Closer // the upgraded connection under conn, nil if not captured
-	logger *slog.Logger
-	trace  func(dir string, raw []byte)
-
-	writeMu sync.Mutex
-
-	events     chan item
-	closing    chan struct{}
-	readerDone chan struct{}
-	readErr    error // set by the reader before it closes events
-
-	unknownMu sync.Mutex
-	unknown   map[string]int
-
-	closeOnce sync.Once
-}
-
-type item struct {
-	ev  Event
-	err error
-}
-
-// Dial opens the session with `Authorization: Bearer ek_…`, within the
-// WebSocket open timeout.
+// Dial opens the session with `Authorization: Bearer ek_…`, within the WebSocket open timeout
+// and with recite's read limit.
 func Dial(ctx context.Context, cfg DialConfig) (*Session, error) {
-	if cfg.Client == nil {
-		return nil, errors.New("realtime: Dial without the production http.Client")
-	}
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
-	}
-	dctx, cancel := context.WithTimeout(ctx, openai.WebSocketOpenTimeout)
-	defer cancel()
-	capture := &upgradeCapture{rt: cfg.Client.Transport}
-	hc := *cfg.Client
-	hc.Transport = capture
-	conn, resp, err := websocket.Dial(dctx, cfg.URL, &websocket.DialOptions{
-		HTTPClient: &hc,
-		HTTPHeader: http.Header{"Authorization": {"Bearer " + cfg.Secret.Bearer()}},
+	return sr.Dial(ctx, sr.DialConfig{
+		Client: cfg.Client, URL: cfg.URL, Secret: cfg.Secret, HandshakeTimeout: openai.WebSocketOpenTimeout,
+		ReadLimit: ReadLimit, Route: cfg.Route, Logger: cfg.Logger, Trace: cfg.Trace,
 	})
-	if err != nil {
-		if resp != nil && resp.StatusCode != http.StatusSwitchingProtocols {
-			if cerr := openai.CheckResponse(resp, cfg.Route); cerr != nil {
-				return nil, cerr
-			}
-		}
-		return nil, transportError("realtime: open WebSocket", err)
-	}
-	conn.SetReadLimit(ReadLimit)
-	s := &Session{
-		conn:       conn,
-		raw:        capture.conn,
-		logger:     logger,
-		trace:      cfg.Trace,
-		events:     make(chan item),
-		closing:    make(chan struct{}),
-		readerDone: make(chan struct{}),
-		unknown:    map[string]int{},
-	}
-	go s.readLoop()
-	return s, nil
-}
-
-// readLoop is the only reader. It ends when the connection fails or Close runs.
-func (s *Session) readLoop() {
-	defer close(s.readerDone)
-	defer close(s.events)
-	for {
-		_, data, err := s.conn.Read(context.Background())
-		if err != nil {
-			select {
-			case <-s.closing:
-				s.readErr = ErrClosed
-			default:
-				s.readErr = readError(err)
-			}
-			return
-		}
-		if s.trace != nil {
-			s.trace("server", data)
-		}
-		ev, err := DecodeEvent(data)
-		if err == nil {
-			if u, ok := ev.(Unknown); ok {
-				s.countUnknown(u.Type)
-				continue
-			}
-			if _, ok := ev.(Ignored); ok {
-				continue
-			}
-		}
-		select {
-		case s.events <- item{ev: ev, err: err}:
-		case <-s.closing:
-			s.readErr = ErrClosed
-			return
-		}
-	}
-}
-
-func (s *Session) countUnknown(typ string) {
-	s.unknownMu.Lock()
-	s.unknown[typ]++
-	n := s.unknown[typ]
-	s.unknownMu.Unlock()
-	if n == 1 {
-		s.logger.Debug("realtime: unknown event type", "type", typ)
-	}
-}
-
-// Unknown returns how many events of each unknown type this session received (NET-04).
-func (s *Session) Unknown() map[string]int {
-	s.unknownMu.Lock()
-	defer s.unknownMu.Unlock()
-	return maps.Clone(s.unknown)
-}
-
-// Next returns the next consumed event. A protocol error for one malformed
-// event does not end the session; a connection failure does, and is returned
-// classified from then on. Cancelling ctx unblocks it with ctx.Err().
-func (s *Session) Next(ctx context.Context) (Event, error) {
-	select {
-	case it, ok := <-s.events:
-		if !ok {
-			return nil, s.readErr // written before events was closed
-		}
-		return it.ev, it.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-// Send writes one client event as JSON. Writes are serialised.
-func (s *Session) Send(ctx context.Context, event any) error {
-	b, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("realtime: encode event: %w", err)
-	}
-	select {
-	case <-s.closing:
-		return ErrClosed
-	default:
-	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if s.trace != nil {
-		s.trace("client", b)
-	}
-	if err := s.conn.Write(ctx, websocket.MessageText, b); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return transportError("realtime: send", err)
-	}
-	return nil
-}
-
-// Close runs the library's close handshake in a goroutine and drops the
-// connection with CloseNow if it has not finished within 2 s. It waits for the
-// reader goroutine, so nothing outlives it. Safe to call more than once.
-func (s *Session) Close() error {
-	s.closeOnce.Do(func() {
-		close(s.closing)
-		done := make(chan error, 1)
-		go func() { done <- s.conn.Close(websocket.StatusNormalClosure, "") }()
-		t := time.NewTimer(closeGrace)
-		defer t.Stop()
-		select {
-		case err := <-done:
-			if err != nil && !errors.Is(err, net.ErrClosed) {
-				s.logger.Debug("realtime: close handshake", "err", err)
-			}
-		case <-t.C:
-			s.logger.Debug("realtime: peer did not answer the close frame; dropping the connection")
-			// CloseNow is a no-op while Close is in progress (the library marks the
-			// connection closing first), so the upgraded connection is closed under
-			// it; that fails the library's pending read and Close returns.
-			if s.raw != nil {
-				_ = s.raw.Close()
-			}
-			_ = s.conn.CloseNow()
-			<-done
-		}
-		<-s.readerDone
-	})
-	return nil
-}
-
-// upgradeCapture keeps the upgraded connection of the handshake response, so
-// Close can drop it when the library's close handshake hangs. It wraps the
-// production transport, so the origin policy and proxy still apply.
-type upgradeCapture struct {
-	rt   http.RoundTripper
-	conn io.Closer
-}
-
-func (u *upgradeCapture) RoundTrip(req *http.Request) (*http.Response, error) {
-	rt := u.rt
-	if rt == nil {
-		rt = http.DefaultTransport
-	}
-	resp, err := rt.RoundTrip(req)
-	if err == nil && resp.StatusCode == http.StatusSwitchingProtocols {
-		u.conn = resp.Body // an io.ReadWriteCloser for a 101
-	}
-	return resp, err
-}
-
-// readError classifies a failed read: a close frame by its code, anything else
-// as a transport failure.
-func readError(err error) error {
-	var ce websocket.CloseError
-	if errors.As(err, &ce) {
-		return openai.ConnClosed(int(ce.Code), ce.Reason, err)
-	}
-	return transportError("realtime: read", err)
-}
-
-// transportError classifies a connection failure. One the classifier does not
-// recognise is still a broken connection, never a programming error.
-func transportError(msg string, err error) error {
-	class := openai.Classify(err)
-	if class == openai.ClassInternal {
-		class = openai.ClassNetwork
-	}
-	return &openai.Error{Class: class, Message: msg, Err: err}
 }

@@ -5,7 +5,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/xiaolai/recite/internal/numwords"
+	"github.com/xiaolai/sayso/go/numwords"
 )
 
 // Scanning helpers shared by the rules. Offsets are byte offsets; rules only

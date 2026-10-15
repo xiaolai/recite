@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/xiaolai/recite/internal/codexapp"
+	"github.com/xiaolai/sayso/go/codexapp"
 )
 
 // FormatPlan renders the Codex plan status for `usage` and `doctor` (OBS-04): used percent,

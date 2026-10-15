@@ -48,6 +48,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fakecodex debug: token="+canary())
 	}
 	args := os.Args[1:]
+	// Codex's global `-c key=value` overrides come before the subcommand; the app-server client
+	// sends `-c model_provider="openai"`.
+	for len(args) >= 2 && args[0] == "-c" {
+		args = args[2:]
+	}
 	switch {
 	case len(args) >= 2 && args[0] == "login" && args[1] == "status":
 		os.Exit(loginStatus(mode))
@@ -86,7 +91,8 @@ func recordPID() error {
 	return werr
 }
 
-// record writes argv and the environment, one per line, to $FAKECODEX_RECORD when set.
+// record appends argv and the environment, one per line, to $FAKECODEX_RECORD when set. It
+// appends, because a client starts one child per fetch or refresh and a test reads them all.
 func record() error {
 	path := os.Getenv("FAKECODEX_RECORD")
 	if path == "" {
@@ -101,7 +107,15 @@ func record() error {
 	for _, e := range env {
 		b.WriteString("env=" + e + "\n")
 	}
-	return os.WriteFile(path, []byte(b.String()), 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.WriteString(b.String())
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
 }
 
 // recordRequest appends one received line as req=<line> to $FAKECODEX_RECORD when set.
