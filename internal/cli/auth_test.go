@@ -354,3 +354,12 @@ func TestSubprocessExitStatusIsNotAnExitCode(t *testing.T) {
 		t.Fatalf("recite's own coded error: code %d, want %d", code, exitcode.Usage)
 	}
 }
+
+// auth status reports a stdout it could not write, as the JSON path does.
+func TestAuthStatusReportsWriteFailure(t *testing.T) {
+	c, errb := gateCLI(t, "chatgpt")
+	c.Stdout = failingWriter{}
+	if code := c.authStatus(); code != 1 || !strings.Contains(errb.String(), "write output") {
+		t.Fatalf("code %d, stderr %q", code, errb.String())
+	}
+}

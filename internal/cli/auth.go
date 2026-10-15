@@ -100,7 +100,9 @@ func (c *CLI) authStatus() int {
 			row("expires", relative(st.Expires.Sub(c.Now())))
 		}
 	}
-	_, _ = io.WriteString(c.Stdout, secret.Scrub(b.String())) // stdout has no error channel worth more than the exit code
+	if _, err := io.WriteString(c.Stdout, secret.Scrub(b.String())); err != nil {
+		return c.writeResult(err)
+	}
 	if g, ok := st.Guide(); ok {
 		_, _ = io.WriteString(c.Stderr, secret.Scrub(g.Text()))
 	}
