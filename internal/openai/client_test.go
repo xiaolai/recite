@@ -1,7 +1,9 @@
 package openai
 
 import (
+	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -174,5 +176,17 @@ func TestTimeouts(t *testing.T) {
 	}
 	if got := ResponseHardCap(10 * time.Second); got != 60*time.Second {
 		t.Errorf("ResponseHardCap(10s) = %v, want 60s", got)
+	}
+}
+
+// NewClient never writes into the caller's option slice: the guard is appended to a copy.
+func TestNewClientLeavesCallerOptionsAlone(t *testing.T) {
+	marker := WithRootCAs(x509.NewCertPool())
+	all := []Option{marker, marker}
+	if _, err := NewClient(all[:1]...); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%p", all[1]) != fmt.Sprintf("%p", marker) {
+		t.Fatal("NewClient overwrote the caller's second option")
 	}
 }

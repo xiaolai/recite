@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/xiaolai/sayso/go/openaihttp"
@@ -52,7 +53,9 @@ func WithTestOrigin(hostport string) Option { return openaihttp.WithTestOrigin(h
 // client with its origin policy, no redirects and the proxy from the environment, plus recite's
 // test guard, which refuses the real API over the real network in a non-live test run.
 func NewClient(opts ...Option) (*http.Client, error) {
-	return openaihttp.NewClient(append(opts, openaihttp.WithRealNetworkGuard(realNetworkGuard))...)
+	// A fresh slice: appending to opts could overwrite the caller's backing array.
+	all := append(slices.Clip(opts), openaihttp.WithRealNetworkGuard(realNetworkGuard))
+	return openaihttp.NewClient(all...)
 }
 
 func realNetworkGuard() error {
