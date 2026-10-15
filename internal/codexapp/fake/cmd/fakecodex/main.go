@@ -7,8 +7,10 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"strconv"
@@ -25,8 +27,12 @@ const futureMode = "futureMode"
 func main() {
 	mode := os.Getenv("FAKECODEX_MODE")
 	if f := os.Getenv("FAKECODEX_STATE_FILE"); f != "" {
-		if b, err := os.ReadFile(f); err == nil { // absent until a login writes it
+		switch b, err := os.ReadFile(f); {
+		case err == nil:
 			mode = strings.TrimSpace(string(b))
+		case !errors.Is(err, fs.ErrNotExist): // absent until a login writes it; anything else is a broken fixture
+			fmt.Fprintln(os.Stderr, "fakecodex: state file:", err)
+			os.Exit(70)
 		}
 	}
 	if mode == "" {
@@ -93,6 +99,9 @@ func recordPID() error {
 
 // record appends argv and the environment, one per line, to $FAKECODEX_RECORD when set. It
 // appends, because a client starts one child per fetch or refresh and a test reads them all.
+// Only the variables a test sets or checks keep their value; every other one is recorded by
+// name alone, so a record a failing test prints never holds an inherited credential while a
+// variable that should have been removed is still visible.
 func record() error {
 	path := os.Getenv("FAKECODEX_RECORD")
 	if path == "" {
@@ -105,7 +114,12 @@ func record() error {
 	env := os.Environ()
 	slices.Sort(env)
 	for _, e := range env {
-		b.WriteString("env=" + e + "\n")
+		name, _, _ := strings.Cut(e, "=")
+		if recordedValue(name) {
+			b.WriteString("env=" + e + "\n")
+		} else {
+			b.WriteString("env=" + name + "\n")
+		}
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
@@ -116,6 +130,12 @@ func record() error {
 		werr = cerr
 	}
 	return werr
+}
+
+// recordedValue reports the variables whose value a record keeps: the fake's own settings and
+// the ones tests compare.
+func recordedValue(name string) bool {
+	return strings.HasPrefix(name, "FAKECODEX_") || name == "CODEX_HOME" || name == "PATH" || name == "HOME"
 }
 
 // recordRequest appends one received line as req=<line> to $FAKECODEX_RECORD when set.
@@ -311,6 +331,11 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 		default:
 			reply(req.ID, nil, &rpcError{Code: -32601, Message: "Method not found: " + req.Method})
 		}
+	}
+	if err := sc.Err(); err != nil {
+		// An oversized request or a broken stdin is not a clean end; the request itself is not quoted.
+		fmt.Fprintln(os.Stderr, "fakecodex: read request:", err)
+		return 74
 	}
 	return 0
 }

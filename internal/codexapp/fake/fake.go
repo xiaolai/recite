@@ -9,7 +9,8 @@
 //	FAKECODEX_DELAY_MS      per-message delay in slow mode (default 15000, past the 10 s timeout)
 //	FAKECODEX_CANARY        stderr-canary token (default eyJcanary.canary.canary)
 //	FAKECODEX_RECORD        file that each start appends argv= and env= lines to, in any mode, then one
-//	                        req=<line> line per received app-server message
+//	                        req=<line> line per received app-server message; an env= line holds the
+//	                        value only for FAKECODEX_*, CODEX_HOME, PATH and HOME, else the name alone
 //	FAKECODEX_LEAK          misbehaviour of getAuthStatus that leaks FAKECODEX_CANARY:
 //	                        rpc-error (in the error message), malformed (in a truncated JSON
 //	                        line), token (as authToken even with includeToken false)

@@ -171,6 +171,9 @@ func Probe(ctx context.Context, cfg ProbeConfig) *Status {
 	env := []string{}
 	path := ""
 	for _, kv := range os.Environ() {
+		if testguard.Active() && !testEnv(kv) {
+			continue
+		}
 		if strings.HasPrefix(kv, "PATH=") {
 			path = kv[len("PATH="):]
 		}
@@ -215,6 +218,24 @@ func Probe(ctx context.Context, cfg ProbeConfig) *Status {
 		st.Plan = st.plan(ctx)
 	}
 	return st
+}
+
+// testEnv reports the variables a non-live test passes to a Codex child: what the fake reads
+// and a process needs, and the authentication overrides, which tests set to check they are
+// removed. The rest of the developer's environment, which may hold live credentials, stays out.
+func testEnv(kv string) bool {
+	name, _, _ := strings.Cut(kv, "=")
+	switch {
+	case strings.HasPrefix(name, "FAKECODEX_"), name == "PATH", name == "HOME", name == "TMPDIR", name == "GOCOVERDIR":
+		return true
+	}
+	for _, o := range []string{"OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_APP_SERVER_LOGIN_CLIENT_ID",
+		"CODEX_REFRESH_TOKEN_URL_OVERRIDE", "CODEX_REVOKE_TOKEN_URL_OVERRIDE"} {
+		if strings.EqualFold(name, o) {
+			return true
+		}
+	}
+	return false
 }
 
 // candidates are the folders searched after PATH: Codex's GUI install locations, except in a

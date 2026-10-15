@@ -201,3 +201,18 @@ func jwt(exp int64) string {
 	return b.EncodeToString([]byte(`{"alg":"RS256"}`)) + "." +
 		b.EncodeToString(fmt.Appendf(nil, `{"exp":%d}`, exp)) + "." + b.EncodeToString([]byte("sig"))
 }
+
+// In a non-live test the Codex child gets only what the fake and a process need, and the
+// authentication overrides tests set to check their removal; the developer's other variables,
+// which may hold live credentials, never reach it or its record.
+func TestTestChildEnvironmentIsHermetic(t *testing.T) {
+	t.Setenv("RECITE_TEST_AMBIENT_SECRET", "canary-ambient")
+	st, _, rec := run(t, 0, "chatgpt")
+	wantState(t, st, StateReady)
+	if strings.Contains(rec, "RECITE_TEST_AMBIENT_SECRET") {
+		t.Fatal("an ambient variable reached the test child")
+	}
+	if !strings.Contains(rec, "env=FAKECODEX_MODE=chatgpt\n") {
+		t.Fatal("the fake's own settings did not reach it")
+	}
+}

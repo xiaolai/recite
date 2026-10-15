@@ -34,6 +34,18 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// hermeticEnv is the environment the fake runs with in these tests: what a process needs, and
+// none of the developer's variables, which may hold live credentials.
+func hermeticEnv() []string {
+	env := []string{}
+	for _, name := range []string{"PATH", "HOME", "TMPDIR"} {
+		if v, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+v)
+		}
+	}
+	return env
+}
+
 // client is a minimal JSON-RPC peer for the tests; the real one is internal/codexapp (WP-1.3).
 type client struct {
 	t      *testing.T
@@ -47,7 +59,7 @@ type client struct {
 func start(t *testing.T, env ...string) *client {
 	t.Helper()
 	cmd := exec.Command(bin, "app-server", "--listen", "stdio://")
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(hermeticEnv(), env...)
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -315,6 +327,56 @@ func TestStderrCanaryAndRecorder(t *testing.T) {
 	}
 }
 
+// A record keeps the value of the fake's own settings only; any other variable is recorded by
+// name, so a printed record holds no inherited credential but still shows a variable that
+// should have been removed.
+func TestRecordKeepsOtherValuesOut(t *testing.T) {
+	rec := filepath.Join(t.TempDir(), "rec.txt")
+	c := start(t, "FAKECODEX_RECORD="+rec, "OPENAI_API_KEY=sk-canary-record", "SOME_TOKEN=canary-other")
+	c.handshake()
+	_ = c.in.Close()
+	if err := c.cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "canary") {
+		t.Error("the record holds a value it should name only")
+	}
+	for _, want := range []string{"env=OPENAI_API_KEY\n", "env=SOME_TOKEN\n", "env=FAKECODEX_RECORD=" + rec + "\n"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("record lacks %q", want)
+		}
+	}
+}
+
+// A state file that exists but cannot be read is a broken fixture, never the default sign-in.
+func TestUnreadableStateFileFails(t *testing.T) {
+	cmd := exec.Command(bin, "login", "status")
+	cmd.Env = append(hermeticEnv(), "FAKECODEX_STATE_FILE="+t.TempDir()) // a folder: reading it fails
+	var ee *exec.ExitError
+	if err := cmd.Run(); !errors.As(err, &ee) || ee.ExitCode() != 70 {
+		t.Fatalf("exit %v, want 70", err)
+	}
+}
+
+// An oversized request ends the app-server with an error, not as a clean end of input.
+func TestOversizedRequestFails(t *testing.T) {
+	c := start(t)
+	// The fake stops reading at the limit, so the rest of the write may meet a closed pipe.
+	_, _ = c.in.Write(append(bytes.Repeat([]byte("x"), 5<<20), '\n'))
+	_ = c.in.Close()
+	var ee *exec.ExitError
+	if err := c.cmd.Wait(); !errors.As(err, &ee) || ee.ExitCode() != 74 {
+		t.Fatalf("exit %v, want 74", err)
+	}
+	if strings.Contains(c.stderr.String(), "xxxx") {
+		t.Error("the request was quoted")
+	}
+}
+
 // accept: FND-05#1
 func TestLoginStatus(t *testing.T) {
 	cases := []struct {
@@ -329,7 +391,7 @@ func TestLoginStatus(t *testing.T) {
 	}
 	for _, tc := range cases {
 		cmd := exec.Command(bin, "login", "status")
-		cmd.Env = append(os.Environ(), "FAKECODEX_MODE="+tc.mode)
+		cmd.Env = append(hermeticEnv(), "FAKECODEX_MODE="+tc.mode)
 		out, err := cmd.Output()
 		code := 0
 		var ee *exec.ExitError
@@ -343,7 +405,7 @@ func TestLoginStatus(t *testing.T) {
 		}
 	}
 	cmd := exec.Command(bin, "app-server")
-	cmd.Env = append(os.Environ(), "FAKECODEX_MODE=no-such-mode")
+	cmd.Env = append(hermeticEnv(), "FAKECODEX_MODE=no-such-mode")
 	if err := cmd.Run(); err == nil {
 		t.Fatal("unknown mode accepted")
 	}
