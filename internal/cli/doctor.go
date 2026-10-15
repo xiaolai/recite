@@ -144,7 +144,7 @@ func (c *CLI) authCheck(st *auth.Status) doctorCheck {
 		return warnCheck("auth", "not checked: Codex is not usable (see the codex line)", "")
 	default:
 		g, _ := st.Guide()
-		return failCheck("auth", string(st.State)+": "+g.Message, firstFix(g), st.ExitCode())
+		return failCheck("auth", string(st.State)+": "+g.Message, guideFix(g), st.ExitCode())
 	}
 	if st.Expires.IsZero() { // the token carries no expiry; the API decides
 		return okCheck("auth", "chatgpt, plan "+orUnknown(st.Plan)+", token expiry unknown")
@@ -334,6 +334,20 @@ func writable(dir string) error {
 		cerr = rerr
 	}
 	return cerr
+}
+
+// guideFix is the whole guide on one line: every step's explanation and command, in order, so a
+// sequence (logout, then login) keeps its second half and a warning or prerequisite stays with
+// the commands it qualifies.
+func guideFix(g auth.Guide) string {
+	var parts []string
+	for _, s := range g.Steps {
+		parts = append(parts, strings.TrimSpace(s.Text+" "+s.Command))
+	}
+	if len(parts) == 0 {
+		return auth.AuthURL
+	}
+	return strings.Join(parts, "; ")
 }
 
 func firstFix(g auth.Guide) string {

@@ -307,3 +307,16 @@ func TestDoctorReportsWriteFailure(t *testing.T) {
 		t.Fatalf("code %d, stderr %q", r.code, r.stderr)
 	}
 }
+
+// The auth fix is the whole guide: logout, then login, and the warning that it changes how Codex
+// itself signs in, never the logout alone.
+func TestDoctorAuthFixKeepsTheWholeGuide(t *testing.T) {
+	e := newDoctorEnv(t)
+	e.mode = "apikey"
+	r := e.run()
+	for _, want := range []string{" logout; ", " login; Warning: this changes how Codex itself signs in."} {
+		if !strings.Contains(r.stdout, want) {
+			t.Fatalf("doctor output lacks %q:\n%s", want, r.stdout)
+		}
+	}
+}
