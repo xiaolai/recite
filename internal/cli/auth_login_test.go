@@ -165,3 +165,29 @@ func TestAuthLoginRejectsArguments(t *testing.T) {
 		t.Fatalf("status --device-auth: %+v", r)
 	}
 }
+
+// A Codex without getAuthStatus whose store is a file hands the sign-in to auth.json, yet it is
+// still the Codex that signs in: login runs it, and only --auth-source file refuses.
+func TestAuthLoginAfterConfigReadFileFallback(t *testing.T) {
+	e := newLoginEnv(t, "unknown-method", "unknown-method")
+	t.Setenv("FAKECODEX_CONFIG_STORE", "file")
+	if err := os.MkdirAll(e.home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(e.home, "auth.json"),
+		[]byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"opaque-file-token"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := e.run("auth", "login")
+	if r.code != exitcode.OK || !strings.Contains(e.loginRecord(), "args=login\n") {
+		t.Fatalf("code %d, login ran %v, stderr %q", r.code, e.loginRecord() != "", r.stderr)
+	}
+	var out, errb bytes.Buffer
+	c := New(&out, &errb)
+	c.Getenv = func(string) string { return "" }
+	c.StdinIsTTY = func() bool { return true }
+	if code := c.Run([]string{"--codex-bin", fakeCodex, "--codex-home", e.home, "--auth-source", "file", "auth", "login"}); code != ExitUsage ||
+		!strings.Contains(errb.String(), "--auth-source file cannot sign in") {
+		t.Fatalf("--auth-source file: code %d stderr %q", code, errb.String())
+	}
+}

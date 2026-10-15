@@ -301,6 +301,13 @@ func appServer(mode string, in io.Reader, out io.Writer) int {
 			}
 			reply(req.ID, map[string]any{"ordinaryUsageAllowed": true, "rateLimits": limit,
 				"rateLimitsByLimitId": map[string]any{"codex": limit}}, nil)
+		case "config/read":
+			store := os.Getenv("FAKECODEX_CONFIG_STORE")
+			if store == "" {
+				reply(req.ID, nil, &rpcError{Code: -32601, Message: "Method not found: " + req.Method})
+				continue
+			}
+			reply(req.ID, map[string]any{"config": map[string]any{"cli_auth_credentials_store": store}}, nil)
 		default:
 			reply(req.ID, nil, &rpcError{Code: -32601, Message: "Method not found: " + req.Method})
 		}

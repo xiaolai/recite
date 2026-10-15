@@ -133,8 +133,14 @@ func (c *CLI) authLogin(deviceAuth bool) int {
 	if err := st.Close(); err != nil {
 		c.Logger.Debug("close codex app-server", "err", err)
 	}
-	if rc.Source != auth.SourceCodex || rc.CodexBin == "" {
+	// Only an explicit --auth-source file refuses: under auto or codex, a Codex whose store is a
+	// file hands the sign-in to auth.json (config/read), yet still signs in.
+	switch {
+	case c.globals.AuthSource == auth.SourceFile:
 		c.errorf("recite auth login: needs the Codex executable; --auth-source file cannot sign in")
+		return ExitUsage
+	case rc.CodexBin == "":
+		c.errorf("recite auth login: needs the Codex executable, and none was found; the sign-in was read from auth.json")
 		return ExitUsage
 	}
 	err := codexapp.Login(rc.CodexConfig(c.Logger), deviceAuth,

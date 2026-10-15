@@ -17,6 +17,8 @@
 //	FAKECODEX_LOGIN_RECORD  `login`/`logout` append argv0=, args=, home= (CODEX_HOME) and
 //	                        stdin= (one line read from stdin) lines here
 //	FAKECODEX_LOGIN_SETS    the mode `login` writes into FAKECODEX_STATE_FILE
+//	FAKECODEX_CONFIG_STORE  when set, `config/read` reports it as cli_auth_credentials_store;
+//	                        unset, `config/read` is an unknown method
 package fake
 
 import (
