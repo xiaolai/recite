@@ -53,10 +53,12 @@ func setupAuth(fs *flag.FlagSet, c *CLI) func([]string) int {
 	}
 }
 
-// probe runs the AUTH-07 login-state probe with the global flags.
-func (c *CLI) probe(ctx context.Context) *auth.Status {
+// probe runs the AUTH-07 login-state probe with the global flags. withPlan also reads the plan
+// type, which costs another Codex child and a network lookup, so only the commands that show it
+// (auth status, doctor) ask for it.
+func (c *CLI) probe(ctx context.Context, withPlan bool) *auth.Status {
 	st := auth.Probe(ctx, auth.ProbeConfig{
-		WithPlan:  true,
+		WithPlan:  withPlan,
 		CodexBin:  c.globals.CodexBin,
 		CodexHome: c.globals.CodexHome,
 		Source:    c.globals.AuthSource,
@@ -73,7 +75,7 @@ func (c *CLI) probe(ctx context.Context) *auth.Status {
 // authStatus is `recite auth status` (AUTH-06). It prints the state, never the
 // token, email or account ID; exit 0 only when ready.
 func (c *CLI) authStatus() int {
-	st := c.probe(context.Background())
+	st := c.probe(context.Background(), true)
 	defer func() { _ = st.Close() }()
 	if c.globals.JSON {
 		if g, ok := st.Guide(); ok {
@@ -116,7 +118,7 @@ func (c *CLI) authLogin(deviceAuth bool) int {
 		c.errorf("recite auth login: stdin is not a terminal; the Codex sign-in is interactive. Run it in a terminal")
 		return ExitUsage
 	}
-	st := c.probe(context.Background())
+	st := c.probe(context.Background(), false) // the status printed after the login reads the plan
 	switch st.State {
 	case auth.StateAPIKey, auth.StateUnsupported, auth.StateNoCodex, auth.StateCodexTooOld:
 		// Changing how Codex itself signs in is the user's decision (api-key, unsupported-auth),
@@ -237,7 +239,7 @@ func (c *CLI) withCredentials(fn func(ctx context.Context, creds *auth.Credentia
 	defer release()
 	c.intr = intr
 	defer func() { c.intr = nil }()
-	st := c.probe(ctx)
+	st := c.probe(ctx, false)
 	defer func() { _ = st.Close() }()
 	if g, ok := st.Guide(); ok {
 		if c.globals.JSON {

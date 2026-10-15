@@ -89,7 +89,7 @@ func setupDoctor(fs *flag.FlagSet, c *CLI) func([]string) int {
 // doctor runs the checks of design §12.4 in order. A check that needs an earlier one to pass
 // is reported as a warning saying so, so every check still prints a line.
 func (c *CLI) doctor(ctx context.Context, deep bool) []doctorCheck {
-	st := c.probe(ctx)
+	st := c.probe(ctx, true) // the auth line shows the plan
 	defer func() { _ = st.Close() }()
 	checks := []doctorCheck{codexCheck(st)}
 	authCheck := c.authCheck(st)

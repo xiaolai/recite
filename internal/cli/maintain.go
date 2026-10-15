@@ -109,7 +109,7 @@ func planJSON(rl codexapp.RateLimits) *planStatus {
 // output, not as an exit code: the local summary is still the answer.
 func (c *CLI) codexPlan() (codexapp.RateLimits, string) {
 	ctx := context.Background()
-	st := c.probe(ctx)
+	st := c.probe(ctx, false) // the plan status comes from PlanStatus
 	defer func() { _ = st.Close() }()
 	rl, ok, err := st.PlanStatus(ctx)
 	switch {
