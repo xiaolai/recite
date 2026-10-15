@@ -247,6 +247,11 @@ func (c *CLI) withCredentials(fn func(ctx context.Context, creds *auth.Credentia
 	defer func() { c.intr = nil }()
 	st := c.probe(ctx, false)
 	defer func() { _ = st.Close() }()
+	if intr.Interrupted() {
+		// A probe the interrupt cut short is not a sign-in problem: exit 130, not a login guide.
+		c.errorf("recite: interrupted; no output was written")
+		return ExitInterrupted
+	}
 	if g, ok := st.Guide(); ok {
 		if c.globals.JSON {
 			return c.emit(g.Event(), st.ExitCode())
@@ -259,7 +264,7 @@ func (c *CLI) withCredentials(fn func(ctx context.Context, creds *auth.Credentia
 		if err != nil && openai.Classify(err) != openai.ClassCancelled {
 			c.Logger.Debug("failure during the interrupt", "err", err)
 		}
-		c.errorf("recite: interrupted; no output was written")
+		c.errorf("recite: interrupted; no audio file was published, and audio already streamed to stdout may be incomplete")
 		return ExitInterrupted
 	}
 	return c.reportFailure(err)

@@ -316,3 +316,21 @@ func TestClassificationRunsBeforeAnyRequest(t *testing.T) {
 		t.Fatalf("ready: code %d, %d requests, stderr %q", code, len(srv.MintRequests()), errb.String())
 	}
 }
+
+// An interrupt that cuts the login-state probe short exits 130, not 3 with a login guide.
+func TestInterruptDuringProbeExits130(t *testing.T) {
+	c, errb := gateCLI(t, "slow")
+	t.Setenv("FAKECODEX_DELAY_MS", "3000")
+	sigs := make(chan os.Signal, 2)
+	c.Signals = func() (<-chan os.Signal, func()) { return sigs, func() {} }
+	go func() {
+		time.Sleep(300 * time.Millisecond) // the probe is waiting on the slow fake
+		sigs <- os.Interrupt
+		sigs <- os.Interrupt // the second aborts the probe
+	}()
+	ran := false
+	code := c.withCredentials(func(context.Context, *auth.Credentials) error { ran = true; return nil })
+	if code != ExitInterrupted || ran || strings.Contains(errb.String(), "More help:") {
+		t.Fatalf("code %d, ran %v, stderr %q", code, ran, errb.String())
+	}
+}
