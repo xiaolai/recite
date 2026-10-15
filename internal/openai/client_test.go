@@ -139,11 +139,13 @@ func TestRedirectsAreNeverFollowed(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// The policy drops Location, so the client returns the 3xx unfollowed and CheckResponse
+				// classifies it; a Do error would quote the Location (sayso spec/http-and-mint.md).
 				resp, err := c.Do(newReq(t, s, APIBase+s.path))
-				if err == nil {
-					_ = resp.Body.Close()
-					t.Fatalf("%s %s %d: redirect followed", s.name, name, status)
+				if err != nil {
+					t.Fatalf("%s %s %d: Do failed instead of returning the reply: %v", s.name, name, status, err)
 				}
+				err = CheckResponse(resp, "")
 				got := base.requests()
 				if len(got) != 1 {
 					t.Fatalf("%s %s %d: base saw %d requests, want 1", s.name, name, status, len(got))
