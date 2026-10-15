@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -179,7 +180,14 @@ func (m *Minter) mint(ctx context.Context, session any, route openai.Route) (aut
 		Lifetime: SecretTTL, Route: route}
 	sec, err := sm.Secret(ctx, session)
 	if openai.Classify(err) == openai.ClassAuthExpired {
-		return auth.ClientSecret{}, &openai.Error{Class: openai.ClassAuthExpired, Message: MsgSignInRefused, Err: err}
+		// recite's message, over the refusal's own status, code and request id, which callers
+		// read with errors.As; the original stays the cause.
+		out := &openai.Error{Class: openai.ClassAuthExpired, Message: MsgSignInRefused, Err: err}
+		var oe *openai.Error
+		if errors.As(err, &oe) {
+			out.Status, out.Type, out.Code, out.Param, out.RequestID = oe.Status, oe.Type, oe.Code, oe.Param, oe.RequestID
+		}
+		return auth.ClientSecret{}, out
 	}
 	return sec, err
 }

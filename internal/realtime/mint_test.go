@@ -255,3 +255,25 @@ func TestMintRefreshFailsExit3(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// Two refusals in a row keep the provider's status and code on recite's error, for callers that
+// read them with errors.As; only the message is recite's own.
+func TestMintRefusedTwiceKeepsTheRefusal(t *testing.T) {
+	srv := fake.NewServer(t, loadScenario(t, "speak"), fake.WithMintErrorDetail(401, "invalid_token", ""))
+	_, err := minter(t, srv, renewingCreds{}).MintSpeech(context.Background(), speechSpec("low", 1))
+	var e *openai.Error
+	if !errors.As(err, &e) || e.Message != realtime.MsgSignInRefused || e.Status != 401 || e.Code != "invalid_token" {
+		t.Fatalf("err = %#v", e)
+	}
+}
+
+// renewingCreds renews to a second token, which the server refuses too.
+type renewingCreds struct{}
+
+func (renewingCreds) Token(context.Context) (auth.Token, error) {
+	return auth.NewToken("eyJcanary.first.canary", time.Unix(1800000000, 0), "", "test"), nil
+}
+
+func (renewingCreds) RefreshAfter(context.Context, auth.Token) (auth.Token, error) {
+	return auth.NewToken("eyJcanary.second.canary", time.Unix(1800000000, 0), "", "test"), nil
+}

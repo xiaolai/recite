@@ -36,6 +36,10 @@ func ResponseHardCap(estimated time.Duration) time.Duration {
 	return 3*estimated + 30*time.Second
 }
 
+// Guarded reports whether c came from NewClient, so a bearer sent through it passes the origin
+// policy, the redirect refusal and the test guard.
+func Guarded(c *http.Client) bool { return openaihttp.Guarded(c) }
+
 // Option configures NewClient (openaihttp.Option).
 type Option = openaihttp.Option
 

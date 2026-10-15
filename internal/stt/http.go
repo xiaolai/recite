@@ -28,6 +28,8 @@ const (
 
 	transcriptionsPath = "/v1/audio/transcriptions"
 	maxReply           = 16 << 20
+	// maxBilledSeconds bounds usage.seconds: a day, far beyond any take.
+	maxBilledSeconds = 24 * 60 * 60
 )
 
 // TokenSource yields the ChatGPT bearer and refreshes it after a refusal; *auth.Credentials
@@ -58,6 +60,11 @@ func (h *HTTP) Transcribe(ctx context.Context, pcm []byte, hint Hint) (Transcrip
 	if h.Client == nil || h.BaseURL == "" || h.Creds == nil {
 		return Transcript{}, errors.New("stt: HTTP needs a Client, a BaseURL and Creds")
 	}
+	// The bearer goes only through the origin policy, the redirect refusal and the test guard: a
+	// plain http.Client would send it anywhere.
+	if !openai.Guarded(h.Client) {
+		return Transcript{}, &openai.Error{Class: openai.ClassInternal, Message: "stt: HTTP needs a client from openai.NewClient"}
+	}
 	padded := Pad(pcm)
 	body, contentType, err := h.Body(padded, hint)
 	if err != nil {
@@ -69,11 +76,18 @@ func (h *HTTP) Transcribe(ctx context.Context, pcm []byte, hint Hint) (Transcrip
 	}
 	ctx, cancel := context.WithTimeout(ctx, openai.STTTimeout(audio.PCM(padded).Duration()))
 	defer cancel()
-	t, err := h.post(ctx, tok, body, contentType)
-	if err != nil && dropped(err) && ctx.Err() == nil {
-		h.logger().Info("stt: connection dropped; retrying the transcription once", "err", err)
-		t, err = h.post(ctx, tok, body, contentType)
+	// One drop retry for the whole transcription, before or after a refresh.
+	retried := false
+	send := func(tok auth.Token) (Transcript, error) {
+		t, err := h.post(ctx, tok, body, contentType)
+		if err != nil && dropped(err) && ctx.Err() == nil && !retried {
+			retried = true
+			h.logger().Info("stt: connection dropped; retrying the transcription once", "err", err)
+			t, err = h.post(ctx, tok, body, contentType)
+		}
+		return t, err
 	}
+	t, err := send(tok)
 	if openai.Classify(err) != openai.ClassAuthExpired {
 		return t, err
 	}
@@ -81,7 +95,7 @@ func (h *HTTP) Transcribe(ctx context.Context, pcm []byte, hint Hint) (Transcrip
 	if rerr != nil {
 		return Transcript{}, rerr
 	}
-	t, err = h.post(ctx, fresh, body, contentType)
+	t, err = send(fresh)
 	if openai.Classify(err) == openai.ClassAuthExpired {
 		return Transcript{}, &openai.Error{Class: openai.ClassAuthExpired, Message: "the refreshed ChatGPT sign-in was refused too", Err: err}
 	}
@@ -162,9 +176,12 @@ func (h *HTTP) post(ctx context.Context, tok auth.Token, body []byte, contentTyp
 		return Transcript{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxReply))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxReply+1))
 	if err != nil {
 		return Transcript{}, transportError("stt: read transcription", err)
+	}
+	if len(raw) > maxReply { // the limit would otherwise end the body early and hide what follows
+		return Transcript{}, &openai.Error{Class: openai.ClassProtocol, Message: "transcription reply exceeds 16 MiB"}
 	}
 	return DecodeTranscription(raw)
 }
@@ -185,6 +202,11 @@ func DecodeTranscription(raw []byte) (Transcript, error) {
 	}
 	if reply.Text == nil {
 		return Transcript{}, &openai.Error{Class: openai.ClassProtocol, Message: "transcription reply lacks text"}
+	}
+	// Billed seconds feed the usage ledger and its cost: a negative or absurd count is a broken
+	// reply, not a number to round (and an overflowing int conversion).
+	if s := reply.Usage.Seconds; s < 0 || s > maxBilledSeconds {
+		return Transcript{}, &openai.Error{Class: openai.ClassProtocol, Message: "transcription reply has an out-of-range usage.seconds"}
 	}
 	t := Transcript{
 		Text:      *reply.Text,
