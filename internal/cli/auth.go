@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -301,10 +302,15 @@ func (c *CLI) reportFailure(err error) int {
 		}
 		return re.ExitCode()
 	}
+	// recite's own errors carry their exit code. A subprocess's *exec.ExitError has an ExitCode
+	// method too, but its status is ffmpeg's or a player's, not one of recite's codes: it is
+	// classified below like any other failure.
 	var coded interface{ ExitCode() int }
 	if errors.As(err, &coded) {
-		c.errorf("recite: %v", err)
-		return coded.ExitCode()
+		if _, sub := coded.(*exec.ExitError); !sub {
+			c.errorf("recite: %v", err)
+			return coded.ExitCode()
+		}
 	}
 	var e *openai.Error
 	if !errors.As(err, &e) {

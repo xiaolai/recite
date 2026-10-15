@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -17,8 +19,10 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/xiaolai/recite/internal/audio"
 	"github.com/xiaolai/recite/internal/auth"
 	codexfake "github.com/xiaolai/recite/internal/codexapp/fake"
+	"github.com/xiaolai/recite/internal/exitcode"
 	"github.com/xiaolai/recite/internal/openai"
 	"github.com/xiaolai/recite/internal/realtime"
 	rtfake "github.com/xiaolai/recite/internal/realtime/fake"
@@ -332,5 +336,21 @@ func TestInterruptDuringProbeExits130(t *testing.T) {
 	code := c.withCredentials(func(context.Context, *auth.Credentials) error { ran = true; return nil })
 	if code != ExitInterrupted || ran || strings.Contains(errb.String(), "More help:") {
 		t.Fatalf("code %d, ran %v, stderr %q", code, ran, errb.String())
+	}
+}
+
+// A subprocess's exit status is not a recite exit code: ffmpeg exiting 3 is not an auth failure.
+func TestSubprocessExitStatusIsNotAnExitCode(t *testing.T) {
+	err := exec.Command("/bin/sh", "-c", "exit 3").Run()
+	var xe *exec.ExitError
+	if !errors.As(err, &xe) {
+		t.Fatalf("no exit error: %v", err)
+	}
+	c, _ := gateCLI(t, "chatgpt")
+	if code := c.reportFailure(fmt.Errorf("audio: ffmpeg failed: %w", err)); code != exitcode.Internal {
+		t.Fatalf("code %d, want %d (internal)", code, exitcode.Internal)
+	}
+	if code := c.reportFailure(fmt.Errorf("wrapped: %w", &audio.EncoderError{})); code != exitcode.Usage {
+		t.Fatalf("recite's own coded error: code %d, want %d", code, exitcode.Usage)
 	}
 }
