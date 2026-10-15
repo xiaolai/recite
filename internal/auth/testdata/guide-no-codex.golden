@@ -6,5 +6,5 @@ Codex CLI is not installed. recite uses your ChatGPT sign-in through Codex.
   or with the install script (macOS, Linux):
       curl -fsSL https://chatgpt.com/codex/install.sh | sh
   Then sign in:
-      codex login
+      CODEX_HOME=/srv/codex-home codex login
 More help: https://learn.chatgpt.com/docs/auth

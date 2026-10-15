@@ -88,7 +88,7 @@ func (s *Status) Guide() (Guide, bool) {
 // executable's absolute path, shell-quoted, with CODEX_HOME=<home> in front
 // when a home is set: a bare `codex` would be looked up again by the user's
 // shell and could run another installation (A#6). Only no-codex, which has
-// no executable, uses plain commands. recite's own commands carry the same
+// no executable, names plain `codex`, still with the home in force. recite's own commands carry the same
 // context as flags (ReciteCommand).
 func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 	codex := CodexCommand(c)
@@ -107,7 +107,8 @@ func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 			{Text: "Install it with npm (macOS, Linux):", Command: "npm install -g @openai/codex"},
 			{Text: "or with Homebrew (macOS):", Command: "brew install --cask codex"},
 			{Text: "or with the install script (macOS, Linux):", Command: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"},
-			{Text: "Then sign in:", Command: "codex login"},
+			// No executable was resolved, so the command names plain codex, but still the home in force.
+			{Text: "Then sign in:", Command: CodexCommand(Context{CodexHome: c.CodexHome}) + " login"},
 		}
 	case StateCodexTooOld:
 		if version == "" {
@@ -190,8 +191,8 @@ func CodexCommand(c Context) string {
 
 // ReciteCommand renders `recite <args>` for the context: the executable and
 // CODEX_HOME in force become --codex-bin and --codex-home, shell-quoted, so the
-// command inspects the same Codex sign-in. A context whose source is codex
-// adds --auth-source codex.
+// command inspects the same Codex sign-in. The source in force (codex, or
+// file) is named too, so the command reads the same credential store.
 func ReciteCommand(c Context, args string) string {
 	cmd := "recite"
 	if c.CodexBin != "" {
@@ -200,8 +201,8 @@ func ReciteCommand(c Context, args string) string {
 	if c.CodexHome != "" {
 		cmd += " --codex-home " + ShellQuote(c.CodexHome)
 	}
-	if c.Source == SourceCodex {
-		cmd += " --auth-source codex"
+	if c.Source == SourceCodex || c.Source == SourceFile {
+		cmd += " --auth-source " + c.Source
 	}
 	return cmd + " " + args
 }

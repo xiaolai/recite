@@ -307,6 +307,17 @@ func TestGuideContents(t *testing.T) {
 	if cmds := g.FixCommands(); cmds[len(cmds)-1] != "codex login" {
 		t.Errorf("no-codex ends with %q", cmds[len(cmds)-1])
 	}
+	// The home in force survives the missing executable, so the login reaches the same sign-in.
+	g, _ = GuideFor(StateNoCodex, Context{CodexHome: "/srv/codex home"}, "", "")
+	if cmds := g.FixCommands(); cmds[len(cmds)-1] != "CODEX_HOME='/srv/codex home' codex login" {
+		t.Errorf("no-codex with a home ends with %q", cmds[len(cmds)-1])
+	}
+	// recite's own commands name the source in force, so doctor reads the same store.
+	for src, want := range map[string]string{SourceFile: " --auth-source file doctor", SourceCodex: " --auth-source codex doctor"} {
+		if got := ReciteCommand(Context{CodexHome: "/h", Source: src}, "doctor"); got != "recite --codex-home /h"+want {
+			t.Errorf("ReciteCommand(%s) = %q", src, got)
+		}
+	}
 }
 
 // accept: AUTH-07#8
