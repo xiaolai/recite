@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -128,32 +129,48 @@ func PrunePlan(items []Item, cutoff time.Time, maxSize int64) []Item {
 }
 
 // Remove deletes every file of the take key under root. A take already gone is not an error.
-func Remove(root, key string) error {
-	if !validKey(key) {
-		return fmt.Errorf("cache: invalid key %q", key)
+func Remove(root, key string) error { return RemoveKeys(root, []string{key}) }
+
+// RemoveKeys deletes every file of each take in keys under root, reading each shard directory
+// once however many of its takes go (one read per take made clearing a full shard quadratic).
+// Within a shard every entry goes before any audio, so a removal interrupted half way leaves
+// misses, never an entry whose audio is gone. A take already gone is not an error.
+func RemoveKeys(root string, keys []string) error {
+	byShard := map[string]map[string]bool{}
+	for _, key := range keys {
+		if !validKey(key) {
+			return fmt.Errorf("cache: invalid key %q", key)
+		}
+		if byShard[key[:2]] == nil {
+			byShard[key[:2]] = map[string]bool{}
+		}
+		byShard[key[:2]][key] = true
 	}
-	sub := filepath.Join(TakesDir(root), key[:2])
-	names, err := os.ReadDir(sub)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("cache: %w", err)
-	}
-	// The entry goes first, so a removal interrupted half way leaves a miss, never an entry
-	// whose audio is gone.
-	slices.SortStableFunc(names, func(a, b fs.DirEntry) int {
-		return cmp.Compare(rank(a.Name()), rank(b.Name()))
-	})
-	for _, n := range names {
-		if fileKey(n.Name()) != key || n.IsDir() {
+	shards := slices.Sorted(maps.Keys(byShard))
+	for _, shard := range shards {
+		want := byShard[shard]
+		sub := filepath.Join(TakesDir(root), shard)
+		names, err := os.ReadDir(sub)
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(sub, n.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("cache: remove %s: %w", key, err)
+		if err != nil {
+			return fmt.Errorf("cache: %w", err)
 		}
+		slices.SortStableFunc(names, func(a, b fs.DirEntry) int {
+			return cmp.Compare(rank(a.Name()), rank(b.Name()))
+		})
+		for _, n := range names {
+			key := fileKey(n.Name())
+			if !want[key] || n.IsDir() {
+				continue
+			}
+			if err := os.Remove(filepath.Join(sub, n.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("cache: remove %s: %w", key, err)
+			}
+		}
+		_ = os.Remove(sub) // best effort: only succeeds when the shard directory is empty
 	}
-	_ = os.Remove(sub) // best effort: only succeeds when the shard directory is empty
 	return nil
 }
 
