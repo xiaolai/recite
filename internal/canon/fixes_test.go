@@ -221,10 +221,11 @@ func TestPiecesCompose(t *testing.T) {
 }
 
 // A long text of compounds and years stays linear: listing every combination of 1,000 compounds is 2^1000 readings.
-// The bound is loose on purpose (the race detector slows this tenfold); enumeration would not finish.
+// The bound is loose on purpose (the race detector slows this tenfold); enumeration would not finish. Under the race
+// detector the text is raceFactor times shorter, still 2^124 readings.
 func TestEquivalentScales(t *testing.T) {
 	var a, b strings.Builder
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 500/raceFactor; i++ {
 		a.WriteString("e-mail long-term 1999; ")
 		if i%2 == 0 {
 			b.WriteString("email long term nineteen ninety nine; ")
@@ -252,7 +253,7 @@ func TestCutsHoldForEveryReading(t *testing.T) {
 		"five", "nineteen", "ninety", "zero", "ring", "list", "way", "blank", "seven", "ten", "twenty",
 	}
 	rng := rand.New(rand.NewPCG(105, 94))
-	for range 4000 {
+	for range 4000 / raceFactor {
 		words := make([]string, 2+rng.IntN(4))
 		for i := range words {
 			words[i] = vocab[rng.IntN(len(vocab))]

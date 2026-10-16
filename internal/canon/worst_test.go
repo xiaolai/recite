@@ -62,11 +62,16 @@ func equivalentWithin(a, b string) (bool, int) {
 // Each costliest shape, at MaxBytes, finishes within a time and a memory bound, and the real ones within a fraction of
 // the work budget: the work of one call is bounded by equivalentWork (see budget), not by the shape of its input. The
 // bounds are about three times what was measured (2.8 s, 841 MB allocated and 241 MB in use for the costliest, a word
-// of 1,350 single letters). Under the race detector the texts are shorter.
+// of 1,350 single letters). Under the race detector the texts are shorter and only the real shapes run, for their work
+// bound: time and memory are benchmarks, never asserted under -race (feature ledger, kinds of criteria), so the costly
+// shapes run where it is off, in plain go test and the scheduled CI job.
 func TestEquivalentWorstCase(t *testing.T) {
 	n := MaxBytes / raceFactor
 	real := map[string]int{"prose": 8, "twenty-one": 8, "nineteen": 8, "oh-oh": 2} // shape: work at most budget/x
 	for _, c := range worstShapes(n) {
+		if _, ok := real[c.name]; !ok && raceFactor != 1 {
+			continue
+		}
 		if len(c.a) > n || len(c.b) > n {
 			t.Fatalf("%s: %d and %d bytes, over %d", c.name, len(c.a), len(c.b), n)
 		}
@@ -100,7 +105,7 @@ func TestEquivalentWorstCase(t *testing.T) {
 		t.Logf("%s: equivalent %v, work %d, %v, %d MB allocated, %d MB peak in use", c.name, eq, work, took, allocated>>20, inUse>>20)
 		// Work and memory are the bounds; the clock only catches a hang, so a loaded machine cannot fail a correct
 		// walk. work never exceeds the budget by more than the one spend that ran it out.
-		if took > raceSlowdown*60*time.Second || allocated > 2<<30 || inUse > 768<<20 {
+		if raceFactor == 1 && (took > 60*time.Second || allocated > 2<<30 || inUse > 768<<20) {
 			t.Errorf("%s: %v, %d MB allocated, %d MB in use: over the bound", c.name, took, allocated>>20, inUse>>20)
 		}
 		if raceFactor == 1 && eq != Equivalent(c.a, c.b) { // once is enough under the race detector

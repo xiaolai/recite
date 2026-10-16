@@ -146,7 +146,7 @@ func TestLatticeMatchesEveryCombination(t *testing.T) {
 		"x.com", "one-hundred-and-five", "a-hundred", "seven-oh-four", "nineteen-oh-five", "twenty", "oh", "one",
 	}
 	rng := rand.New(rand.NewPCG(105, 15))
-	for range 3000 {
+	for range 3000 / raceFactor {
 		var words []string
 		hyphens := 0
 		for len(words) < 2+rng.IntN(5) {
@@ -164,7 +164,7 @@ func TestLatticeMatchesEveryCombination(t *testing.T) {
 func TestLatticeMatchesOnLetterChains(t *testing.T) {
 	rng := rand.New(rand.NewPCG(94, 105))
 	letters := []string{"o", "h", "n", "e", "a", "d", "t", "w", "x", "s", "v"}
-	for range 2000 {
+	for range 2000 / raceFactor {
 		var b strings.Builder
 		for i, n := 0, 1+rng.IntN(10); i < n; i++ {
 			b.WriteString(letters[rng.IntN(len(letters))])

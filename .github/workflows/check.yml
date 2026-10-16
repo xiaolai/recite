@@ -82,3 +82,5 @@ jobs:
           go-version-file: go.mod
       - run: make fuzz
       - run: make bench
+      # canon's property tests at their full counts: make check runs them under -race at an eighth (FND-03).
+      - run: go test -count=1 ./internal/canon

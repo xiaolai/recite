@@ -2,7 +2,4 @@
 
 package canon
 
-const (
-	raceFactor   = 1
-	raceSlowdown = 1
-)
+const raceFactor = 1
