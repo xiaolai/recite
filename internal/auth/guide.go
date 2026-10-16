@@ -153,7 +153,7 @@ func GuideFor(state State, c Context, mode, version string) (Guide, bool) {
 		}
 	case StateNoSignInFile:
 		g.Message = "There is no auth.json to read the ChatGPT sign-in from. Codex may keep it in the system keychain, which only Codex can read."
-		if c.Source == SourceCodex {
+		if c.Source == SourceCodex || c.StoreFallback {
 			// Codex was asked already and pointed at the file store: asking it again repeats this.
 			g.Steps = []Step{{Text: "Sign in with Codex:", Command: codex + " login"}}
 			break

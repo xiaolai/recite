@@ -165,3 +165,32 @@ func TestNoSignInFileGuideUnderCodexSource(t *testing.T) {
 		t.Fatalf("file-source guide %+v, want the Codex probe", g.Steps)
 	}
 }
+
+// A Codex without getAuthStatus whose config/read names the file store has its auth.json read
+// instead; when that file is missing, the guide asks for a sign-in, not for the same probe
+// again, under the auto source as under codex (audit).
+// accept: AUTH-07#15
+func TestNoSignInFileAfterStoreFallbackAsksForSignIn(t *testing.T) {
+	for _, src := range []string{SourceAuto, SourceCodex} {
+		st, _ := probeFake(t, probeCase{mode: "unknown-method", source: src, env: map[string]string{"FAKECODEX_CONFIG_STORE": "file"}})
+		wantState(t, st, StateNoSignInFile)
+		if !st.Context.StoreFallback {
+			t.Fatalf("%s: the store fallback is not recorded", src)
+		}
+		g, _ := st.Guide()
+		for _, s := range g.Steps {
+			if strings.Contains(s.Command, "auth status") {
+				t.Fatalf("%s: guide repeats the probe: %+v", src, g.Steps)
+			}
+		}
+		if len(g.Steps) == 0 || !strings.HasSuffix(g.Steps[0].Command, " login") {
+			t.Fatalf("%s: guide %+v, want a sign-in", src, g.Steps)
+		}
+	}
+	// The file source never asked Codex: its guide still offers to.
+	st, _ := probeFake(t, probeCase{source: SourceFile})
+	wantState(t, st, StateNoSignInFile)
+	if st.Context.StoreFallback {
+		t.Fatal("the file source recorded a store fallback")
+	}
+}

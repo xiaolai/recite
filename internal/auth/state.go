@@ -81,6 +81,10 @@ type Context struct {
 	// MissingBin is the executable the user named (--codex-bin or RECITE_CODEX_BIN) when it
 	// was not found, so the guide can point at the path rather than say Codex is missing.
 	MissingBin string
+	// StoreFallback is set when Codex was asked, lacked getAuthStatus, and its config/read
+	// named auth.json as its store, so the file was read on its word: asking Codex again
+	// would repeat the same answer, so the guide must not suggest it.
+	StoreFallback bool
 
 	// child is how the probe started Codex. It is a pointer so that no formatting of a Context
 	// or a Status (%v, %+v, %#v) prints the environment, which holds the user's credentials.
@@ -214,8 +218,12 @@ func Probe(ctx context.Context, cfg ProbeConfig) *Status {
 	}
 	st.State, st.Err = cst.State, cst.Err
 	st.Mode, st.CodexVersion, st.Expires = cst.Mode, cst.Info.CodexVersion, cst.Expires
+	// codexauth names a resolved executable only when it started Codex, and the file as the source
+	// after that only through its store fallback: the file source and the missing-executable
+	// fallback never resolve one.
 	st.Context = Context{CodexBin: cst.Info.Bin, CodexHome: cst.Info.CodexHome, Source: string(cst.Info.Source),
-		MissingBin: cst.Info.MissingBin, child: &childConfig{env: env, timeout: cfg.Timeout}}
+		MissingBin: cst.Info.MissingBin, child: &childConfig{env: env, timeout: cfg.Timeout},
+		StoreFallback: cst.Info.Bin != "" && cst.Info.Source == codexauth.SourceFile}
 	if st.Context.CodexBin == "" && rerr == nil {
 		st.Context.CodexBin = resolved // the file source never starts Codex, but its guide names it
 	}
