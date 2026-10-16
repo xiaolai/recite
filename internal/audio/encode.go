@@ -342,19 +342,31 @@ func encodeFFmpeg(ctx context.Context, e Encoding, p pcmSource, meta, path, filt
 
 // maxPeakPasses bounds the normalised encodes; peakStep is the margin added to each overshoot.
 const (
-	maxPeakPasses = 3
+	maxPeakPasses = 6
 	peakStep      = 0.1
 )
 
 // encodeUnderCeiling normalises p toward target and checks the encoded file: a lossy codec
 // (AAC, MP3, Opus) and resampling can lift the true peak above the ceiling loudnorm met on
-// the PCM. Each pass that overshoots lowers loudnorm's ceiling by the measured overshoot plus
-// peakStep and encodes again, so the file gives up only the headroom its codec needed. A file
-// still over the ceiling after maxPeakPasses is an error, never published.
+// the PCM. Each pass that overshoots keeps loudnorm's pass exactly as it was and follows it
+// with a linear gain cut of the measured overshoot plus peakStep, accumulated, and encodes
+// again, so the file gives up only the level its codec needed. A file still over the ceiling
+// after maxPeakPasses is an error, never published.
+//
+// The cut is a gain AFTER loudnorm, never a lower ceiling FOR it: a take whose linear gain to
+// the target would cross the ceiling sends loudnorm into its dynamic mode, where the encoded
+// peak does not move monotonically with TP= (measured: aims of -1.5, -1.9 and -2.5 dBTP gave
+// -1.42, -1.79 and -1.65), so lowering it chased a target it could step past. A gain scales
+// every PCM peak alike, but the CODEC's overshoot above them is not constant, so a deeper cut
+// can still land higher (measured on one take: cuts of 0.15, 0.36 and 0.68 dB encoded at -1.39,
+// -1.28 and -2.16 dBTP against a -1.5 ceiling — the third pass of three failed). What converges
+// is the cut: it grows by at least peakStep every pass and so outgrows any bounded overshoot,
+// which is why there are passes to spare. The ceiling outranks the loudness target: a trimmed
+// file sits that much below I.
 func encodeUnderCeiling(ctx context.Context, e Encoding, p pcmSource, meta, path string, target LoudnessTarget, m Measurement) error {
-	aim := target
+	trim := 0.0
 	for pass := 1; ; pass++ {
-		if err := encodeFFmpeg(ctx, e, p, meta, path, normalizeFilter(aim, m)); err != nil {
+		if err := encodeFFmpeg(ctx, e, p, meta, path, trimmed(normalizeFilter(target, m), trim)); err != nil {
 			return err
 		}
 		got, err := measureFile(ctx, e, path)
@@ -368,8 +380,16 @@ func encodeUnderCeiling(ctx context.Context, e Encoding, p pcmSource, meta, path
 			return fmt.Errorf("audio: the %s true peak is %.2f dBTP after %d passes, above the %s ceiling of %.1f dBTP",
 				e.Format, got.TP, pass, e.Loudness, target.TP)
 		}
-		aim.TP -= got.TP - target.TP + peakStep
+		trim += got.TP - target.TP + peakStep
 	}
+}
+
+// trimmed is filter followed by a gain cut of trim dB, or filter alone when there is none.
+func trimmed(filter string, trim float64) string {
+	if trim <= 0 {
+		return filter
+	}
+	return filter + ",volume=-" + num(trim) + "dB"
 }
 
 // chapterFile writes ffmetadata text to a private temp directory: its path, or "" for no
