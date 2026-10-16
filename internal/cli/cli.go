@@ -93,7 +93,7 @@ func (c *CLI) Run(args []string) int {
 		}
 		if !strings.Contains(err.Error(), "flag provided but not defined") {
 			// A say or render run still ends its --json stream with its final event (CLI-06).
-			return c.commandDone(c.commandOf(args), c.usageErr("recite", err))
+			return c.commandDone(c.commandOf(gfs, args), c.usageErr("recite", err))
 		}
 		c.globals = defaultGlobals()
 		return c.runCommand(c.mustLookup("say"), args)
@@ -144,18 +144,31 @@ func (c *CLI) runCommand(cmd command, args []string) int {
 	return run(positional)
 }
 
-// commandOf is the command a line that failed to parse would have run: the first registered
-// command name among its arguments, else say, the default.
-func (c *CLI) commandOf(args []string) command {
-	for _, a := range args {
-		if a == "--" {
-			break
-		}
-		if !strings.HasPrefix(a, "-") {
-			if cmd, ok := c.lookup(a); ok {
+// commandOf is the command a line whose global flags failed to parse would have run, found the
+// way Run finds it: past the global flags (fs), skipping each flag's value, the first argument
+// names the command when it is one; anything else (text, an unknown flag, "--") is say's, the
+// default. A flag's value is never taken for a command (`--profile render say Hi` is say).
+func (c *CLI) commandOf(fs *flag.FlagSet, args []string) command {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" || len(a) < 2 || a[0] != '-' {
+			if cmd, ok := c.lookup(a); ok && a != "--" {
 				return cmd
 			}
+			break
 		}
+		name := strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-")
+		if strings.Contains(name, "=") {
+			continue
+		}
+		f := fs.Lookup(name)
+		if f == nil {
+			break // an unknown flag sends the whole line to say
+		}
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+			continue
+		}
+		i++ // the value, whatever it looks like
 	}
 	return c.mustLookup("say")
 }

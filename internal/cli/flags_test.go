@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -52,6 +53,7 @@ func TestStackedVerbosityKeepsValues(t *testing.T) {
 }
 
 // A malformed global flag before say still ends the --json stream with say's final event.
+// accept: CLI-06#2
 func TestMalformedGlobalFlagEndsTheJSONStream(t *testing.T) {
 	var out, errb bytes.Buffer
 	c := New(&out, &errb)
@@ -59,6 +61,38 @@ func TestMalformedGlobalFlagEndsTheJSONStream(t *testing.T) {
 	code := c.Run([]string{"--json", "--auth-source", "invalid", "say", "Hi"})
 	if code != ExitUsage || !strings.Contains(out.String(), `"event"`) {
 		t.Fatalf("code %d stdout %q", code, out.String())
+	}
+}
+
+// The final event belongs to the command the line names, found past the global flags: a
+// flag's value is never taken for a command, and text or an unknown flag means say (audit).
+// accept: CLI-06#2
+func TestMalformedGlobalFlagFinalEventNamesTheCommand(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string // the final event
+	}{
+		{[]string{"--json", "--profile", "render", "--auth-source", "invalid", "say", "Hi"}, "done"},
+		{[]string{"--json", "--auth-source", "invalid", "--profile", "render", "say", "Hi"}, "done"},
+		{[]string{"--json", "--profile", "auth", "--auth-source", "invalid", "say", "Hi"}, "done"},
+		{[]string{"--json", "--auth-source=invalid", "render", "x.md"}, "render"},
+		{[]string{"--json", "--codex-home", "say", "--auth-source", "invalid", "render", "x.md"}, "render"},
+		{[]string{"--json", "--auth-source", "invalid", "Hello", "render"}, "done"},
+		{[]string{"--json", "--auth-source", "invalid"}, "done"},
+		{[]string{"--json", "--log-file"}, "done"},
+	} {
+		var out, errb bytes.Buffer
+		c := New(&out, &errb)
+		c.Getenv = func(string) string { return "" }
+		code := c.Run(tc.args)
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		var ev struct {
+			Event string `json:"event"`
+			Exit  int    `json:"exit"`
+		}
+		if err := json.Unmarshal([]byte(lines[len(lines)-1]), &ev); err != nil || code != ExitUsage || ev.Event != tc.want || ev.Exit != ExitUsage {
+			t.Errorf("%q: code %d, final event %q (%v), want %s", tc.args, code, out.String(), err, tc.want)
+		}
 	}
 }
 
