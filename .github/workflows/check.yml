@@ -54,6 +54,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # setup-go keys its cache by runner OS, architecture and go.sum, which check shares.
+          # A release build that finished first saved its plain builds under that key, and check,
+          # finding the key taken, never saved its race and lint builds: it ran cold every time.
+          cache: false
       - run: make release
       - name: all four binaries and their checksums exist
         run: |
