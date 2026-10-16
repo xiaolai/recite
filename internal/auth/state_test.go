@@ -419,10 +419,10 @@ func TestContextKeepsTheProbesChildConfig(t *testing.T) {
 	if cfg.Timeout != 7*time.Second {
 		t.Fatalf("timeout %v, want 7s", cfg.Timeout)
 	}
-	if cfg.Env == nil {
+	if cfg.Env.IsZero() {
 		t.Fatal("no environment: the child would inherit the process's CODEX_HOME")
 	}
-	for _, kv := range cfg.Env {
+	for _, kv := range cfg.Env.List() {
 		if strings.HasPrefix(kv, "CODEX_HOME=") {
 			t.Fatal("the child environment carries the ambient CODEX_HOME") // the value is not printed
 		}

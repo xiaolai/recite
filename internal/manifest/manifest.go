@@ -213,10 +213,10 @@ type Rejection struct {
 
 // ChunkUsage is the usage the chunk cost this run (zero for a cached chunk).
 type ChunkUsage struct {
-	TextIn     int `json:"text_in"`
-	TextOut    int `json:"text_out"`
-	AudioOut   int `json:"audio_out"`
-	STTSeconds int `json:"stt_seconds"`
+	TextIn     int64 `json:"text_in"`
+	TextOut    int64 `json:"text_out"`
+	AudioOut   int64 `json:"audio_out"`
+	STTSeconds int   `json:"stt_seconds"`
 }
 
 // Run is everything Build reads.

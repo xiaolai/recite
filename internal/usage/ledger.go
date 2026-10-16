@@ -35,12 +35,12 @@ type Entry struct {
 	Chunk   string    `json:"chunk"`
 	Attempt int       `json:"attempt"`
 
-	InputTokens       int `json:"input_tokens,omitempty"`
-	OutputTokens      int `json:"output_tokens,omitempty"`
-	InputTextTokens   int `json:"input_text_tokens,omitempty"`
-	OutputTextTokens  int `json:"output_text_tokens,omitempty"`
-	OutputAudioTokens int `json:"output_audio_tokens,omitempty"`
-	STTSeconds        int `json:"stt_seconds,omitempty"`
+	InputTokens       int64 `json:"input_tokens,omitempty"`
+	OutputTokens      int64 `json:"output_tokens,omitempty"`
+	InputTextTokens   int64 `json:"input_text_tokens,omitempty"`
+	OutputTextTokens  int64 `json:"output_text_tokens,omitempty"`
+	OutputAudioTokens int64 `json:"output_audio_tokens,omitempty"`
+	STTSeconds        int   `json:"stt_seconds,omitempty"`
 
 	// EstimateUSD is the list-price estimate; null when the price table has no rate for the
 	// model. PriceNote labels it (Note) and names the table's dated source.

@@ -14,4 +14,6 @@ require (
 	golang.org/x/text v0.41.0
 )
 
+require golang.org/x/sys v0.48.0 // indirect
+
 replace github.com/xiaolai/sayso/go => ../sayso/go

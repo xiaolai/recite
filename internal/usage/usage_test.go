@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 // bigEntry is an entry whose line is several KB, so a split write would show.
 func bigEntry(writer string, i int) Entry {
 	return Entry{Time: ledgerNow, Command: "say", Kind: KindRender, Model: strings.Repeat("m", 4000),
-		Chunk: fmt.Sprintf("%s-%04d", writer, i), Attempt: 1, OutputAudioTokens: i}
+		Chunk: fmt.Sprintf("%s-%04d", writer, i), Attempt: 1, OutputAudioTokens: int64(i)}
 }
 
 func appendHelper(dir string) int {

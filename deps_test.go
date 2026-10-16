@@ -19,6 +19,9 @@ var (
 		"golang.org/x/text",
 		// The shared Codex sign-in, Realtime and said-guard module, split out of recite itself.
 		"github.com/xiaolai/sayso/go",
+		// Through sayso only: it opens auth.json with openat(2) and O_NOFOLLOW, one directory at a
+		// time, which the syscall package lacks on macOS.
+		"golang.org/x/sys",
 	}
 	testOnlyModules = []string{
 		"go.uber.org/goleak",

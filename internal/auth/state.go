@@ -101,7 +101,7 @@ func (c Context) CodexConfig(logger *slog.Logger) codexapp.Config {
 	if c.child != nil {
 		timeout, env = c.child.timeout, c.child.env
 	}
-	return codexapp.Config{Bin: c.CodexBin, CodexHome: c.CodexHome, Env: env, Timeout: timeout, Logger: logger,
+	return codexapp.Config{Bin: c.CodexBin, CodexHome: c.CodexHome, Env: codexapp.EnvOf(env), Timeout: timeout, Logger: logger,
 		ClientName: "recite", Guard: guard}
 }
 
@@ -204,7 +204,7 @@ func Probe(ctx context.Context, cfg ProbeConfig) *Status {
 		bin = resolved
 	}
 	cst, err := codexauth.Probe(ctx, codexauth.Config{
-		Source: source, Bin: bin, CodexHome: home, Env: env, Candidates: cands,
+		Source: source, Bin: bin, CodexHome: home, Env: codexapp.EnvOf(env), Candidates: cands,
 		Margin: RefreshMargin, Timeout: cfg.Timeout, Now: cfg.Now, Logger: cfg.Logger,
 		ClientName: "recite", Guard: guard,
 	})

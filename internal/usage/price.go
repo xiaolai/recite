@@ -5,8 +5,8 @@ import "math"
 // Tokens is the token usage of one render (realtime.TokenUsage, kept separate so this package
 // does not depend on the realtime client).
 type Tokens struct {
-	Input, Output, InputText, OutputText, OutputAudio int
-	Detailed                                          bool // output details were reported
+	Input, Output, InputText, OutputText, OutputAudio int64 // signed 64-bit, as the realtime API reports them
+	Detailed                                          bool  // output details were reported
 }
 
 // Note labels every estimate: recite cannot see what, if anything, is billed.
@@ -97,7 +97,7 @@ const AudioTokensPerSecond = 20
 // EstimateSpeech prices seconds of speech not yet rendered, and transcribing it once when
 // sttModel is not empty. ok is false when the speech model has no recorded rate.
 func (p PriceTable) EstimateSpeech(model, sttModel string, seconds float64) (float64, bool) {
-	usd, ok := p.Render(model, Tokens{OutputAudio: int(math.Round(seconds * AudioTokensPerSecond)), Detailed: true})
+	usd, ok := p.Render(model, Tokens{OutputAudio: int64(math.Round(seconds * AudioTokensPerSecond)), Detailed: true})
 	if !ok {
 		return 0, false
 	}

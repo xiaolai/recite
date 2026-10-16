@@ -55,14 +55,14 @@ func expectedTakes(t *testing.T, sc fake.Scenario) []expected {
 				Status   string            `json:"status"`
 				Metadata map[string]string `json:"metadata"`
 				Usage    struct {
-					InputTokens       int `json:"input_tokens"`
-					OutputTokens      int `json:"output_tokens"`
+					InputTokens       int64 `json:"input_tokens"`
+					OutputTokens      int64 `json:"output_tokens"`
 					InputTokenDetails *struct {
-						TextTokens int `json:"text_tokens"`
+						TextTokens int64 `json:"text_tokens"`
 					} `json:"input_token_details"`
 					OutputTokenDetails *struct {
-						TextTokens  int `json:"text_tokens"`
-						AudioTokens int `json:"audio_tokens"`
+						TextTokens  int64 `json:"text_tokens"`
+						AudioTokens int64 `json:"audio_tokens"`
 					} `json:"output_token_details"`
 				} `json:"usage"`
 			} `json:"response"`
