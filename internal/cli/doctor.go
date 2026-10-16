@@ -93,7 +93,9 @@ func setupDoctor(fs *flag.FlagSet, c *CLI) func([]string) int {
 }
 
 // doctor runs the checks of design §12.4 in order. A check that needs an earlier one to pass
-// is reported as a warning saying so, so every check still prints a line.
+// is reported as a warning saying so, so every check still prints a line. An interrupt
+// cancels ctx: the check running then returns, and no later check runs, so nothing more is
+// started or written (the directory checks write a probe file).
 func (c *CLI) doctor(ctx context.Context, deep bool) []doctorCheck {
 	st := c.probe(ctx, true) // the auth line shows the plan
 	defer func() { _ = st.Close() }()
@@ -102,18 +104,24 @@ func (c *CLI) doctor(ctx context.Context, deep bool) []doctorCheck {
 	checks := []doctorCheck{codexCheck(st)}
 	authCheck := c.authCheck(st)
 	checks = append(checks, authCheck)
+	if ctx.Err() != nil {
+		return checks
+	}
 	ready := st.State == auth.StateReady
 	if ready {
 		checks = append(checks, planCheck(ctx, st))
 	} else {
 		checks = append(checks, warnCheck("plan", "not checked: the sign-in is not ready", ""))
 	}
+	if ctx.Err() != nil {
+		return checks
+	}
 	if ready {
 		route, sess := c.routeCheck(ctx, st.Creds)
 		checks = append(checks, route)
-		if deep && sess != nil {
+		if deep && sess != nil && ctx.Err() == nil {
 			checks = append(checks, c.deepCheck(ctx, st.Creds, sess))
-		} else if deep {
+		} else if deep && ctx.Err() == nil {
 			checks = append(checks, warnCheck("deep", "not checked: the route check failed", ""))
 		}
 		if sess != nil {
@@ -124,6 +132,9 @@ func (c *CLI) doctor(ctx context.Context, deep bool) []doctorCheck {
 		if deep {
 			checks = append(checks, warnCheck("deep", "not checked: the sign-in is not ready", ""))
 		}
+	}
+	if ctx.Err() != nil {
+		return checks
 	}
 	checks = append(checks, c.encoderChecks()...)
 	return append(checks, c.dirChecks()...)
