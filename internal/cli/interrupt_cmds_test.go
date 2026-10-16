@@ -81,3 +81,42 @@ func TestInterruptDuringDoctorEncoderChecksStopsTheDirectoryChecks(t *testing.T)
 		}
 	}
 }
+
+// An interrupt that arrives while doctor resolves the settings for the directory checks stops it before the cache
+// probe starts (audit).
+// accept: CLI-05#4
+func TestInterruptDuringDoctorSettingsStopsTheCacheProbe(t *testing.T) {
+	var out, errb bytes.Buffer
+	c := New(&out, &errb)
+	dir := t.TempDir()
+	env := map[string]string{"RECITE_CACHE_DIR": filepath.Join(dir, "cache"), "XDG_STATE_HOME": filepath.Join(dir, "state")}
+	sigs := make(chan os.Signal, 1)
+	c.Signals = func() (<-chan os.Signal, func()) { return sigs, func() {} }
+	encoders, sent := 0, false
+	c.LookPath = func(name string) (string, error) {
+		encoders++
+		return "/usr/bin/" + name, nil
+	}
+	c.Getenv = func(k string) string {
+		// The encoder checks are the last LookPath calls; the settings resolve right after them.
+		if encoders > 0 && !sent && k == "RECITE_CACHE_DIR" {
+			sent = true
+			sigs <- os.Interrupt
+			time.Sleep(300 * time.Millisecond) // the watcher cancels the run
+		}
+		return env[k]
+	}
+	c.Now = func() time.Time { return cliNow }
+	code := c.Run([]string{"--codex-bin", filepath.Join(dir, "missing-codex"), "--codex-home", t.TempDir(), "--auth-source", "file", "doctor"})
+	if code != ExitInterrupted || out.Len() != 0 {
+		t.Fatalf("code %d, stdout %d bytes, stderr %q", code, out.Len(), errb.String())
+	}
+	if !sent {
+		t.Fatal("the settings were never resolved after the encoder checks")
+	}
+	for _, p := range []string{env["RECITE_CACHE_DIR"], env["XDG_STATE_HOME"]} {
+		if _, err := os.Lstat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s exists: a probe ran after the interrupt (%v)", filepath.Base(p), err)
+		}
+	}
+}

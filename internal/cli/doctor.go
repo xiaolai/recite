@@ -354,7 +354,11 @@ func (c *CLI) encoderChecks(ctx context.Context) []doctorCheck {
 // stops them before the next one starts.
 func (c *CLI) dirChecks(ctx context.Context) []doctorCheck {
 	var out []doctorCheck
-	if st, err := c.resolveSettings(newFlagSet("doctor-settings"), nil); err == nil {
+	st, err := c.resolveSettings(newFlagSet("doctor-settings"), nil)
+	if ctx.Err() != nil {
+		return nil // interrupted while the settings resolved: no probe starts
+	}
+	if err == nil {
 		out = append(out, dirCheck("cache", st.Get("cache_dir").Raw))
 	} else {
 		// The state directory does not depend on the config: still check it.
