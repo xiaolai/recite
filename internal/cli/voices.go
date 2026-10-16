@@ -111,6 +111,11 @@ func (c *CLI) previewVoices(dir, sample, effort string) int {
 		job sayJob
 	}
 	jobs := make([]voiceJob, 0, len(realtime.Voices))
+	defer func() {
+		for _, j := range jobs {
+			j.job.close()
+		}
+	}()
 	for _, v := range realtime.Voices {
 		req := base
 		req.Command = "voices --preview"

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -32,16 +31,22 @@ type Stats struct {
 func TakesDir(root string) string { return filepath.Join(root, "takes") }
 
 // Scan lists the takes under root without creating anything: a missing store is empty.
-// Stray temporary files of an interrupted write are counted with their take, so pruning and
-// clearing reclaim them too. Items are sorted by access time, oldest first, then by key.
 func Scan(root string) ([]Item, error) {
-	dir := TakesDir(root)
+	s, ok, err := OpenExisting(root)
+	if err != nil || !ok {
+		return nil, err
+	}
+	defer func() { _ = s.Close() }()
+	return s.Scan()
+}
+
+// Scan lists the store's takes. Stray temporary files of an interrupted write are counted with
+// their take, so pruning and clearing reclaim them too. Items are sorted by access time, oldest
+// first, then by key. The walk is relative to the store's directory, which it never leaves.
+func (s *Store) Scan() ([]Item, error) {
 	byKey := map[string]*Item{}
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(s.dir.Root().FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if p == dir && errors.Is(err, fs.ErrNotExist) {
-				return fs.SkipAll
-			}
 			return err
 		}
 		if d.IsDir() || !d.Type().IsRegular() {
@@ -67,12 +72,11 @@ func Scan(root string) ([]Item, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("cache: scan %s: %w", dir, err)
+		return nil, fmt.Errorf("cache: scan %s: %w", s.Dir(), err)
 	}
-	st := &Store{dir: dir}
 	items := make([]Item, 0, len(byKey))
 	for _, it := range byKey {
-		if at, ok := st.Accessed(it.Key); ok {
+		if at, ok := s.Accessed(it.Key); ok {
 			it.Accessed = at
 		}
 		items = append(items, *it)
@@ -131,11 +135,23 @@ func PrunePlan(items []Item, cutoff time.Time, maxSize int64) []Item {
 // Remove deletes every file of the take key under root. A take already gone is not an error.
 func Remove(root, key string) error { return RemoveKeys(root, []string{key}) }
 
-// RemoveKeys deletes every file of each take in keys under root, reading each shard directory
-// once however many of its takes go (one read per take made clearing a full shard quadratic).
-// Within a shard every entry goes before any audio, so a removal interrupted half way leaves
-// misses, never an entry whose audio is gone. A take already gone is not an error.
+// RemoveKeys deletes every file of each take in keys under root (Store.RemoveKeys); a missing
+// store has nothing to remove.
 func RemoveKeys(root string, keys []string) error {
+	s, ok, err := OpenExisting(root)
+	if err != nil || !ok {
+		return err
+	}
+	defer func() { _ = s.Close() }()
+	return s.RemoveKeys(keys)
+}
+
+// RemoveKeys deletes every file of each take in keys, reading each shard directory once
+// however many of its takes go (one read per take made clearing a full shard quadratic).
+// Within a shard every entry goes before any audio, so a removal interrupted half way leaves
+// misses, never an entry whose audio is gone. A take already gone is not an error. Every
+// removal is relative to the store's directory.
+func (s *Store) RemoveKeys(keys []string) error {
 	byShard := map[string]map[string]bool{}
 	for _, key := range keys {
 		if !validKey(key) {
@@ -149,8 +165,7 @@ func RemoveKeys(root string, keys []string) error {
 	shards := slices.Sorted(maps.Keys(byShard))
 	for _, shard := range shards {
 		want := byShard[shard]
-		sub := filepath.Join(TakesDir(root), shard)
-		names, err := os.ReadDir(sub)
+		names, err := fs.ReadDir(s.dir.Root().FS(), shard)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -165,11 +180,11 @@ func RemoveKeys(root string, keys []string) error {
 			if !want[key] || n.IsDir() {
 				continue
 			}
-			if err := os.Remove(filepath.Join(sub, n.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := s.dir.Root().Remove(filepath.Join(shard, n.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("cache: remove %s: %w", key, err)
 			}
 		}
-		_ = os.Remove(sub) // best effort: only succeeds when the shard directory is empty
+		_ = s.dir.Root().Remove(shard) // best effort: only succeeds when the shard directory is empty
 	}
 	return nil
 }

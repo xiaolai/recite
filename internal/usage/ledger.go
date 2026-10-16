@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/xiaolai/recite/internal/fsx"
@@ -52,7 +51,7 @@ type Entry struct {
 // append at once: each line is one write(2) on an O_APPEND descriptor, which the kernel
 // positions and writes as a unit for a regular file, so lines never interleave (OBS-03).
 type Ledger struct {
-	dir string
+	dir *fsx.Dir // held open: no write follows a path replaced after Open
 	now func() time.Time
 }
 
@@ -61,17 +60,21 @@ func Open(dir string, now func() time.Time) (*Ledger, error) {
 	if dir == "" {
 		return nil, errors.New("usage: no ledger directory")
 	}
-	if _, err := fsx.MkdirPrivate(dir); err != nil {
+	d, err := fsx.OpenPrivate(dir)
+	if err != nil {
 		return nil, err
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &Ledger{dir: dir, now: now}, nil
+	return &Ledger{dir: d, now: now}, nil
 }
 
+// Close releases the ledger directory.
+func (l *Ledger) Close() error { return l.dir.Close() }
+
 // Path is the current ledger file.
-func (l *Ledger) Path() string { return filepath.Join(l.dir, FileName) }
+func (l *Ledger) Path() string { return filepath.Join(l.dir.Path(), FileName) }
 
 // Append writes e as one line, after rotating a ledger last written in an earlier month.
 func (l *Ledger) Append(e Entry) error {
@@ -83,11 +86,9 @@ func (l *Ledger) Append(e Entry) error {
 	if err := l.rotate(); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(l.Path(), os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0o600)
+	// Not fsx's single-link rule: during a rotation the ledger has two names for a moment.
+	f, err := l.dir.OpenFile(FileName, os.O_WRONLY|os.O_APPEND|os.O_CREATE)
 	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
-			return fmt.Errorf("usage: %s is a symlink: %w", l.Path(), fsx.ErrUnsafePath)
-		}
 		return fmt.Errorf("usage: open ledger: %w", err)
 	}
 	n, werr := f.Write(b) // one write: the line must never be split
@@ -114,7 +115,7 @@ func ArchiveName(t time.Time) string {
 // processes rotating at once exactly one wins and removes the old name; the others append to
 // whichever file the name then holds. No line is lost.
 func (l *Ledger) rotate() error {
-	fi, err := os.Lstat(l.Path())
+	fi, err := l.dir.Root().Lstat(FileName)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -127,14 +128,13 @@ func (l *Ledger) rotate() error {
 	if last.Year()*12+int(last.Month()) >= now.Year()*12+int(now.Month()) {
 		return nil
 	}
-	archive := filepath.Join(l.dir, ArchiveName(last))
-	if err := os.Link(l.Path(), archive); err != nil {
+	if err := l.dir.Root().Link(FileName, ArchiveName(last)); err != nil {
 		if errors.Is(err, fs.ErrExist) || errors.Is(err, fs.ErrNotExist) {
 			return nil // another process rotated it
 		}
 		return fmt.Errorf("usage: rotate ledger: %w", err)
 	}
-	if err := os.Remove(l.Path()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := l.dir.Root().Remove(FileName); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("usage: rotate ledger: %w", err)
 	}
 	return nil

@@ -212,3 +212,47 @@ func TestPeekRecordsNoAccess(t *testing.T) {
 		t.Fatalf("peek accepted tampered audio: %v %v", ok, err)
 	}
 }
+
+// The store writes, reads and removes through the takes directory it checked at Open: once the
+// cache root is replaced by a symlink, nothing reaches the link's destination (audit: every
+// operation reopened the full path).
+// accept: AUTH-05#8
+func TestStoreStaysInTheCheckedDirectory(t *testing.T) {
+	st, root := open(t)
+	defer func() { _ = st.Close() }()
+	base := filepath.Dir(root)
+	evil := filepath.Join(base, "evil")
+	if err := os.MkdirAll(filepath.Join(evil, "takes"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(base, "moved")
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(evil, root); err != nil {
+		t.Fatal(err)
+	}
+	k := key(7)
+	if err := st.Put(entry(k), []byte("pcm")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, err := st.Get(k); !ok || err != nil {
+		t.Fatalf("Get after the swap: ok %v, err %v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(moved, "takes", k[:2], k+".json")); err != nil {
+		t.Fatalf("the entry is not in the checked directory: %v", err)
+	}
+	if ents, _ := os.ReadDir(filepath.Join(evil, "takes")); len(ents) != 0 {
+		t.Fatalf("the link's destination was written: %v", ents)
+	}
+	items, err := st.Scan()
+	if err != nil || len(items) != 1 || items[0].Key != k {
+		t.Fatalf("Scan = %v, %v", items, err)
+	}
+	if err := st.RemoveKeys([]string{k}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(moved, "takes", k[:2], k+".json")); !os.IsNotExist(err) {
+		t.Fatalf("the entry survived its removal: %v", err)
+	}
+}

@@ -248,7 +248,14 @@ func (c *CLI) cacheLs(root string) int {
 
 // cacheRemove removes the takes pick selects and reports what it reclaimed.
 func (c *CLI) cacheRemove(root, verb string, pick func([]cache.Item) []cache.Item) int {
-	items, err := cache.Scan(root)
+	// One descriptor for the scan and the removal: what is removed is what was scanned, in the
+	// directory that was checked, whatever happens to the path in between.
+	st, ok, err := cache.OpenExisting(root)
+	var items []cache.Item
+	if err == nil && ok {
+		defer func() { _ = st.Close() }()
+		items, err = st.Scan()
+	}
 	if err != nil {
 		c.errorf("recite cache %s: %v", verb, err)
 		return exitcode.Internal
@@ -260,7 +267,10 @@ func (c *CLI) cacheRemove(root, verb string, pick func([]cache.Item) []cache.Ite
 		keys[i] = it.Key
 		freed += it.Size
 	}
-	if err := cache.RemoveKeys(root, keys); err != nil {
+	if len(keys) > 0 {
+		err = st.RemoveKeys(keys)
+	}
+	if err != nil {
 		c.errorf("recite cache %s: %v", verb, err)
 		return exitcode.Internal
 	}

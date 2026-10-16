@@ -57,13 +57,14 @@ func isPartialManifest(path string) bool {
 		head.Status != manifest.StatusComplete
 }
 
-// keepRejectedDir prepares --keep-rejected DIR as a private directory before any request.
-func keepRejectedDir(dir string) error {
+// keepRejectedDir prepares --keep-rejected DIR as a private directory before any request, and
+// holds it open so every rejected take is written into the directory checked here; nil when
+// the flag is not set.
+func keepRejectedDir(dir string) (*fsx.Dir, error) {
 	if dir == "" {
-		return nil
+		return nil, nil
 	}
-	_, err := fsx.MkdirPrivate(dir)
-	return err
+	return fsx.OpenPrivate(dir)
 }
 
 // recorder collects what a run's manifest and usage ledger need while workers run: it is the
@@ -72,7 +73,7 @@ type recorder struct {
 	c       *CLI
 	ledger  *usage.Ledger // nil: no state directory
 	prices  usage.PriceTable
-	keepDir string
+	keepDir *fsx.Dir // nil without --keep-rejected
 
 	mu          sync.Mutex
 	estimate    float64

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -74,7 +73,7 @@ type Entry struct {
 // entry; an entry that fails to parse or whose audio does not match its recorded hash is a
 // miss, never trusted.
 type Store struct {
-	dir string
+	dir *fsx.Dir // the takes directory, held open: no write follows a path replaced after Open
 	now func() time.Time
 }
 
@@ -84,7 +83,7 @@ func Open(root string, now func() time.Time) (*Store, error) {
 	if root == "" || !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("cache: %q: want an absolute directory", root)
 	}
-	dir, err := fsx.MkdirPrivate(root, "takes")
+	dir, err := fsx.OpenPrivate(root, "takes")
 	if err != nil {
 		return nil, fmt.Errorf("cache: %w", err)
 	}
@@ -94,8 +93,24 @@ func Open(root string, now func() time.Time) (*Store, error) {
 	return &Store{dir: dir, now: now}, nil
 }
 
+// OpenExisting opens the store under root for maintenance without creating anything; ok is
+// false when there is none. The takes directory is checked like Open checks it (fsx).
+func OpenExisting(root string) (s *Store, ok bool, err error) {
+	dir, ok, err := fsx.OpenExisting(filepath.Clean(root), "takes")
+	if err != nil {
+		return nil, false, fmt.Errorf("cache: %w", err)
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return &Store{dir: dir, now: time.Now}, true, nil
+}
+
+// Close releases the store's directory.
+func (s *Store) Close() error { return s.dir.Close() }
+
 // Dir is the takes directory.
-func (s *Store) Dir() string { return s.dir }
+func (s *Store) Dir() string { return s.dir.Path() }
 
 func validKey(key string) bool {
 	if len(key) != 64 {
@@ -105,7 +120,8 @@ func validKey(key string) bool {
 	return err == nil
 }
 
-func (s *Store) base(key string) string { return filepath.Join(s.dir, key[:2], key) }
+// base is key's files' name in the store, without extension: <shard>/<key>.
+func base(key string) string { return filepath.Join(key[:2], key) }
 
 // Get returns the entry and raw PCM of key. ok is false on a miss, including an entry that is
 // partial, corrupt, or recorded under another key; err reports only why a present entry was
@@ -130,8 +146,8 @@ func (s *Store) load(key string) (e Entry, pcm []byte, ok bool, err error) {
 	if !validKey(key) {
 		return Entry{}, nil, false, fmt.Errorf("cache: invalid key %q", key)
 	}
-	b := s.base(key)
-	raw, err := os.ReadFile(b + ".json")
+	b := base(key)
+	raw, err := s.dir.Root().ReadFile(b + ".json")
 	if errors.Is(err, fs.ErrNotExist) {
 		return Entry{}, nil, false, nil
 	}
@@ -144,7 +160,7 @@ func (s *Store) load(key string) (e Entry, pcm []byte, ok bool, err error) {
 	if e.Schema != EntrySchema || e.Key != key {
 		return Entry{}, nil, false, fmt.Errorf("cache: entry %s: schema %q, key %q", key, e.Schema, e.Key)
 	}
-	pcm, err = os.ReadFile(b + ".pcm")
+	pcm, err = s.dir.Root().ReadFile(b + ".pcm")
 	if err != nil {
 		return Entry{}, nil, false, fmt.Errorf("cache: audio %s: %w", key, err)
 	}
@@ -158,7 +174,12 @@ func (s *Store) load(key string) (e Entry, pcm []byte, ok bool, err error) {
 // touch records the access time in the index (one small file per entry; atime is not
 // trusted, design §11.1). A failure only loses pruning precision, so it is ignored.
 func (s *Store) touch(key string) {
-	_ = writeAtomic(filepath.Join(s.dir, key[:2]), key+".access", []byte(strconv.FormatInt(s.now().UnixNano(), 10)))
+	shard, ok, err := s.dir.Existing(key[:2])
+	if err != nil || !ok {
+		return
+	}
+	defer func() { _ = shard.Close() }()
+	_ = shard.WriteAtomic(key+".access", []byte(strconv.FormatInt(s.now().UnixNano(), 10)))
 }
 
 // Accessed returns the last access time recorded for key.
@@ -166,7 +187,7 @@ func (s *Store) Accessed(key string) (time.Time, bool) {
 	if !validKey(key) {
 		return time.Time{}, false
 	}
-	b, err := os.ReadFile(s.base(key) + ".access")
+	b, err := s.dir.Root().ReadFile(base(key) + ".access")
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -194,49 +215,17 @@ func (s *Store) Put(e Entry, pcm []byte) error {
 	if err != nil {
 		return fmt.Errorf("cache: encode %s: %w", e.Key, err)
 	}
-	sub, err := fsx.MkdirPrivate(s.dir, e.Key[:2])
+	sub, err := s.dir.Sub(e.Key[:2])
 	if err != nil {
 		return fmt.Errorf("cache: %w", err)
 	}
-	if err := writeAtomic(sub, e.Key+".pcm", pcm); err != nil {
-		return err
+	defer func() { _ = sub.Close() }() // read-only directory descriptor
+	if err := sub.WriteAtomic(e.Key+".pcm", pcm); err != nil {
+		return fmt.Errorf("cache: %w", err)
 	}
-	if err := writeAtomic(sub, e.Key+".json", append(raw, '\n')); err != nil {
-		return err
+	if err := sub.WriteAtomic(e.Key+".json", append(raw, '\n')); err != nil {
+		return fmt.Errorf("cache: %w", err)
 	}
 	s.touch(e.Key)
-	return nil
-}
-
-// writeAtomic writes name in dir through a 0600 temporary file and a rename.
-func writeAtomic(dir, name string, data []byte) (err error) {
-	f, err := os.CreateTemp(dir, "."+name+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("cache: temp for %s: %w", name, err)
-	}
-	tmp := f.Name()
-	defer func() {
-		if err != nil {
-			_ = os.Remove(tmp) // best effort: a stray temp file is never read as an entry
-		}
-	}()
-	if err := f.Chmod(0o600); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("cache: chmod %s: %w", name, err)
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("cache: write %s: %w", name, err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("cache: sync %s: %w", name, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("cache: close %s: %w", name, err)
-	}
-	if err := os.Rename(tmp, filepath.Join(dir, name)); err != nil {
-		return fmt.Errorf("cache: rename %s: %w", name, err)
-	}
 	return nil
 }

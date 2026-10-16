@@ -58,10 +58,10 @@ func RejectedName(chunk string, attempt int) string {
 	return chunk + "-a" + strconv.Itoa(attempt)
 }
 
-// WriteRejected saves take a of chunk c in dir, which must already be a private directory:
+// WriteRejected saves take a of chunk c in dir, a private directory held open (fsx.Dir):
 // <chunk>-a<attempt>.wav with the take's audio as rendered, and .json with its report. Both
 // files are private (0600). Every text field is scrubbed.
-func WriteRejected(dir string, c verify.Chunk, a verify.Attempt, take realtime.Take) error {
+func WriteRejected(dir *fsx.Dir, c verify.Chunk, a verify.Attempt, take realtime.Take) error {
 	if a.Rejection == nil {
 		return fmt.Errorf("manifest: %s attempt %d was not rejected", c.ID, a.N)
 	}
@@ -89,9 +89,9 @@ func WriteRejected(dir string, c verify.Chunk, a verify.Attempt, take realtime.T
 	if err != nil {
 		return fmt.Errorf("manifest: encode rejected take: %w", err)
 	}
-	base := filepath.Join(dir, RejectedName(c.ID, a.N))
+	base := RejectedName(c.ID, a.N)
 	pcm := audio.PCM(take.PCM[:len(take.PCM)-len(take.PCM)%audio.BytesPerSample])
-	f, err := fsx.CreatePrivate(base + ".wav")
+	f, err := dir.Create(base + ".wav")
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func WriteRejected(dir string, c verify.Chunk, a verify.Attempt, take realtime.T
 		werr = cerr
 	}
 	if werr != nil {
-		return fmt.Errorf("manifest: write %s.wav: %w", base, werr)
+		return fmt.Errorf("manifest: write %s.wav: %w", filepath.Join(dir.Path(), base), werr)
 	}
-	return fsx.WritePrivate(base+".json", append(b, '\n'))
+	return dir.Write(base+".json", append(b, '\n'))
 }

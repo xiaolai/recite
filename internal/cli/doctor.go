@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -342,18 +341,20 @@ func dirCheck(name, dir string) doctorCheck {
 	return okCheck(name, dir+" writable")
 }
 
-// writable checks dir the way the cache and the usage ledger open it (fsx.MkdirPrivate: created
+// writable checks dir the way the cache and the usage ledger open it (fsx.OpenPrivate: created
 // 0700 when missing, never a symlink, owned by the user), then writes, syncs and removes a probe
-// file with data in it, so a filesystem that creates files but refuses their data fails here.
+// file with data in it through the directory held open, so a filesystem that creates files but
+// refuses their data fails here.
 func writable(dir string) error {
-	if _, err := fsx.MkdirPrivate(dir); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dir, ".doctor-*")
+	d, err := fsx.OpenPrivate(dir)
 	if err != nil {
 		return err
 	}
-	name := f.Name()
+	defer func() { _ = d.Close() }() // a read-only directory descriptor
+	f, name, err := d.CreateTemp(".doctor-")
+	if err != nil {
+		return err
+	}
 	_, err = f.Write([]byte("recite doctor write probe\n"))
 	if err == nil {
 		err = f.Sync()
@@ -361,7 +362,7 @@ func writable(dir string) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if rerr := os.Remove(name); err == nil {
+	if rerr := d.Root().Remove(name); err == nil {
 		err = rerr
 	}
 	return err

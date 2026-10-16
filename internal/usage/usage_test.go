@@ -238,3 +238,36 @@ func TestEstimateSpeechMatchesHandCalculation(t *testing.T) {
 		t.Fatal("a model without a rate was priced")
 	}
 }
+
+// The ledger appends into the directory it checked at Open, even after that path is replaced
+// by a symlink (audit: every append reopened the full path).
+// accept: AUTH-05#8
+func TestLedgerStaysInTheCheckedDirectory(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "state")
+	l, err := Open(dir, func() time.Time { return ledgerNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	evil := filepath.Join(base, "evil")
+	if err := os.Mkdir(evil, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(base, "moved")
+	if err := os.Rename(dir, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(evil, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Append(Entry{Time: ledgerNow, Command: "say", Kind: KindRender}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(readLines(t, filepath.Join(moved, FileName))); n != 1 {
+		t.Fatalf("%d lines in the checked directory, want 1", n)
+	}
+	if ents, _ := os.ReadDir(evil); len(ents) != 0 {
+		t.Fatalf("the link's destination was written: %v", ents)
+	}
+}

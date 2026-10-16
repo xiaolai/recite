@@ -95,6 +95,7 @@ func (c *CLI) runSay(req SayRequest) int {
 	if code != ExitOK {
 		return code
 	}
+	defer job.close()
 	c.Logger.Info("plan", "chunks", len(job.tasks), "jobs", req.Jobs)
 	if req.DryRun || c.globals.JSON {
 		ev := c.estimate(req, job, req.DryRun)
@@ -183,11 +184,12 @@ func (c *CLI) prepareSay(req SayRequest) (sayJob, int) {
 	job := sayJob{input: input, plan: plan, tasks: tasks, gaps: gaps, target: target, enc: enc, extras: x,
 		manifest: mpath, replaceManifest: mreplace}
 	if job.cache, err = c.takeCache(req); err == nil {
-		if err = keepRejectedDir(req.KeepRejected); err == nil {
+		if job.keep, err = keepRejectedDir(req.KeepRejected); err == nil {
 			job.ledger, err = c.openLedger()
 		}
 	}
 	if err != nil {
+		job.close()
 		c.errorf("%s: %v", req.prefix(), err)
 		if errors.Is(err, fsx.ErrUnsafePath) {
 			return sayJob{}, ExitUsage
@@ -284,12 +286,28 @@ type sayJob struct {
 	tasks           []pipeline.Task
 	cache           *pipeline.TakeCache
 	ledger          *usage.Ledger
+	keep            *fsx.Dir // --keep-rejected, held open; nil without the flag
 	gaps            []int
 	target          string // stdoutTarget streams (AUD-07)
 	enc             audio.Encoding
 	manifest        string // "" under --no-manifest
 	replaceManifest bool
 	extras          extras // subtitles, chapters, split output
+}
+
+// close releases the directories the job holds open: the take cache, the --keep-rejected
+// directory and the usage ledger's. Each is a read-only directory descriptor, so closing one
+// cannot lose data.
+func (j sayJob) close() {
+	if j.cache != nil {
+		_ = j.cache.Store.Close()
+	}
+	if j.keep != nil {
+		_ = j.keep.Close()
+	}
+	if j.ledger != nil {
+		_ = j.ledger.Close()
+	}
 }
 
 // takeCache opens the take cache (RUN-04): nil under --no-cache or without a cache directory.
@@ -315,7 +333,7 @@ func (c *CLI) renderAll(ctx context.Context, creds *auth.Credentials, req SayReq
 	if err != nil {
 		return err
 	}
-	rec := &recorder{c: c, ledger: job.ledger, prices: usage.ListPrices, keepDir: req.KeepRejected}
+	rec := &recorder{c: c, ledger: job.ledger, prices: usage.ListPrices, keepDir: job.keep}
 	var tr stt.Transcriber
 	if req.Verify.Mode != verify.ModeOff {
 		t, closeTr, err := c.NewTranscriber(creds)
