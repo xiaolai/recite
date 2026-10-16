@@ -41,6 +41,7 @@ func readFile(t *testing.T, path string) string {
 // Each step is its own recipe line, so make stops at the first non-zero exit.
 // accept: FND-03#1
 func TestMakeCheckRunsEveryStepInOrder(t *testing.T) {
+	t.Parallel()
 	recipe := makeRecipe(t, readFile(t, "Makefile"), "check")
 	steps := []string{
 		"gofmt -l",
@@ -69,6 +70,7 @@ func TestMakeCheckRunsEveryStepInOrder(t *testing.T) {
 }
 
 func TestLiveSuitesAreNotInCheck(t *testing.T) {
+	t.Parallel()
 	mk := readFile(t, "Makefile")
 	for _, line := range makeRecipe(t, mk, "check") {
 		for _, tag := range []string{"live", "qualify", "calibrate", "RECITE_LIVE"} {
@@ -85,6 +87,7 @@ func TestLiveSuitesAreNotInCheck(t *testing.T) {
 
 // accept: FND-03#1
 func TestWorkflowRunsCheckOnMacOSAndLinux(t *testing.T) {
+	t.Parallel()
 	wf := readFile(t, ".github/workflows/check.yml")
 	for _, want := range []string{
 		"os: [macos-latest, ubuntu-latest]",
@@ -114,6 +117,7 @@ func TestWorkflowRunsCheckOnMacOSAndLinux(t *testing.T) {
 // the job took at most 2m24s on ubuntu-latest and 1m05s on macos-latest.
 // accept: FND-03#3
 func TestWorkflowCheckJobTimeout(t *testing.T) {
+	t.Parallel()
 	wf := readFile(t, ".github/workflows/check.yml")
 	_, job, ok := strings.Cut(wf, "\n  check:\n")
 	if !ok {

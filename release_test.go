@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -24,12 +25,44 @@ func writeExec(t *testing.T, dir, name, body string) {
 	}
 }
 
-// runScript runs a repository script with bash, the fakes in fakeBin first on PATH, and the
-// extra environment. It returns the exit code and the combined output.
+// fakeEnvFile holds, inside a fake bin directory, the settings its fakes read. They travel
+// with the bin rather than through the process environment, so tests that use fakes can
+// run in parallel.
+const fakeEnvFile = ".fake-env.json"
+
+// setFakeEnv sets key to value for every script runScript runs with the fakes in bin.
+func setFakeEnv(t *testing.T, bin, key, value string) {
+	t.Helper()
+	vars := fakeEnv(t, bin)
+	vars[key] = value
+	b, err := json.Marshal(vars)
+	must(t, err)
+	writeFile(t, filepath.Join(bin, fakeEnvFile), string(b), 0o644)
+}
+
+// fakeEnv is the settings setFakeEnv stored for bin, none when there are none.
+func fakeEnv(t *testing.T, bin string) map[string]string {
+	t.Helper()
+	vars := map[string]string{}
+	b, err := os.ReadFile(filepath.Join(bin, fakeEnvFile))
+	if os.IsNotExist(err) {
+		return vars
+	}
+	must(t, err)
+	must(t, json.Unmarshal(b, &vars))
+	return vars
+}
+
+// runScript runs a repository script with bash, the fakes in fakeBin first on PATH, their
+// settings, and the extra environment, which overrides both. It returns the exit code and
+// the combined output.
 func runScript(t *testing.T, fakeBin string, env []string, script string, args ...string) (int, string) {
 	t.Helper()
 	cmd := exec.Command("bash", append([]string{script}, args...)...)
 	cmd.Env = append(os.Environ(), "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for k, v := range fakeEnv(t, fakeBin) {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	cmd.Env = append(cmd.Env, env...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -51,6 +84,7 @@ var semverChain = []string{"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "
 
 // accept: REL-03#1
 func TestTapVersionGuard(t *testing.T) {
+	t.Parallel()
 	type guardCase struct {
 		current, next string
 		want          int
@@ -134,6 +168,7 @@ func semverCmp(t *testing.T, a, b string) string {
 // including the prerelease orderings a stable NEW never reaches through the guard.
 // accept: REL-03#1
 func TestTapVersionGuardSemverPrecedence(t *testing.T) {
+	t.Parallel()
 	for i, a := range semverChain {
 		for j, b := range semverChain {
 			want := "0"
@@ -172,6 +207,7 @@ func TestTapVersionGuardSemverPrecedence(t *testing.T) {
 // binary's `recite version` must name the version the formula was rendered for.
 // accept: REL-03#1
 func TestFormulaTestChecksReleasedVersion(t *testing.T) {
+	t.Parallel()
 	tmpl := readFile(t, "packaging/homebrew/recite.rb.tmpl")
 	for _, want := range []string{
 		`VERSION = "@VERSION@".freeze`,
@@ -239,6 +275,7 @@ func packageRelease(t *testing.T, dist, tmp, fakeBin, tz, umask string) (int, st
 // reproduces a published release byte for byte. A failed run leaves no staging behind.
 // accept: REL-03#1
 func TestPackageReleaseIsReproducible(t *testing.T) {
+	t.Parallel()
 	platforms := []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"}
 	newDist := func(mode os.FileMode, mtime time.Time) string {
 		dist := t.TempDir()
@@ -325,6 +362,7 @@ echo "tar: write error" >&2; exit 1
 
 // accept: REL-01#1
 func TestReleaseBuildJobRunsEachNativeBinary(t *testing.T) {
+	t.Parallel()
 	wf := readFile(t, ".github/workflows/check.yml")
 	_, job, ok := strings.Cut(wf, "\n  release-build:\n")
 	if !ok {
@@ -356,6 +394,7 @@ func TestReleaseBuildJobRunsEachNativeBinary(t *testing.T) {
 
 // accept: REL-02#3
 func TestCleanMacWorkflowChecksGatekeeper(t *testing.T) {
+	t.Parallel()
 	wf := readFile(t, ".github/workflows/clean-mac.yml")
 	for _, want := range []string{
 		"on:\n  workflow_dispatch:\n    inputs:\n      version:",
@@ -446,11 +485,11 @@ esac
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("FAKE_LOG", log)
-	t.Setenv("FAKE_FLAGS", flags)
-	t.Setenv("FAKE_STATUS", status)
-	t.Setenv("FAKE_VERIFY_EXIT", strconv.Itoa(verifyExit))
-	t.Setenv("FAKE_MUTATE", "")
+	setFakeEnv(t, bin, "FAKE_LOG", log)
+	setFakeEnv(t, bin, "FAKE_FLAGS", flags)
+	setFakeEnv(t, bin, "FAKE_STATUS", status)
+	setFakeEnv(t, bin, "FAKE_VERIFY_EXIT", strconv.Itoa(verifyExit))
+	setFakeEnv(t, bin, "FAKE_MUTATE", "")
 	return bin, dist, log
 }
 
@@ -474,6 +513,7 @@ func readLog(t *testing.T, path string) string {
 
 // accept: REL-02#1
 func TestSignNotarizeVerifiesHardenedSignature(t *testing.T) {
+	t.Parallel()
 	bin, dist, log := signFakes(t, "0x10000(runtime)", "Accepted", 0)
 	code, out := runSign(t, bin, dist)
 	if code != 0 {
@@ -511,6 +551,7 @@ func TestSignNotarizeVerifiesHardenedSignature(t *testing.T) {
 
 // accept: REL-02#2
 func TestSignNotarizeRequiresAccepted(t *testing.T) {
+	t.Parallel()
 	bin, dist, log := signFakes(t, "0x10000(runtime)", "Accepted", 0)
 	if code, out := runSign(t, bin, dist); code != 0 {
 		t.Fatalf("Accepted: exit %d: %s", code, out)
@@ -544,6 +585,7 @@ func TestSignNotarizeRequiresAccepted(t *testing.T) {
 // snapshot's, and a release binary that changed during the wait is refused.
 // accept: REL-02#2
 func TestSignNotarizeBindsSubmittedBytes(t *testing.T) {
+	t.Parallel()
 	bin, dist, log := signFakes(t, "0x10000(runtime)", "Accepted", 0)
 	if code, out := runSign(t, bin, dist); code != 0 {
 		t.Fatalf("Accepted: exit %d: %s", code, out)
@@ -566,7 +608,7 @@ func TestSignNotarizeBindsSubmittedBytes(t *testing.T) {
 	}
 
 	bin, dist, _ = signFakes(t, "0x10000(runtime)", "Accepted", 0)
-	t.Setenv("FAKE_MUTATE", filepath.Join(dist, "recite-darwin-arm64"))
+	setFakeEnv(t, bin, "FAKE_MUTATE", filepath.Join(dist, "recite-darwin-arm64"))
 	code, out := runSign(t, bin, dist)
 	if code == 0 || !strings.Contains(out, "changed while it was notarised") {
 		t.Errorf("binary swapped during notarisation: exit %d: %s", code, out)
@@ -687,10 +729,10 @@ esac
 	for _, platform := range []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"} {
 		writeFile(t, filepath.Join(dist, "recite-"+platform), fakeReleaseBinary(platform, releaseRev, "false"), 0o755)
 	}
-	t.Setenv("FAKE_FAIL_ON", failOn)
-	t.Setenv("FAKE_SAY", sayMode)
-	t.Setenv("FAKE_GO_FAIL", goFail)
-	t.Setenv("FAKE_GO_LOG", goLog)
+	setFakeEnv(t, bin, "FAKE_FAIL_ON", failOn)
+	setFakeEnv(t, bin, "FAKE_SAY", sayMode)
+	setFakeEnv(t, bin, "FAKE_GO_FAIL", goFail)
+	setFakeEnv(t, bin, "FAKE_GO_LOG", goLog)
 	return bin, dist, recite, goLog
 }
 
@@ -747,6 +789,7 @@ func latestReport(t *testing.T, dist string) string {
 
 // accept: REL-05#1
 func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
+	t.Parallel()
 	bin, dist, recite, goLog := releaseCheckFakes(t, "", "", "")
 	// HOME is the directory every temporary path is under, so the report must redact them all.
 	home := filepath.Dir(filepath.Dir(recite))
@@ -830,15 +873,18 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 		{"round-trip test fails", "", "", "TestLiveSayHello", "--- FAIL: fake"},
 		{"known-sentence test fails", "", "", "TestLiveHTTPKnownSentence", "--- FAIL: fake"},
 	} {
-		bin, dist, recite, _ := releaseCheckFakes(t, tc.failOn, tc.say, tc.goFail)
-		env := []string{"RECITE_LIVE=1", "DIST=" + dist, "RECITE_BIN=" + recite}
-		code, out := runScript(t, bin, env, "scripts/release-check.sh")
-		if code != 1 || !strings.Contains(out, tc.want) {
-			t.Errorf("%s: exit %d, want 1 with %q: %s", tc.name, code, tc.want, out)
-		}
-		if report := latestReport(t, dist); !strings.Contains(report, "\nResult: FAIL (") {
-			t.Errorf("%s: report does not say FAIL:\n%s", tc.name, report)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			bin, dist, recite, _ := releaseCheckFakes(t, tc.failOn, tc.say, tc.goFail)
+			env := []string{"RECITE_LIVE=1", "DIST=" + dist, "RECITE_BIN=" + recite}
+			code, out := runScript(t, bin, env, "scripts/release-check.sh")
+			if code != 1 || !strings.Contains(out, tc.want) {
+				t.Errorf("exit %d, want 1 with %q: %s", code, tc.want, out)
+			}
+			if report := latestReport(t, dist); !strings.Contains(report, "\nResult: FAIL (") {
+				t.Errorf("report does not say FAIL:\n%s", report)
+			}
+		})
 	}
 
 	if code, _ := runScript(t, bin, []string{"RECITE_LIVE=", "DIST=" + dist, "RECITE_BIN=" + recite}, "scripts/release-check.sh"); code != 2 {
@@ -884,6 +930,7 @@ func TestReleaseCheckExitsNonZeroOnAFailedStep(t *testing.T) {
 // audio and the step fails rather than passing on its size.
 // accept: REL-05#1
 func TestReleaseCheckProbesM4AWithoutFFprobe(t *testing.T) {
+	t.Parallel()
 	hostTools := []string{"bash", "env", "dirname", "basename", "date", "mkdir", "cat", "shasum", "awk",
 		"head", "sed", "tail", "tr", "grep", "python3"}
 	for _, tc := range []struct {
@@ -1007,13 +1054,13 @@ esac
 	}
 	writeFile(t, filepath.Join(p.dist, "release-check-20261012T000000Z.md"),
 		passReport(t, p.dist), 0o644)
-	t.Setenv("FAKE_LOG", p.log)
-	t.Setenv("FAKE_RELEASE", p.release)
-	t.Setenv("FAKE_TAG_REF", "tag "+publishTagObj)
-	t.Setenv("FAKE_TAG_COMMIT", publishHead)
-	t.Setenv("FAKE_FORMULA", "")
-	t.Setenv("FAKE_GIT_STATUS", "")
-	t.Setenv("FAKE_GIT_STATUS_EXIT", "")
+	setFakeEnv(t, p.bin, "FAKE_LOG", p.log)
+	setFakeEnv(t, p.bin, "FAKE_RELEASE", p.release)
+	setFakeEnv(t, p.bin, "FAKE_TAG_REF", "tag "+publishTagObj)
+	setFakeEnv(t, p.bin, "FAKE_TAG_COMMIT", publishHead)
+	setFakeEnv(t, p.bin, "FAKE_FORMULA", "")
+	setFakeEnv(t, p.bin, "FAKE_GIT_STATUS", "")
+	setFakeEnv(t, p.bin, "FAKE_GIT_STATUS_EXIT", "")
 	return p
 }
 
@@ -1031,6 +1078,7 @@ func (p publishEnv) run(t *testing.T) (int, string) {
 
 // accept: REL-05#1
 func TestPublishReleaseRefusesWithoutPassingCheck(t *testing.T) {
+	t.Parallel()
 	report := "release-check-20261012T000000Z.md"
 	for _, tc := range []struct {
 		name   string
@@ -1068,7 +1116,7 @@ func TestPublishReleaseRefusesWithoutPassingCheck(t *testing.T) {
 			// Packaging swaps linux-amd64's binary for other bytes just before tar reads it.
 			realTar, err := exec.LookPath("tar")
 			must(t, err)
-			t.Setenv("REAL_TAR", realTar)
+			setFakeEnv(t, p.bin, "REAL_TAR", realTar)
 			writeExec(t, p.bin, "tar", `dir="" prev="" create=""
 for a in "$@"; do
 	if [ "$prev" = -C ]; then dir="$a"; fi
@@ -1079,9 +1127,9 @@ if [ -n "$create" ] && [ "${dir##*/}" = linux-amd64 ]; then printf 'swapped' >"$
 exec "$REAL_TAR" "$@"
 `)
 		}, "recite-linux-amd64.tar.gz holds a recite that is not the checked recite-linux-amd64"},
-		{"dirty tree", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_GIT_STATUS", " M README.md\n") },
+		{"dirty tree", func(t *testing.T, p publishEnv) { setFakeEnv(t, p.bin, "FAKE_GIT_STATUS", " M README.md\n") },
 			"the working tree is not clean"},
-		{"git status fails", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_GIT_STATUS_EXIT", "128") },
+		{"git status fails", func(t *testing.T, p publishEnv) { setFakeEnv(t, p.bin, "FAKE_GIT_STATUS_EXIT", "128") },
 			"git status failed"},
 		{"not notarised", func(t *testing.T, p publishEnv) {
 			writeFile(t, filepath.Join(p.dist, "notary-info-darwin-amd64.txt"), "  status: Invalid\n", 0o644)
@@ -1094,9 +1142,9 @@ exec "$REAL_TAR" "$@"
 			writeFile(t, filepath.Join(p.dist, "recite-darwin-amd64"), "re-signed later", 0o755)
 			writeFile(t, filepath.Join(p.dist, report), passReport(t, p.dist), 0o644)
 		}, "is not the binary that was notarised"},
-		{"tag missing on xiaolai/recite", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_TAG_REF", "") },
+		{"tag missing on xiaolai/recite", func(t *testing.T, p publishEnv) { setFakeEnv(t, p.bin, "FAKE_TAG_REF", "") },
 			"tag v9.9.9 is not on xiaolai/recite"},
-		{"tag on xiaolai/recite at another commit", func(t *testing.T, p publishEnv) { t.Setenv("FAKE_TAG_COMMIT", "2222222") },
+		{"tag on xiaolai/recite at another commit", func(t *testing.T, p publishEnv) { setFakeEnv(t, p.bin, "FAKE_TAG_COMMIT", "2222222") },
 			"xiaolai/recite's tag v9.9.9 is 2222222, not HEAD"},
 	} {
 		p := publishFakes(t)
@@ -1129,6 +1177,7 @@ exec "$REAL_TAR" "$@"
 // any command runs: every tool the script could reach is a fake that records its call.
 // accept: REL-05#1
 func TestPublishReleaseRejectsNonReleaseVersions(t *testing.T) {
+	t.Parallel()
 	for _, version := range []string{"v9.9.9-rc1", "v09.9.9", "v9.09.9", "v9.9.09", "9.9.9", "v9.9"} {
 		bin := t.TempDir()
 		log := filepath.Join(t.TempDir(), "calls.log")
@@ -1149,9 +1198,10 @@ func TestPublishReleaseRejectsNonReleaseVersions(t *testing.T) {
 // anything, and refuses when what is already published is not this build.
 // accept: REL-03#1
 func TestPublishReleaseResumes(t *testing.T) {
+	t.Parallel()
 	p := publishFakes(t)
 	// A lightweight tag names the commit directly.
-	t.Setenv("FAKE_TAG_REF", "commit "+publishHead)
+	setFakeEnv(t, p.bin, "FAKE_TAG_REF", "commit "+publishHead)
 	if code, out := p.run(t); code != 0 {
 		t.Fatalf("first run: exit %d: %s", code, out)
 	}
@@ -1168,7 +1218,7 @@ func TestPublishReleaseResumes(t *testing.T) {
 	// Re-run: the release and the tap formula already exist and match this build.
 	tapFormula := filepath.Join(t.TempDir(), "recite.rb")
 	writeFile(t, tapFormula, readFile(t, filepath.Join(p.dist, "recite.rb")), 0o644)
-	t.Setenv("FAKE_FORMULA", tapFormula)
+	setFakeEnv(t, p.bin, "FAKE_FORMULA", tapFormula)
 	must(t, os.Remove(p.log))
 	code, out := p.run(t)
 	if code != 0 || !strings.Contains(out, "already exists") || !strings.Contains(out, "tap already has 9.9.9") {
@@ -1220,6 +1270,7 @@ func TestPublishReleaseResumes(t *testing.T) {
 // replaced by the release; one that is a later prerelease is not.
 // accept: REL-03#1
 func TestPublishReleaseReadsPrereleaseTapVersion(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		tapVersion string
 		pushed     bool
@@ -1232,7 +1283,7 @@ func TestPublishReleaseReadsPrereleaseTapVersion(t *testing.T) {
 		p := publishFakes(t)
 		tapFormula := filepath.Join(t.TempDir(), "recite.rb")
 		writeFile(t, tapFormula, "class Recite < Formula\n  VERSION = \""+tc.tapVersion+"\"\n  version VERSION\nend\n", 0o644)
-		t.Setenv("FAKE_FORMULA", tapFormula)
+		setFakeEnv(t, p.bin, "FAKE_FORMULA", tapFormula)
 		code, out := p.run(t)
 		pushed := strings.Contains(readLog(t, p.log), "\x1fpush\x1forigin\x1fHEAD:main\n")
 		if (code == 0) != tc.pushed || pushed != tc.pushed || !strings.Contains(out, tc.want) {

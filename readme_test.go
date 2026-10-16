@@ -14,6 +14,7 @@ import (
 // The README exit-code table lists exactly the constants, with their meanings.
 // accept: CLI-03#2
 func TestREADMEExitCodeTable(t *testing.T) {
+	t.Parallel()
 	readme := readFile(t, "README.md")
 	_, section, ok := strings.Cut(readme, "## Exit codes\n")
 	if !ok {
@@ -69,6 +70,7 @@ var helpFlag = regexp.MustCompile(`(?m)^  -([A-Za-z0-9][A-Za-z0-9-]*)(?:[ \t]|$)
 // -name or --name.
 // accept: REL-04#1
 func TestREADMEDocumentsEveryHelpFlag(t *testing.T) {
+	t.Parallel()
 	readme := readFile(t, "README.md")
 	top := helpOf(t, "--help")
 	_, cmds, ok := strings.Cut(top, "\nCommands:\n")
@@ -110,6 +112,7 @@ func TestREADMEDocumentsEveryHelpFlag(t *testing.T) {
 // The disclosure sits on the first screen of the README: its first 25 lines.
 // accept: REL-04#1
 func TestREADMENoticeOnFirstScreen(t *testing.T) {
+	t.Parallel()
 	lines := strings.Split(readFile(t, "README.md"), "\n")
 	if len(lines) > 25 {
 		lines = lines[:25]

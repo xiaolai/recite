@@ -73,6 +73,7 @@ func disallowed(mods []string) []string {
 
 // accept: FND-01#3
 func TestGoModDependenciesAllowlisted(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("go.mod")
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
@@ -88,6 +89,7 @@ func TestGoModDependenciesAllowlisted(t *testing.T) {
 
 // accept: FND-01#3
 func TestParseRequiresFlagsDisallowed(t *testing.T) {
+	t.Parallel()
 	fixture := `module example.com/x
 
 go 1.27
@@ -117,6 +119,7 @@ require (
 
 // accept: FND-01#2
 func TestBinaryDepsAllowlisted(t *testing.T) {
+	t.Parallel()
 	out, err := exec.Command("go", "list", "-deps", "-f", "{{with .Module}}{{.Path}}{{end}}", "./cmd/recite").Output()
 	if err != nil {
 		t.Fatalf("go list -deps: %v", err)
@@ -130,6 +133,7 @@ func TestBinaryDepsAllowlisted(t *testing.T) {
 
 // accept: FND-01#1
 func TestBuildEmptyImplementation(t *testing.T) {
+	t.Parallel()
 	if out, err := exec.Command("go", "build", "./...").CombinedOutput(); err != nil {
 		t.Fatalf("go build ./...: %v\n%s", err, out)
 	}
