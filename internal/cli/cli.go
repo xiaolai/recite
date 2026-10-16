@@ -92,7 +92,9 @@ func (c *CLI) Run(args []string) int {
 			return ExitOK
 		}
 		if !strings.Contains(err.Error(), "flag provided but not defined") {
-			// A say or render run still ends its --json stream with its final event (CLI-06).
+			// A say or render run still ends its --json stream with its final event (CLI-06), even when --json
+			// comes after the flag that failed: Parse stopped there, so the boolean flags past it are applied here.
+			applyBoolFlags(gfs, args)
 			return c.commandDone(c.commandOf(gfs, args), c.usageErr("recite", err))
 		}
 		c.globals = defaultGlobals()
@@ -171,6 +173,33 @@ func (c *CLI) commandOf(fs *flag.FlagSet, args []string) command {
 		i++ // the value, whatever it looks like
 	}
 	return c.mustLookup("say")
+}
+
+// applyBoolFlags sets every boolean flag of fs in the leading flags of args, walking them as commandOf does. It
+// runs after Parse failed partway, so a boolean flag past the failure (`--auth-source x --json say`) still counts.
+// A flag whose value does not parse is skipped: the failure is already being reported.
+func applyBoolFlags(fs *flag.FlagSet, args []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" || len(a) < 2 || a[0] != '-' {
+			return
+		}
+		name, value, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-"), "=")
+		f := fs.Lookup(name)
+		if f == nil {
+			return
+		}
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+			if !hasValue {
+				value = "true"
+			}
+			_ = fs.Set(name, value)
+			continue
+		}
+		if !hasValue {
+			i++ // the value, whatever it looks like
+		}
+	}
 }
 
 // endedByTerminator reports whether fs.Parse(args) stopped at a "--" terminator, as opposed to a

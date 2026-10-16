@@ -80,6 +80,10 @@ func TestMalformedGlobalFlagFinalEventNamesTheCommand(t *testing.T) {
 		{[]string{"--json", "--auth-source", "invalid", "Hello", "render"}, "done"},
 		{[]string{"--json", "--auth-source", "invalid"}, "done"},
 		{[]string{"--json", "--log-file"}, "done"},
+		// --json after the flag that failed still asks for the stream.
+		{[]string{"--auth-source", "invalid", "--json", "say", "Hi"}, "done"},
+		{[]string{"--auth-source=invalid", "-json", "render", "x.md"}, "render"},
+		{[]string{"--profile", "p", "--auth-source", "invalid", "--json=true", "say", "Hi"}, "done"},
 	} {
 		var out, errb bytes.Buffer
 		c := New(&out, &errb)
@@ -93,6 +97,17 @@ func TestMalformedGlobalFlagFinalEventNamesTheCommand(t *testing.T) {
 		if err := json.Unmarshal([]byte(lines[len(lines)-1]), &ev); err != nil || code != ExitUsage || ev.Event != tc.want || ev.Exit != ExitUsage {
 			t.Errorf("%q: code %d, final event %q (%v), want %s", tc.args, code, out.String(), err, tc.want)
 		}
+	}
+}
+
+// A boolean flag past the failure is applied as written: --json=false asks for no stream.
+// accept: CLI-06#2
+func TestMalformedGlobalFlagHonoursALaterJSONFalse(t *testing.T) {
+	var out, errb bytes.Buffer
+	c := New(&out, &errb)
+	c.Getenv = func(string) string { return "" }
+	if code := c.Run([]string{"--json", "--auth-source", "invalid", "--json=false", "say", "Hi"}); code != ExitUsage || out.Len() != 0 {
+		t.Errorf("code %d, stdout %q; want exit %d and no stream", code, out.String(), ExitUsage)
 	}
 }
 
