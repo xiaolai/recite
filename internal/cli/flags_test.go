@@ -84,6 +84,9 @@ func TestMalformedGlobalFlagFinalEventNamesTheCommand(t *testing.T) {
 		{[]string{"--auth-source", "invalid", "--json", "say", "Hi"}, "done"},
 		{[]string{"--auth-source=invalid", "-json", "render", "x.md"}, "render"},
 		{[]string{"--profile", "p", "--auth-source", "invalid", "--json=true", "say", "Hi"}, "done"},
+		{[]string{"--auth-source", "invalid", "say", "--json", "Hi"}, "done"},
+		{[]string{"--auth-source", "invalid", "render", "x.md", "--json"}, "render"},
+		{[]string{"--auth-source", "invalid", "say", "--voice", "alloy", "--json", "Hi"}, "done"},
 	} {
 		var out, errb bytes.Buffer
 		c := New(&out, &errb)

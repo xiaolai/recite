@@ -93,9 +93,11 @@ func (c *CLI) Run(args []string) int {
 		}
 		if !strings.Contains(err.Error(), "flag provided but not defined") {
 			// A say or render run still ends its --json stream with its final event (CLI-06), even when --json
-			// comes after the flag that failed: Parse stopped there, so the boolean flags past it are applied here.
-			applyBoolFlags(gfs, args)
-			return c.commandDone(c.commandOf(gfs, args), c.usageErr("recite", err))
+			// comes after the flag that failed, before or after the command name: Parse stopped at the failure, so
+			// the boolean flags of the whole line are applied here.
+			cmd := c.commandOf(gfs, args)
+			c.applyBoolFlags(cmd, args)
+			return c.commandDone(cmd, c.usageErr("recite", err))
 		}
 		c.globals = defaultGlobals()
 		return c.runCommand(c.mustLookup("say"), args)
@@ -175,19 +177,27 @@ func (c *CLI) commandOf(fs *flag.FlagSet, args []string) command {
 	return c.mustLookup("say")
 }
 
-// applyBoolFlags sets every boolean flag of fs in the leading flags of args, walking them as commandOf does. It
-// runs after Parse failed partway, so a boolean flag past the failure (`--auth-source x --json say`) still counts.
-// A flag whose value does not parse is skipped: the failure is already being reported.
-func applyBoolFlags(fs *flag.FlagSet, args []string) {
+// applyBoolFlags sets the boolean flags written anywhere on the line, read with cmd's flag set (its own flags and
+// the globals, as runCommand parses them, interspersed): it runs after Parse failed partway, so a boolean flag past
+// the failure (`--auth-source x --json say`, `--auth-source x say --json Hi`) still counts. Walking stops at "--". A
+// flag whose value does not parse, or that the set does not know, is skipped: a failure is already being reported.
+func (c *CLI) applyBoolFlags(cmd command, args []string) {
+	fs := newFlagSet("recite " + cmd.name)
+	c.globals.register(fs)
+	c.globals.registerStacked(fs)
+	cmd.setup(fs, c)
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if a == "--" || len(a) < 2 || a[0] != '-' {
+		if a == "--" {
 			return
+		}
+		if len(a) < 2 || a[0] != '-' {
+			continue // the command name or a positional
 		}
 		name, value, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-"), "=")
 		f := fs.Lookup(name)
 		if f == nil {
-			return
+			continue
 		}
 		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
 			if !hasValue {
