@@ -106,9 +106,9 @@ func TestQ11HintTakes(t *testing.T) {
 			keys[tk.Chunk.ID] = key{i + 1, take}
 		}
 	}
-	var est time.Duration
+	var est []verify.Chunk
 	for _, tk := range tasks {
-		est += tk.Chunk.Estimate
+		est = append(est, tk.Chunk)
 	}
 	if err := livebudget.Preflight(est, 1, liveBudget); err != nil {
 		t.Fatal(err)

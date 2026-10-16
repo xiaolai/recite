@@ -107,9 +107,9 @@ func qualifyCorpus(t *testing.T, bullet, tag string, corpus []string, minFirst i
 		t.Fatalf("run each of the %d shards in its own invocation: RECITE_SHARD=1..%d", len(shards), len(shards))
 	}
 	part := shards[k-1]
-	var est time.Duration
+	var est []verify.Chunk
 	for _, tk := range part {
-		est += tk.Chunk.Estimate
+		est = append(est, tk.Chunk)
 	}
 	if err := livebudget.Preflight(est, attempts, liveBudget); err != nil {
 		t.Fatal(err)
@@ -280,12 +280,12 @@ type attempt struct {
 func shard(tasks []pipeline.Task, attempts int, budget time.Duration) [][]pipeline.Task {
 	var out [][]pipeline.Task
 	var cur []pipeline.Task
-	var est time.Duration
+	var est []verify.Chunk
 	for _, tk := range tasks {
-		if len(cur) > 0 && livebudget.Preflight(est+tk.Chunk.Estimate, attempts, budget) != nil {
-			out, cur, est = append(out, cur), nil, 0
+		if len(cur) > 0 && livebudget.Preflight(append(est, tk.Chunk), attempts, budget) != nil {
+			out, cur, est = append(out, cur), nil, nil
 		}
-		cur, est = append(cur, tk), est+tk.Chunk.Estimate
+		cur, est = append(cur, tk), append(est, tk.Chunk)
 	}
 	return append(out, cur)
 }

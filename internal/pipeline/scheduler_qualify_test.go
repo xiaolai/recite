@@ -72,9 +72,9 @@ func BenchmarkLiveThroughput(b *testing.B) {
 	// benchmark measures throughput, not retries. The budget spans every loop iteration.
 	opts := verify.OptionsFor(verify.ModeNormal)
 	opts.MaxAttempts = 2
-	var est time.Duration
+	var est []verify.Chunk
 	for _, t := range tasks {
-		est += t.Chunk.Estimate
+		est = append(est, t.Chunk)
 	}
 	if err := livebudget.Preflight(est, opts.MaxAttempts+opts.RequestExtraAttempts, liveBudget); err != nil {
 		b.Fatal(err)

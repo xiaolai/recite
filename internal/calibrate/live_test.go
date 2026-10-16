@@ -205,9 +205,9 @@ func TestCalibrateRender(t *testing.T) {
 func renderShard(t *testing.T, m mini, k int, held map[string]bool) {
 	t.Helper()
 	part := m.shards[k-1]
-	var est time.Duration
+	var est []verify.Chunk
 	for _, tk := range part {
-		est += tk.Chunk.Estimate
+		est = append(est, tk.Chunk)
 	}
 	if err := livebudget.Preflight(est, 1, liveBudget); err != nil {
 		t.Fatal(err)

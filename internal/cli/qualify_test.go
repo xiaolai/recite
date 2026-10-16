@@ -50,7 +50,9 @@ func sayM2(t *testing.T, dir string, interrupt bool) m2Run {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := livebudget.Preflight(realtime.EstimateDuration(string(raw), 1), 2, liveBudget); err != nil {
+	// One estimate for the whole text. Its chunks run about 25s, where the guard's ratio, not its
+	// short-take slack, is the bound; only a short last chunk could add, and under ShortTakeSlack.
+	if err := livebudget.Preflight([]verify.Chunk{{Spoken: string(raw), Estimate: realtime.EstimateDuration(string(raw), 1)}}, 2, liveBudget); err != nil {
 		t.Fatal(err)
 	}
 	budget := livebudget.New(liveBudget)

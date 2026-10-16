@@ -172,12 +172,12 @@ func HeardAsOriginal(recs []Record) []Record {
 func Shard(tasks []pipeline.Task, budget time.Duration) [][]pipeline.Task {
 	var out [][]pipeline.Task
 	var cur []pipeline.Task
-	var est time.Duration
+	var est []verify.Chunk
 	for _, tk := range tasks {
-		if len(cur) > 0 && livebudget.Preflight(est+tk.Chunk.Estimate, 1, budget) != nil {
-			out, cur, est = append(out, cur), nil, 0
+		if len(cur) > 0 && livebudget.Preflight(append(est, tk.Chunk), 1, budget) != nil {
+			out, cur, est = append(out, cur), nil, nil
 		}
-		cur, est = append(cur, tk), est+tk.Chunk.Estimate
+		cur, est = append(cur, tk), append(est, tk.Chunk)
 	}
 	return append(out, cur)
 }

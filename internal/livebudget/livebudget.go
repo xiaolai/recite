@@ -22,10 +22,14 @@ var (
 	ErrExceeded   = errors.New("livebudget: the audio budget was reached; the run is incomplete")
 )
 
-// Preflight refuses a run whose worst case, the estimated audio × the duration guard's upper
-// bound × the attempt limit, is over the budget.
-func Preflight(estimate time.Duration, attempts int, budget time.Duration) error {
-	worst := time.Duration(float64(estimate) * verify.MaxDurationRatio * float64(attempts))
+// Preflight refuses a run whose worst case, the longest take the duration guard accepts for each
+// chunk (verify.MaxTakeDuration) × the attempt limit, is over the budget.
+func Preflight(chunks []verify.Chunk, attempts int, budget time.Duration) error {
+	var each time.Duration
+	for _, c := range chunks {
+		each += verify.MaxTakeDuration(c.Estimate, c.Spoken)
+	}
+	worst := each * time.Duration(attempts)
 	if worst > budget {
 		return fmt.Errorf("%w: up to %v of audio, budget %v", ErrOverBudget, worst.Round(time.Second), budget)
 	}

@@ -93,9 +93,9 @@ func TestQ12EmphasisListening(t *testing.T) {
 	if os.Getenv("RECITE_LIVE") == "" {
 		t.Skip("set RECITE_LIVE=1 to render the Q12 listening set against the real service")
 	}
-	var est time.Duration
+	var est []verify.Chunk
 	for _, tk := range tasks {
-		est += tk.Chunk.Estimate
+		est = append(est, tk.Chunk)
 	}
 	if err := livebudget.Preflight(est, opts.MaxAttempts, liveBudget); err != nil {
 		t.Fatal(err)

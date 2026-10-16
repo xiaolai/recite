@@ -43,6 +43,14 @@ func chunk(spokenText string) verify.Chunk {
 	}
 }
 
+// chunkEstimated is chunk with the estimate the pipeline gives it (text.EstimateSeconds, via the
+// segmenter), not the provisional realtime one: for a guard bound measured against real takes.
+func chunkEstimated(spokenText string) verify.Chunk {
+	c := chunk(spokenText)
+	c.Estimate = time.Duration(text.EstimateSeconds(spokenText, 1) * float64(time.Second))
+	return c
+}
+
 // run adjudicates c against the scripted synthesizer and transcriber.
 func run(t *testing.T, c verify.Chunk, o verify.Options, synth *rtfake.ScriptedSynthesizer, tr stt.Transcriber) verify.ChunkResult {
 	t.Helper()
@@ -143,6 +151,54 @@ func TestPreSTTGuardsRerenderWithoutSTT(t *testing.T) {
 				t.Fatalf("STT heard attempt %d, want only attempt 2", calls[0].TakeAttempt)
 			}
 		})
+	}
+}
+
+// A short line is bounded by the guard's slack, not its ratio: "And in." read calmly runs well
+// past 2.2× its estimate and must be kept; a take longer than the slack allows is still refused.
+func TestDurationGuardOnAShortLine(t *testing.T) {
+	c := chunk("And in.")
+	if c.Estimate >= verify.ShortTakeSlack {
+		t.Fatalf("estimate %v: not a short line, so this checks nothing", c.Estimate)
+	}
+	calm := c.Estimate + 900*time.Millisecond
+	if float64(calm)/float64(c.Estimate) <= verify.MaxDurationRatio {
+		t.Fatalf("%v is within the ratio of a %v estimate, so this checks nothing", calm, c.Estimate)
+	}
+	r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c, rtfake.Pass(calm)), sttWith(sttfake.Text(c.Spoken)))
+	wantResult(t, r, verify.StateVerified, 1, 1)
+
+	long := verify.MaxTakeDuration(c.Estimate, c.Spoken) + 100*time.Millisecond
+	r = run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c, rtfake.Pass(long)), sttWith(sttfake.Text(c.Spoken)))
+	if got := reasons(r); len(got) == 0 || got[0] != verify.ReasonDuration {
+		t.Fatalf("a take of %v for a %v estimate was not refused for its duration: %v", long, c.Estimate, got)
+	}
+}
+
+// A pause is spoken: a list read as dictation pauses at every comma and stop, which a character
+// count cannot see. Measured 2026-10-14, a children's lesson, voice coral, every take saying its
+// words exactly: "D, R, F prime." ran 3.63–3.95s and "R. U. R prime. U prime." 5.02–5.75s, so
+// every take of each was refused. Each pause mark allows one paragraph gap more, and nothing else.
+func TestDurationGuardAllowsSpokenPauses(t *testing.T) {
+	for line, longest := range map[string]time.Duration{
+		"D, R, F prime.":          3950 * time.Millisecond,
+		"R. U. R prime. U prime.": 5750 * time.Millisecond,
+	} {
+		c := chunkEstimated(line)
+		if got := verify.MaxTakeDuration(c.Estimate, c.Spoken); got < longest {
+			t.Errorf("%q: the guard allows %v, and a measured take ran %v", line, got, longest)
+		}
+		// Still a bound: a take past it is refused.
+		over := verify.MaxTakeDuration(c.Estimate, c.Spoken) + 100*time.Millisecond
+		r := run(t, c, verify.OptionsFor(verify.ModeNormal), synthWith(c, rtfake.Pass(over)), sttWith(sttfake.Text(c.Spoken)))
+		if got := reasons(r); len(got) == 0 || got[0] != verify.ReasonDuration {
+			t.Errorf("%q: a take of %v was not refused for its duration: %v", line, over, got)
+		}
+	}
+	// Long prose keeps its ratio bound: its pauses fit inside 2.2× already.
+	prose := "The quick brown fox, which was tired, jumped over the lazy dog; then it slept. It woke at noon, ate, and ran off."
+	if e := 8 * time.Second; verify.MaxTakeDuration(e, prose) != time.Duration(float64(e)*verify.MaxDurationRatio) {
+		t.Errorf("prose bound %v, want the ratio's %v", verify.MaxTakeDuration(e, prose), time.Duration(float64(e)*verify.MaxDurationRatio))
 	}
 }
 

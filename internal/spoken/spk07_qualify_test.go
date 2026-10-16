@@ -116,9 +116,9 @@ func TestQualifyDeliveryPresets(t *testing.T) {
 		t.Fatalf("run each of the %d shards in its own invocation: RECITE_SHARD=1..%d", len(shards), len(shards))
 	}
 	part := shards[k-1]
-	var est time.Duration
+	var est []verify.Chunk
 	for _, tk := range part {
-		est += tk.Chunk.Estimate
+		est = append(est, tk.Chunk)
 	}
 	if err := livebudget.Preflight(est, opts.MaxAttempts, liveBudget); err != nil {
 		t.Fatal(err)

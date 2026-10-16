@@ -47,14 +47,38 @@ const (
 // 4: spelled letters keep their identity under CER and inside the alignment, lexicon keys are
 // matched by the lexicon's own word-boundary rule (Han keys inside Han text), and a comparison
 // too large to align is rejected as unverifiable.
-const GuardVersion = 4
+// 5: the duration guard's upper bound is MaxTakeDuration — the estimate plus ShortTakeSlack when
+// that is longer than the ratio — so a short line's calm take is no longer refused — and a spelled
+// capital letter is estimated at its name's length (text.spelledLetterChars), so a list of moves is too;
+// "half way", "all together", "can not" and "part way" join the compound variants; and each pause
+// mark allows PauseSlack more, so a list read as dictation is too.
+const GuardVersion = 5
 
 // Pre-STT guard limits (design §8.1).
 const (
 	MinTakeDuration  = 200 * time.Millisecond
 	MinDurationRatio = 0.5
 	MaxDurationRatio = 2.2
+	// ShortTakeSlack is the time any take may run past its estimate. A ratio alone cannot bound a
+	// short line: "And in." is estimated at 0.5s and a calm reading runs 1.2s, 2.4×, so every take
+	// of it was refused. Above a 0.83s estimate the ratio is the larger bound, so long chunks are
+	// judged exactly as before, and a runaway take of a short line still runs past both.
+	ShortTakeSlack = time.Second
 )
+
+// PauseSlack is what each pause mark in a chunk (text.PauseMarks: a comma, a stop, a dash) may add
+// to a take: the longest gap recite itself puts between paragraphs. A list read as dictation pauses
+// at every mark, and a character count cannot see a pause.
+var PauseSlack = audio.DefaultGaps().Paragraph.Max
+
+// MaxTakeDuration is the longest trimmed take the duration guard accepts for a chunk estimated at
+// estimate and saying spoken: MaxDurationRatio × the estimate, or, if longer, the estimate plus
+// ShortTakeSlack plus PauseSlack for each pause mark. The second only decides for short or
+// punctuation-dense chunks; prose is bounded by the ratio as it always was.
+func MaxTakeDuration(estimate time.Duration, spoken string) time.Duration {
+	pauses := time.Duration(text.PauseMarks(spoken)) * PauseSlack
+	return max(time.Duration(float64(estimate)*MaxDurationRatio), estimate+ShortTakeSlack+pauses)
+}
 
 // Rejection is a failed guard with a human-readable detail for the report.
 type Rejection struct {
@@ -87,7 +111,7 @@ func preSTT(c Chunk, take realtime.Take, noTrim, bypassSaid bool) (audio.PCM, *R
 	if !bypassSaid && !Equivalent(take.Said, c.Spoken) {
 		return pcm, &Rejection{ReasonSaid, fmt.Sprintf("the model said %q", take.Said)}
 	}
-	if r := d.Seconds() / c.Estimate.Seconds(); r < MinDurationRatio || r > MaxDurationRatio {
+	if r := d.Seconds() / c.Estimate.Seconds(); r < MinDurationRatio || d > MaxTakeDuration(c.Estimate, c.Spoken) {
 		return pcm, &Rejection{ReasonDuration, fmt.Sprintf("%v is %.2f× the %v estimate", d, r, c.Estimate)}
 	}
 	return pcm, nil

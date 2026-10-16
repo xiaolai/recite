@@ -222,9 +222,9 @@ func TestFullCalibrationCandidates(t *testing.T) {
 			}
 			shards := calibrate.Shard(tasks, 30*time.Minute)
 			for k, part := range shards {
-				var est time.Duration
+				var est []verify.Chunk
 				for _, tk := range part {
-					est += tk.Chunk.Estimate
+					est = append(est, tk.Chunk)
 				}
 				if err := livebudget.Preflight(est, 1, 30*time.Minute); err != nil {
 					t.Fatalf("shard %d: %v", k+1, err)

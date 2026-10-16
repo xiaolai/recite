@@ -40,12 +40,24 @@ func fakeSynth() *rtfake.ScriptedSynthesizer {
 
 func TestPreflight(t *testing.T) {
 	// 5 min of estimated audio × 2.2 × 2 attempts = 22 min.
-	if err := livebudget.Preflight(5*time.Minute, 2, 30*time.Minute); err != nil {
+	if err := livebudget.Preflight([]verify.Chunk{{Estimate: 5 * time.Minute}}, 2, 30*time.Minute); err != nil {
 		t.Fatalf("22 min under a 30 min budget: %v", err)
 	}
-	err := livebudget.Preflight(5*time.Minute, 3, 30*time.Minute)
+	err := livebudget.Preflight([]verify.Chunk{{Estimate: 5 * time.Minute}}, 3, 30*time.Minute)
 	if !errors.Is(err, livebudget.ErrOverBudget) {
 		t.Fatalf("33 min over a 30 min budget: %v", err)
+	}
+	// Short chunks are bounded by the guard's slack, not its ratio: 10 chunks of 0.5s may each run
+	// 1.5s, so 15s an attempt, where 2.2 × the 5s total would claim 11s. A budget of 12s is short.
+	short := make([]verify.Chunk, 10)
+	for i := range short {
+		short[i] = verify.Chunk{Spoken: "Six", Estimate: 500 * time.Millisecond}
+	}
+	if err := livebudget.Preflight(short, 1, 12*time.Second); !errors.Is(err, livebudget.ErrOverBudget) {
+		t.Fatalf("15s of worst case under a 12s budget passed: %v", err)
+	}
+	if err := livebudget.Preflight(short, 1, 15*time.Second); err != nil {
+		t.Fatalf("15s of worst case under a 15s budget: %v", err)
 	}
 }
 
