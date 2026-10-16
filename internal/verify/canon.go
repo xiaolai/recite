@@ -1,8 +1,8 @@
 package verify
 
-import "github.com/xiaolai/sayso/go/canon"
+import "github.com/xiaolai/recite/internal/canon"
 
-// The canonicaliser lives in github.com/xiaolai/sayso/go/canon; the scorer reads text through it.
+// The canonicaliser lives in package canon (internal/canon); the scorer reads text through it.
 
 // CanonVersion identifies the canonicaliser's behaviour. Cache keys and verification provenance
 // record it.

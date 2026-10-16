@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/xiaolai/sayso/go/canon"
+	"github.com/xiaolai/recite/internal/canon"
 )
 
 // MaxKeywords bounds the STT prompt (VER-10).
