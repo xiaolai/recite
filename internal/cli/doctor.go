@@ -192,14 +192,19 @@ func planCheck(ctx context.Context, st *auth.Status) doctorCheck {
 		return warnCheck("plan", "Codex could not report the plan status: "+errMessage(err), auth.CodexCommand(st.Context)+" login status")
 	case !read:
 		return warnCheck("plan", "not checked: the plan status is read through the Codex app-server, and the auth source is file", "")
-	case rl.OrdinaryUsageKnown && !rl.OrdinaryUsageAllowed: // an omitted field is not a denial
-		return warnCheck("plan", "plan "+orUnknown(rl.PlanType)+": Codex reports that ordinary usage is not allowed now", "wait for the usage window to reset")
 	}
 	parts := []string{"plan " + orUnknown(rl.PlanType)}
 	for _, w := range rl.Windows {
 		parts = append(parts, fmt.Sprintf("%s window %.0f%% used", w.Name, w.UsedPercent))
 	}
-	return okCheck("plan", strings.Join(parts, ", "))
+	detail := strings.Join(parts, ", ")
+	switch {
+	case !rl.OrdinaryUsageKnown: // an omitted field is neither a permission nor a denial
+		return warnCheck("plan", detail+"; Codex did not report whether ordinary usage is allowed now", "")
+	case !rl.OrdinaryUsageAllowed:
+		return warnCheck("plan", detail+"; Codex reports that ordinary usage is not allowed now", "wait for the usage window to reset")
+	}
+	return okCheck("plan", detail)
 }
 
 // routeCheck is check 4: mint a speech secret, open the WebSocket and receive

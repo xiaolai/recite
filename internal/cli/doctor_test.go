@@ -391,14 +391,27 @@ func TestDoctorConfigErrorStillChecksState(t *testing.T) {
 	}
 }
 
-// An omitted ordinaryUsageAllowed is not a denial: doctor reports the plan as ok, and only an
-// explicit false is the "not allowed" warning.
+// An omitted ordinaryUsageAllowed is not a denial, and not a permission either: doctor warns
+// that it is unknown, without the fix a denial gets. Only an explicit false is the "not allowed"
+// warning. Every line keeps the usage windows (audit).
+// accept: CLI-05#5
 func TestDoctorPlanOmittedPermissionIsNotADenial(t *testing.T) {
-	for _, tc := range []struct{ usage, status string }{{"omit", checkOK}, {"false", checkWarn}} {
+	for _, tc := range []struct{ usage, status, want, fix string }{
+		{"omit", checkWarn, "did not report whether ordinary usage is allowed", ""},
+		{"false", checkWarn, "ordinary usage is not allowed now", "wait for the usage window to reset"},
+		{"", checkOK, "plan pro", ""},
+	} {
 		t.Setenv("FAKECODEX_ORDINARY_USAGE", tc.usage)
 		r := newDoctorEnv(t).run()
-		if l := line(t, r.stdout, "plan"); !strings.HasPrefix(l, tc.status) {
-			t.Fatalf("ordinaryUsageAllowed %s: plan line %q", tc.usage, l)
+		l := line(t, r.stdout, "plan")
+		if !strings.HasPrefix(l, tc.status) || !strings.Contains(l, tc.want) || !strings.Contains(l, "window") {
+			t.Fatalf("ordinaryUsageAllowed %q: plan line %q", tc.usage, l)
+		}
+		if tc.fix != "" && !strings.Contains(r.stdout, "fix: "+tc.fix) {
+			t.Fatalf("ordinaryUsageAllowed %q: no fix line:\n%s", tc.usage, r.stdout)
+		}
+		if tc.fix == "" && strings.Contains(r.stdout, "wait for the usage window") {
+			t.Fatalf("ordinaryUsageAllowed %q: a denial's fix:\n%s", tc.usage, r.stdout)
 		}
 	}
 }
