@@ -39,6 +39,11 @@ func TestEquivalencePairs(t *testing.T) {
 		{"three seven oh four, oh oh four four", "three seven O four, O O four four"},
 		{"DE eighty-nine three seven oh four", "D E eighty nine three seven O four"},
 		{"version 4.0", "version four point oh"},
+		// "a hundred" is one hundred, and STT writes it as digits: a calm take of "about a hundred and
+		// sixty" was refused on every attempt for being heard as "about 160".
+		{"about a hundred and sixty is normal", "about 160 is normal"},
+		{"a thousand times", "1,000 times"},
+		{"a million and one", "one million and one"},
 	}
 	for _, p := range pairs {
 		if !Equivalent(p[0], p[1]) {
@@ -49,7 +54,9 @@ func TestEquivalencePairs(t *testing.T) {
 		// Joining spelled letters removes spacing only: different or extra letters still differ.
 		{"part X J", "part X K"}, {"plan A", "plan A B"}, {"XJ", "JX"},
 		// "oh" is zero only beside a number word.
-		{"oh no", "zero no"}, {"the letter O", "the letter zero"}} {
+		{"oh no", "zero no"}, {"the letter O", "the letter zero"},
+		// "a" is one only before a scale word: not an article elsewhere, and not two hundred.
+		{"a hundred", "200"}, {"a cat", "one cat"}, {"a hundred", "a"}} {
 		if Equivalent(p[0], p[1]) {
 			t.Errorf("Equivalent(%q, %q) = true", p[0], p[1])
 		}
