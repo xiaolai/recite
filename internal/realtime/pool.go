@@ -260,7 +260,7 @@ func (l *Lease) Render(ctx context.Context, req RenderRequest) (Take, error) {
 func (l *Lease) Release() {
 	p := l.p
 	p.mu.Lock()
-	if !(l.discard || p.closed || p.expired(l.s)) {
+	if !l.discard && !p.closed && !p.expired(l.s) {
 		l.s.busy = false
 		p.mu.Unlock()
 		return
