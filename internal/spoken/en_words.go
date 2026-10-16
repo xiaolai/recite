@@ -84,6 +84,11 @@ func enRoman(s string, i int, _ *Options) (Match, bool) {
 	if j-i == 1 && (singleCapital(prev) || singleCapital(nextWord(s, j))) {
 		return Match{}, false // a letter spelled out among others ("X J 4471"), not a numeral
 	}
+	// The pronoun: several numbering words are ordinary nouns too ("the part I want", "the book I
+	// read"). Only a capitalised heading word ("Part I") numbers a lone I.
+	if s[i:j] == "I" && !capitalised(strings.TrimSuffix(prev, ".")) {
+		return Match{}, false
+	}
 	switch {
 	case regnalNames[prev]:
 		w := ordinalWords(uint64(v))

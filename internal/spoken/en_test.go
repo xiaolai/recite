@@ -93,6 +93,46 @@ func TestProbeItems(t *testing.T) {
 	}
 }
 
+// The pronoun is not a numeral. Several numbering words are also ordinary nouns ("the part I want",
+// "the book I read"), so a lone "I" after one in lower case is the speaker, and is read as written.
+// Found in a children's lesson, where "the part I want you to know" was spoken as "the part one want".
+// A capitalised heading word ("Part I") and a longer numeral ("part IV") still number.
+func TestPronounIAfterANumberingNoun(t *testing.T) {
+	kept := []string{
+		"And here is the part I want you to know.",
+		"That is the book I read last summer.",
+		"It was the scene I liked best.",
+		"Every season I go back.",
+		"Read the section I marked.",
+		"The phase I'm in now is hard.",
+	}
+	for _, in := range kept {
+		r, err := spoken.Normalize(in, "en", spoken.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkMap(t, r)
+		if r.Spoken != in || len(r.Findings) != 0 {
+			t.Errorf("%q became %q (%d findings); the pronoun was read as a numeral", in, r.Spoken, len(r.Findings))
+		}
+	}
+	numbered := map[string]string{
+		"See Part I first.":     "See Part one first.",
+		"Read Chapter I today.": "Read Chapter one today.",
+		"Go to part IV.":        "Go to part four.",
+	}
+	for in, want := range numbered {
+		r, err := spoken.Normalize(in, "en", spoken.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkMap(t, r)
+		if r.Spoken != want {
+			t.Errorf("%q became %q, want %q", in, r.Spoken, want)
+		}
+	}
+}
+
 // accept: TXT-11#2
 func TestAmbiguityIsReportedNotGuessed(t *testing.T) {
 	cases := []struct {
