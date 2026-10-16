@@ -188,6 +188,21 @@ func TestDoctorFailureModes(t *testing.T) {
 	}
 }
 
+// The route line is recite's wording: the provider's message (an error event's, a mint error
+// body's) is diagnostic only and never printed (audit).
+// accept: NET-05#2
+func TestDoctorRouteLineOmitsProviderMessage(t *testing.T) {
+	for _, opt := range []rtfake.Option{rtfake.WithErrorEvent(0, "server_error"), rtfake.WithMintError(403)} {
+		e := newDoctorEnv(t)
+		e.srv = rtfake.NewServer(t, speakScenario(t), opt)
+		r := e.run()
+		l := line(t, r.stdout, "route")
+		if !strings.HasPrefix(l, checkFail) || strings.Contains(r.stdout, "injected by fake") || strings.Contains(r.stdout, "fake mint error") {
+			t.Fatalf("route line %q:\n%s", l, r.stdout)
+		}
+	}
+}
+
 // accept: CLI-05#2
 func TestDoctorExitIsMostSevereFailure(t *testing.T) {
 	// The route is denied (4) and the state directory is not writable (2): 4 wins.

@@ -205,23 +205,31 @@ func (c *CLI) routeCheck(ctx context.Context, creds *auth.Credentials) (doctorCh
 	start := time.Now() // timing only; never asserted
 	sess, err := synth.Open(ctx, spec)
 	if err != nil {
-		return failCheck("route", routeFailure(err), c.routeFix(err), openai.ExitCode(err)), nil
+		return c.routeFailed(err), nil
 	}
 	if a, ok := sess.(realtime.CreatedAwaiter); ok {
 		if err := a.AwaitCreated(ctx); err != nil {
 			_ = sess.Close()
-			return failCheck("route", routeFailure(err), c.routeFix(err), openai.ExitCode(err)), nil
+			return c.routeFailed(err), nil
 		}
 	}
 	return okCheck("route", fmt.Sprintf("speech secret minted, session opened (%s, %s)", spec.Model, time.Since(start).Round(time.Millisecond))), sess
 }
 
+// routeFailed is the failing route line. The whole error, with the provider's diagnostic
+// message, goes to the debug log only.
+func (c *CLI) routeFailed(err error) doctorCheck {
+	c.Logger.Debug("route check failed", "err", secret.Scrub(err.Error()))
+	return failCheck("route", routeFailure(err), c.routeFix(err), openai.ExitCode(err))
+}
+
+// routeFailure is the route line's detail, in recite's words (failureText).
 func routeFailure(err error) string {
 	var e *openai.Error
 	if errors.As(err, &e) && e.Class == openai.ClassRouteDenied {
-		return fmt.Sprintf("OpenAI refused the %s route (HTTP %d): %s", e.Route, e.Status, e.Message)
+		return failureText(e)
 	}
-	return "the speech session could not be opened: " + err.Error() // the cause names the refusal; output is scrubbed
+	return "the speech session could not be opened: " + errMessage(err)
 }
 
 // routeFix never suggests signing in for a route denial: the sign-in works (AUTH-07). A sign-in
@@ -246,6 +254,7 @@ func (c *CLI) deepCheck(ctx context.Context, creds *auth.Credentials, sess realt
 	take, err := sess.Render(ctx, realtime.RenderRequest{ChunkID: "doctor", Text: doctorSentence,
 		Effort: realtime.DefaultEffort, Attempt: 1, Estimate: estimate})
 	if err != nil {
+		c.Logger.Debug("deep check render failed", "err", secret.Scrub(err.Error()))
 		return failCheck("deep", "render failed: "+errMessage(err), c.routeFix(err), openai.ExitCode(err))
 	}
 	rendered := time.Since(start)
@@ -272,6 +281,7 @@ func (c *CLI) deepCheck(ctx context.Context, creds *auth.Credentials, sess realt
 	defer func() { _ = closeTr() }()
 	t, err := tr.Transcribe(ctx, take.PCM, stt.Hint{Languages: []string{"en"}})
 	if err != nil {
+		c.Logger.Debug("deep check transcription failed", "err", secret.Scrub(err.Error()))
 		return sttProblem("transcription failed: "+errMessage(err), c.routeFix(err), openai.ExitCode(err))
 	}
 	res := verify.Score(doctorSentence, t.Text, verify.ScriptMetric(doctorSentence))
@@ -389,11 +399,12 @@ func firstFix(g auth.Guide) string {
 	return auth.AuthURL
 }
 
-// errMessage is the user-facing message of err: openai.Error.Message without its prefix.
+// errMessage is the user-facing message of err: recite's wording of a classified failure
+// (failureText), never the provider's diagnostic message; any other error as it is.
 func errMessage(err error) string {
 	var e *openai.Error
-	if errors.As(err, &e) && e.Message != "" {
-		return e.Message
+	if errors.As(err, &e) {
+		return failureText(e)
 	}
 	return err.Error()
 }

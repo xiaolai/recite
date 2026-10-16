@@ -2,11 +2,13 @@ package cli
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -363,8 +365,9 @@ func (c *CLI) reportGuide(g auth.Guide) int {
 	return exitcode.Auth
 }
 
-// reportFailure prints err for the user and returns its exit code. Messages
-// come from openai.Error.Message, not Error(), which carries a prefix. Route
+// reportFailure prints err for the user and returns its exit code. A classified failure is
+// worded by recite from its class, status and code (failureText): the provider's free-text
+// message is for diagnostics only and goes to the debug log, never to the terminal. Route
 // denial is not a login problem, so it never suggests signing in (AUTH-07).
 func (c *CLI) reportFailure(err error) int {
 	if err == nil {
@@ -404,15 +407,85 @@ func (c *CLI) reportFailure(err error) int {
 		}
 		return openai.ExitCode(err)
 	}
+	c.errorf("recite: %s", failureText(e))
 	if g, ok := c.runtimeGuide(err); ok {
-		c.errorf("recite: %s: %s", e.Class, e.Message)
 		return c.reportGuide(g)
 	}
-	switch e.Class {
-	case openai.ClassRouteDenied:
-		c.errorf("recite: your ChatGPT sign-in works, but OpenAI refused the %s route (HTTP %d): %s. The route may have closed.", e.Route, e.Status, e.Message)
-	default:
-		c.errorf("recite: %s: %s", e.Class, e.Message)
-	}
 	return openai.ExitCode(err)
+}
+
+// networkCause names a transport failure from the error's type, in recite's words: the
+// cause's own text may carry a peer's close reason, which is provider text.
+func networkCause(e *openai.Error) string {
+	var dns *net.DNSError
+	var tlsErr *tls.RecordHeaderError
+	var alert tls.AlertError
+	var cert *tls.CertificateVerificationError
+	switch err := e.Err; {
+	case err == nil:
+		return ""
+	case errors.As(err, &dns):
+		return "the name did not resolve"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE):
+		return "the connection was reset"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
+		return "timed out"
+	case errors.As(err, &tlsErr), errors.As(err, &alert), errors.As(err, &cert):
+		return "the TLS handshake failed"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return "the connection closed early"
+	}
+	return ""
+}
+
+// failureText is recite's wording of a classified failure: what happened, from the class, then
+// the HTTP status and the provider's code when there are any. The provider's free-text message
+// (openai.Error.Message) is diagnostic only (spec/http-and-mint.md) and is never part of it;
+// the debug log (-vv) has the whole error.
+func failureText(e *openai.Error) string {
+	var what, after string
+	switch e.Class {
+	case openai.ClassAuthExpired:
+		what = "OpenAI did not accept the ChatGPT sign-in"
+	case openai.ClassAuthMode:
+		what = "the sign-in is not a ChatGPT sign-in"
+	case openai.ClassCodexError:
+		what = "Codex could not provide the sign-in"
+	case openai.ClassRouteDenied:
+		route := string(e.Route)
+		if route == "" {
+			route = "requested"
+		}
+		what, after = "your ChatGPT sign-in works, but OpenAI refused the "+route+" route", ". The route may have closed."
+	case openai.ClassInvalidRequest:
+		what = "OpenAI rejected the request"
+	case openai.ClassRateLimited:
+		what = "OpenAI's rate or usage limit was reached"
+	case openai.ClassServer:
+		what = "OpenAI's service failed"
+	case openai.ClassNetwork:
+		what = "the connection to OpenAI failed"
+		if cause := networkCause(e); cause != "" {
+			what += ": " + cause
+		}
+	case openai.ClassProtocol:
+		what = "OpenAI's reply was not what recite expected"
+	case openai.ClassCancelled:
+		what = "interrupted"
+	default:
+		what = "internal error"
+	}
+	var detail []string
+	if e.Status != 0 {
+		detail = append(detail, fmt.Sprintf("HTTP %d", e.Status))
+	}
+	if e.Code != "" {
+		detail = append(detail, "code "+e.Code)
+	}
+	if len(detail) > 0 {
+		what += " (" + strings.Join(detail, ", ") + ")"
+	}
+	return what + after
 }

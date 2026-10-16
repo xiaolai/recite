@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -302,6 +303,35 @@ func TestRouteDeniedPrintsNoLoginGuidance(t *testing.T) {
 	}
 }
 
+// The provider's free-text message is diagnostic only (spec/http-and-mint.md): the terminal
+// gets recite's wording from the class, status and code, and the message reaches only the
+// debug log (audit).
+// accept: NET-05#2
+func TestProviderMessageNeverReachesTheTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		code   string
+		want   string
+	}{
+		{403, "", "refused the speech-mint route (HTTP 403, code"},
+		{401, "missing_scope", "refused the speech-mint route (HTTP 401, code missing_scope). The route may have closed."},
+		{500, "", "OpenAI's service failed (HTTP 500"},
+		{400, "", "OpenAI rejected the request (HTTP 400"},
+	} {
+		srv := rtfake.NewServer(t, speakScenario(t), rtfake.WithMintErrorDetail(tc.status, tc.code, ""))
+		c, errb := gateCLI(t, "chatgpt")
+		var logs bytes.Buffer
+		c.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		c.withCredentials(mintWith(t, srv))
+		if strings.Contains(errb.String(), "fake mint error") || !strings.Contains(errb.String(), tc.want) {
+			t.Errorf("HTTP %d: stderr %q, want %q and no provider message", tc.status, errb.String(), tc.want)
+		}
+		if !strings.Contains(logs.String(), "fake mint error") {
+			t.Errorf("HTTP %d: the debug log lacks the provider message: %s", tc.status, logs.String())
+		}
+	}
+}
+
 // accept: AUTH-07#12
 func TestClassificationRunsBeforeAnyRequest(t *testing.T) {
 	for _, mode := range []string{"logged-out", "apikey", "rpc-error"} {
@@ -372,7 +402,7 @@ func TestRuntimeSignInFailureShowsTheGuide(t *testing.T) {
 	if code := c.withCredentials(refused); code != exitcode.Auth {
 		t.Fatalf("code %d", code)
 	}
-	for _, want := range []string{realtime.MsgSignInRefused, auth.ShellQuote(fakeCodex) + " login\n", auth.AuthURL} {
+	for _, want := range []string{"OpenAI did not accept the ChatGPT sign-in", auth.ShellQuote(fakeCodex) + " login\n", auth.AuthURL} {
 		if !strings.Contains(errb.String(), want) {
 			t.Errorf("stderr lacks %q:\n%s", want, errb.String())
 		}
@@ -401,9 +431,9 @@ func TestFailureDetailsReachTheDebugLog(t *testing.T) {
 	var logs bytes.Buffer
 	c.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	err := fmt.Errorf("chunk c-7: %w", &openai.Error{Class: openai.ClassNetwork, Message: "realtime: mint",
-		Err: errors.New("dial tcp: lookup api.openai.com: no such host"), RequestID: "req_123"})
+		Err: &net.DNSError{Err: "no such host", Name: "api.openai.com", IsNotFound: true}, RequestID: "req_123"})
 	c.reportFailure(err)
-	if !strings.Contains(errb.String(), "network: realtime: mint") {
+	if errb.String() != "recite: the connection to OpenAI failed: the name did not resolve\n" {
 		t.Fatalf("stderr %q", errb.String())
 	}
 	for _, want := range []string{"chunk c-7", "no such host", "req_123"} {
