@@ -149,9 +149,9 @@ func TestLogFileIsPrivate(t *testing.T) {
 // Provider text that reaches the terminal cannot drive it: controls and bidi overrides are
 // escaped, newlines and tabs kept.
 func TestTerminalSafe(t *testing.T) {
-	in := "refused\x1b[2J\x07 ‮gnirts‬\tok\n\u009b"
+	in := "refused\x1b[2J\x07 \u202egnirts\u202c\tok\n\u009b"
 	got := terminalSafe(in)
-	if strings.ContainsAny(got, "\x1b\x07‮‬\u009b") || !strings.Contains(got, `\u001b[2J`) || !strings.Contains(got, "\tok\n") {
+	if strings.ContainsAny(got, "\x1b\x07\u202e\u202c\u009b") || !strings.Contains(got, `\u001b[2J`) || !strings.Contains(got, "\tok\n") {
 		t.Fatalf("terminalSafe(%q) = %q", in, got)
 	}
 	var errb bytes.Buffer
