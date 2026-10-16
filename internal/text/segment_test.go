@@ -208,9 +208,11 @@ func TestSegmentGolden(t *testing.T) {
 		{"ellipsis", "Wait... Then we go home now.", spoken.ModeOff, 1.5, []wantChunk{
 			{"Wait...", "Wait...", BoundarySentence},
 			{"Then we go home now.", "Then we go home now.", BoundaryEnd}}},
+		// No cut after the initial. "J" is spelled, so it costs its name ("jay"), and the budget's
+		// word cut falls one word earlier than when it cost one character.
 		{"initial", "Ask J. Smith to call me back soon.", spoken.ModeOff, 1.5, []wantChunk{
-			{"Ask J. Smith to call", "Ask J. Smith to call", BoundaryWord},
-			{"me back soon.", "me back soon.", BoundaryEnd}}},
+			{"Ask J. Smith to", "Ask J. Smith to", BoundaryWord},
+			{"call me back soon.", "call me back soon.", BoundaryEnd}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

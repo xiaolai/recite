@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xiaolai/recite/internal/spoken"
 )
@@ -79,7 +80,7 @@ It continues {{pause:1.2s}} after a pause.`
 
 // The estimate of an unsplit block equals the one Segment gives it.
 func TestEstimateSecondsMatchesSegment(t *testing.T) {
-	for _, s := range []string{"Hello there, world.", "你好，世界。Hello.", "Mixed 中文 and English text, 123."} {
+	for _, s := range []string{"Hello there, world.", "你好，世界。Hello.", "Mixed 中文 and English text, 123.", "R, U, R prime, U — and then R'."} {
 		seg, err := Segment(spoken.Result{Display: s, Spoken: s, Segments: []spoken.Segment{{Display: spoken.Range{End: len(s)}, Spoken: spoken.Range{End: len(s)}}}},
 			SegmentOptions{Budget: 1000, Speed: 1.25})
 		if err != nil || len(seg.Chunks) != 1 {
@@ -87,6 +88,52 @@ func TestEstimateSecondsMatchesSegment(t *testing.T) {
 		}
 		if got := EstimateSeconds(s, 1.25); got != seg.Chunks[0].Seconds {
 			t.Errorf("%q: %v, Segment %v", s, got, seg.Chunks[0].Seconds)
+		}
+	}
+}
+
+// A capital letter standing alone is spelled, and spoken as its name: "U" is "you", not one
+// character's worth of sound. Counted as one character, a move list like "R, U, R prime, U" was
+// estimated at a third of its length, and every take of it failed the duration guard (2.5×–2.9×).
+// "A" and "I" are words, a letter inside a word is not spelled, and a lower-case letter is not.
+func TestSpelledLettersCostTheirNames(t *testing.T) {
+	per := 1 / SpeechRate(ScriptLatin)
+	extra := func(s string) float64 { return EstimateSeconds(s, 1) - float64(utf8.RuneCountInString(s))*per }
+	near := func(a, b float64) bool { return a-b < 1e-9 && b-a < 1e-9 }
+	for s, letters := range map[string]int{
+		"R, U, R prime, U":       4,
+		"Turn R' then F2.":       1, // R' is spelled; F2 is a token the letter does not stand alone in
+		"X marks the spot.":      1,
+		"I think A is a letter.": 0,
+		"a b c":                  0,
+		"RUF and DRUL are words": 0,
+		"Ünter Ölberg":           0,
+	} {
+		if got, want := extra(s), float64(letters*(spelledLetterChars-1))*per; !near(got, want) {
+			t.Errorf("%q: %.3fs beyond its characters, want %.3fs (%d spelled letters)", s, got, want, letters)
+		}
+	}
+	// Measured, not derived: three takes of this line (a children's lesson, 2026-10-14, voice coral)
+	// ran 8.70s, 8.84s and 9.80s, all saying it word for word. The guard allows 2.2× the estimate,
+	// so the estimate must reach the longest of them over 2.2. Counted as characters it was 3.43s.
+	if est, longest := EstimateSeconds("R, U, R prime, U — and then R, U, U, R prime, U.", 1), 9.80; longest/est > 2.2 {
+		t.Errorf("estimate %.2fs: the longest measured take is %.2f× it, past the guard's 2.2", est, longest/est)
+	}
+}
+
+// A pause mark is where a reader pauses: a run of them ("?!", "...") is one pause, and a mark
+// inside a token ("3.5", "e.g") is still counted, which only ever allows a take more time.
+func TestPauseMarks(t *testing.T) {
+	for s, want := range map[string]int{
+		"D, R, F prime.":          3,
+		"R. U. R prime. U prime.": 4,
+		"Wait... what?!":          2,
+		"No pause here":           0,
+		"A dash — then a stop.":   2,
+		"你好，世界。":                  2,
+	} {
+		if got := PauseMarks(s); got != want {
+			t.Errorf("PauseMarks(%q) = %d, want %d", s, got, want)
 		}
 	}
 }

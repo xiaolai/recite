@@ -309,8 +309,8 @@ func EstimateSeconds(s string, speed float64) float64 {
 	sg := segmenter{speed: speed}
 	dom := DetectScript(s).Script
 	total := 0.0
-	for _, r := range s {
-		total += sg.seconds(r, dom)
+	for i, r := range s {
+		total += sg.seconds(r, dom) + sg.spelled(s, i, utf8.RuneLen(r), r)
 	}
 	return total
 }

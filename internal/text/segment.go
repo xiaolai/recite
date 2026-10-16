@@ -390,7 +390,7 @@ func (sg *segmenter) breaks(a, b int) ([]brk, float64) {
 			add(i, i, BoundaryChar, cum, cum)
 		}
 		before := cum
-		cum += sg.seconds(r, dom)
+		cum += sg.seconds(r, dom) + sg.spelled(s, i, n, r)
 		j := i + n
 		switch {
 		case unicode.IsSpace(r):
@@ -459,6 +459,26 @@ func (sg *segmenter) skipSpace(s string, j int, cum float64, dom Script) (int, f
 		j += n
 	}
 	return j, cum
+}
+
+// spelledLetterChars is how long a spelled letter is spoken, in characters: its name ("you" for U,
+// "ar" for R, "eff" for F), whose English lengths average three.
+const spelledLetterChars = 3
+
+// spelled is the time a capital Latin letter standing alone takes beyond its one character: it is
+// spelled, so spoken as its name. Not A or I, which are words; not a letter beside another letter
+// or a digit, which is part of a word or a token. 0 for any other rune.
+func (sg *segmenter) spelled(s string, i, n int, r rune) float64 {
+	if r > unicode.MaxASCII || !unicode.IsUpper(r) || r == 'A' || r == 'I' {
+		return 0
+	}
+	before, _ := utf8.DecodeLastRuneInString(s[:i])
+	after, _ := utf8.DecodeRuneInString(s[i+n:])
+	if i > 0 && (unicode.IsLetter(before) || unicode.IsDigit(before)) ||
+		i+n < len(s) && (unicode.IsLetter(after) || unicode.IsDigit(after)) {
+		return 0
+	}
+	return (spelledLetterChars - 1) / SpeechRate(ScriptLatin) / sg.speed
 }
 
 // seconds is one rune's estimated duration: letters at their own script's
@@ -575,6 +595,21 @@ func isTerminal(r rune) bool {
 		return true
 	}
 	return false
+}
+
+// PauseMarks counts the marks a reader pauses at in s: the clause and terminal marks Segment
+// cuts at. A run of terminals ("?!", "...") is one pause.
+func PauseMarks(s string) int {
+	n := 0
+	prev := false
+	for _, r := range s {
+		mark := isTerminal(r) || isClause(r)
+		if mark && !prev {
+			n++
+		}
+		prev = mark
+	}
+	return n
 }
 
 func isClause(r rune) bool {
