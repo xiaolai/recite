@@ -346,7 +346,7 @@ func TestProbeRPCErrors(t *testing.T) {
 	wantState(t, st, StateAppServerAuthUnavailable)
 	st, _ = probeFake(t, probeCase{mode: "chatgpt", env: map[string]string{"FAKECODEX_VERSION": "0.150.3"}})
 	wantState(t, st, StateCodexTooOld)
-	if g, _ := st.Guide(); !strings.HasPrefix(g.Text(), "Codex 0.150.3 is too old for recite (needs ≥ 0.162.0).") {
+	if g, _ := st.Guide(); !strings.HasPrefix(g.Text(), "Codex 0.150.3 is too old for recite (needs ≥ 0.161.0).") {
 		t.Fatalf("guide %q", g.Text())
 	}
 	st, _ = probeFake(t, probeCase{mode: "crash"})

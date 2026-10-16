@@ -1,4 +1,4 @@
-Codex 0.150.0 is too old for recite (needs ≥ 0.162.0).
+Codex 0.150.0 is too old for recite (needs ≥ 0.161.0).
   Update it:
       CODEX_HOME=/srv/codex-home '/opt/codex tools/bin/codex' update
   or upgrade it the way it was installed.
