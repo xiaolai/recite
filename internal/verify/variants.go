@@ -138,6 +138,10 @@ var compoundVariants = map[[2]string]string{
 	{"station", "master"}: "stationmaster",
 	{"light", "house"}:    "lighthouse",
 	{"any", "more"}:       "anymore",
+	{"half", "way"}:       "halfway",
+	{"all", "together"}:   "altogether",
+	{"can", "not"}:        "cannot",
+	{"part", "way"}:       "partway",
 }
 
 // hanPronouns fold to 他: 他, 她 and 它 are all read tā, so a recogniser cannot tell them apart

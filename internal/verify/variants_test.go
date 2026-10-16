@@ -26,6 +26,11 @@ func TestSpellingVariantsJudgedEqual(t *testing.T) {
 		{"A weathervane stood on the roof.", "A weather vane stood on the roof."},
 		{"The coastguard rescued them.", "The Coast Guard rescued them."},
 		{"Everyone complained about the draught.", "Everyone complained about the draft."},
+		// Heard in a children's lesson, 2026-10-14: each refused a correct take on every attempt.
+		{"Turn the whole cube half way round.", "Turn the whole cube halfway round."},
+		{"Six goes altogether, at four moves each.", "Six goes all together, at four moves each."},
+		{"You cannot break it.", "You can not break it."},
+		{"You were part-way through a circle.", "You were partway through a circle."},
 	} {
 		j := judged(p[0], p[1])
 		if j.rejection != nil || len(j.content) != 0 || j.result.Score != 1 {
@@ -42,6 +47,8 @@ func TestSpellingVariantsBoundary(t *testing.T) {
 		{"The harbour was quiet.", "The harbor master was quiet."}, // a word added, not a compound
 		{"The master of the harbour left.", "The harbormaster left."},
 		{"The tour ended at noon.", "The tor ended at noon."},
+		{"Turn it half way.", "Turn it half."},             // a word dropped from a compound
+		{"Put it all together.", "Put it altogether now."}, // a word added beside one
 	} {
 		if j := judged(p[0], p[1]); j.result.Score == 1 {
 			t.Errorf("%q / %q compared equal; want a mismatch", p[0], p[1])
