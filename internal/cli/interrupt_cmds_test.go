@@ -46,3 +46,38 @@ func TestInterruptDuringDoctorAndUsageExits130(t *testing.T) {
 		})
 	}
 }
+
+// An interrupt that arrives during the encoder checks stops doctor there: the directory checks, which write probe
+// files, never start (audit).
+// accept: CLI-05#4
+func TestInterruptDuringDoctorEncoderChecksStopsTheDirectoryChecks(t *testing.T) {
+	var out, errb bytes.Buffer
+	c := New(&out, &errb)
+	dir := t.TempDir()
+	env := map[string]string{"RECITE_CACHE_DIR": filepath.Join(dir, "cache"), "XDG_STATE_HOME": filepath.Join(dir, "state")}
+	c.Getenv = func(k string) string { return env[k] }
+	c.Now = func() time.Time { return cliNow }
+	sigs := make(chan os.Signal, 1)
+	c.Signals = func() (<-chan os.Signal, func()) { return sigs, func() {} }
+	sent := false
+	c.LookPath = func(name string) (string, error) {
+		if !sent {
+			sent = true
+			sigs <- os.Interrupt
+			time.Sleep(300 * time.Millisecond) // the watcher cancels the run
+		}
+		return "/usr/bin/" + name, nil
+	}
+	code := c.Run([]string{"--codex-bin", filepath.Join(dir, "missing-codex"), "--codex-home", t.TempDir(), "--auth-source", "file", "doctor"})
+	if code != ExitInterrupted || out.Len() != 0 {
+		t.Fatalf("code %d, stdout %d bytes, stderr %q", code, out.Len(), errb.String())
+	}
+	if !sent {
+		t.Fatal("the encoder checks never ran")
+	}
+	for _, p := range []string{env["RECITE_CACHE_DIR"], env["XDG_STATE_HOME"]} {
+		if _, err := os.Lstat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s exists: a check ran after the interrupt (%v)", filepath.Base(p), err)
+		}
+	}
+}

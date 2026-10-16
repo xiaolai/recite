@@ -136,8 +136,11 @@ func (c *CLI) doctor(ctx context.Context, deep bool) []doctorCheck {
 	if ctx.Err() != nil {
 		return checks
 	}
-	checks = append(checks, c.encoderChecks()...)
-	return append(checks, c.dirChecks()...)
+	checks = append(checks, c.encoderChecks(ctx)...)
+	if ctx.Err() != nil {
+		return checks
+	}
+	return append(checks, c.dirChecks(ctx)...)
 }
 
 // codexCheck is check 1: the executable and its version.
@@ -324,13 +327,16 @@ func (c *CLI) verifyMode() verify.Mode {
 }
 
 // encoderChecks is check 6: the external encoders, warn only.
-func (c *CLI) encoderChecks() []doctorCheck {
+func (c *CLI) encoderChecks(ctx context.Context) []doctorCheck {
 	names := []string{"ffmpeg"}
 	if runtime.GOOS == "darwin" {
 		names = append(names, "afconvert")
 	}
 	var out []doctorCheck
 	for _, n := range names {
+		if ctx.Err() != nil {
+			return out // interrupted: no later check runs
+		}
 		if p, err := c.LookPath(n); err == nil {
 			out = append(out, okCheck(n, p))
 			continue
@@ -344,17 +350,20 @@ func (c *CLI) encoderChecks() []doctorCheck {
 	return out
 }
 
-// dirChecks is check 7: the cache and state directories are writable.
-func (c *CLI) dirChecks() []doctorCheck {
-	cacheDir := ""
+// dirChecks is check 7: the cache and state directories are writable. Each writes a probe file, so an interrupt
+// stops them before the next one starts.
+func (c *CLI) dirChecks(ctx context.Context) []doctorCheck {
+	var out []doctorCheck
 	if st, err := c.resolveSettings(newFlagSet("doctor-settings"), nil); err == nil {
-		cacheDir = st.Get("cache_dir").Raw
+		out = append(out, dirCheck("cache", st.Get("cache_dir").Raw))
 	} else {
 		// The state directory does not depend on the config: still check it.
-		return []doctorCheck{failCheck("cache", "config: "+err.Error(), "fix the config file (recite config path)", exitcode.Usage),
-			dirCheck("state", c.stateDir())}
+		out = append(out, failCheck("cache", "config: "+err.Error(), "fix the config file (recite config path)", exitcode.Usage))
 	}
-	return []doctorCheck{dirCheck("cache", cacheDir), dirCheck("state", c.stateDir())}
+	if ctx.Err() != nil {
+		return out
+	}
+	return append(out, dirCheck("state", c.stateDir()))
 }
 
 func dirCheck(name, dir string) doctorCheck {
