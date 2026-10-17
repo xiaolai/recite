@@ -26,6 +26,31 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # setup-go's cache has no fallback key, so every go.sum change started check cold, and
+          # a cold macos-latest run takes about five minutes: 4:56 passed, 5:09 was cancelled.
+          # A cancelled job saves nothing, so the branch then stayed cold. The cache below
+          # falls back to the last entry instead, and most of the build cache stays valid.
+          cache: false
+      - name: Go cache directories
+        id: go-env
+        shell: bash
+        run: |
+          {
+            echo "gomodcache=$(go env GOMODCACHE)"
+            echo "gocache=$(go env GOCACHE)"
+            echo "goversion=$(go env GOVERSION)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # The paths in setup-go's order, so its entries are compatible with this cache.
+          path: |
+            ${{ steps.go-env.outputs.gomodcache }}
+            ${{ steps.go-env.outputs.gocache }}
+          key: check-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-env.outputs.goversion }}-${{ hashFiles('go.sum') }}
+          # The setup-go line lets the first runs start from setup-go's last entries.
+          restore-keys: |
+            check-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-env.outputs.goversion }}-
+            setup-go-${{ runner.os }}-${{ runner.arch }}-
       - run: make check
 
   # REL-01: every runner cross-builds all four binaries with `make release`, then runs the
@@ -54,9 +79,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          # setup-go keys its cache by runner OS, architecture and go.sum, which check shares.
-          # A release build that finished first saved its plain builds under that key, and check,
-          # finding the key taken, never saved its race and lint builds: it ran cold every time.
+          # No cache: a release build that saved first once took check's key, and their cold
+          # build fits their ten minutes.
           cache: false
       - run: make release
       - name: all four binaries and their checksums exist
