@@ -43,14 +43,14 @@ var countCell = regexp.MustCompile(`^(\d+) of (\d+)$`)
 // accept: VER-07#3
 // accept: VER-11#1
 func TestCommittedReportsStateVerdict(t *testing.T) {
-	docs := filepath.Join("..", "..", "dev-docs")
+	docs := filepath.Join("..", "..", "docs")
 	for _, pattern := range []string{"calibration-[0-9]*[0-9].md", "calibration-*-latin.md", "calibration-*-han.md"} {
 		paths, err := filepath.Glob(filepath.Join(docs, pattern))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(paths) == 0 {
-			t.Fatalf("no committed report matches dev-docs/%s", pattern)
+			t.Fatalf("no committed report matches docs/%s", pattern)
 		}
 		for _, p := range paths {
 			data, err := os.ReadFile(p)

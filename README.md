@@ -179,8 +179,7 @@ also transcribe every take with a separate speech-to-text model and compare it w
 That check is opt-in because calibration showed its limits: it respells rare names
 (Albery → Albury, 许晚晴 → 许婉晴) and so rejects good takes, most often in Chinese, and it
 sometimes writes back the original sentence over a spoken word swap, so it misses some swaps.
-The numbers are in `dev-docs/calibration-20261012*.md` and the decision is D23 in
-`dev-docs/design.md`.
+The numbers are in `docs/calibration-20261012*.md`.
 
 ### render
 

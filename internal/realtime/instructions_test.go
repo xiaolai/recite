@@ -12,10 +12,10 @@ import (
 )
 
 // probeConstant extracts a parenthesised Python string constant (adjacent
-// "..." literals) from dev-docs/probe_matrix.py.
+// "..." literals) from testdata/probe_matrix.py, the probe that measured them.
 func probeConstant(t *testing.T, name string) string {
 	t.Helper()
-	src, err := os.ReadFile("../../dev-docs/probe_matrix.py")
+	src, err := os.ReadFile("testdata/probe_matrix.py")
 	if err != nil {
 		t.Fatal(err)
 	}

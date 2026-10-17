@@ -4,6 +4,8 @@ __pycache__/
 *.wav
 *.mp3
 *.m4a
+# Local development notes, never published
+/dev-docs/
 # Go build output
 /bin/
 /dist/

@@ -20,8 +20,8 @@ import (
 
 // Paths of the real repository, relative to the module root.
 const (
-	ledgerPath   = "dev-docs/feature-ledger.md"
-	planPath     = "dev-docs/implementation-plan.md"
+	ledgerPath   = "docs/feature-ledger.md"
+	planPath     = "docs/implementation-plan.md"
 	deferredPath = "tools/acceptcheck/deferred.txt"
 )
 
