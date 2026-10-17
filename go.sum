@@ -12,8 +12,8 @@ github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57Hu
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 github.com/stretchr/testify v1.8.0 h1:pSgiaMZlXftHpm5L7V1+rVB+AZJydKsMxsQBIJw4PKk=
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
-github.com/xiaolai/sayso/go v0.2.1 h1:i27ZXBpxqcHuzDOSuVVdEnfLzYGGPtUcQza5yfk++ps=
-github.com/xiaolai/sayso/go v0.2.1/go.mod h1:RJJyP92J5pdCFtO4ZiMJXMZoiJ/DER2qimuRN7QyDCc=
+github.com/xiaolai/sayso/go v0.4.0 h1:Tiqqj+ttZ15t26QF3ef2lbOjC6s2OgM7SjF7Y9/zXqg=
+github.com/xiaolai/sayso/go v0.4.0/go.mod h1:RJJyP92J5pdCFtO4ZiMJXMZoiJ/DER2qimuRN7QyDCc=
 github.com/yuin/goldmark v1.8.6 h1:d0VcaP1sx9GkFVkoW+KtggpGi2KZ965i14b0+bDQST4=
 github.com/yuin/goldmark v1.8.6/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
