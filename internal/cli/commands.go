@@ -159,7 +159,7 @@ func (f *sayFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.model, "model", realtime.DefaultModel, "speech `MODEL`: "+strings.Join(realtime.Models, ", "))
 	fs.BoolVar(&f.modelUnchecked, "model-unchecked", false, "accept any --model name")
 	fs.StringVar(&f.voice, "voice", realtime.DefaultVoice, "`VOICE`: "+strings.Join(realtime.Voices, ", "))
-	fs.StringVar(&f.speed, "speed", "1.0", "`SPEED` from 0.25 to 1.5 in steps of 0.01")
+	fs.StringVar(&f.speed, "speed", "1.0", "playback `SPEED` from 0.25 to 1.5 in steps of 0.01; it stretches the audio and does not change the phrasing")
 	fs.StringVar(&f.effort, "effort", string(realtime.DefaultEffort), "reasoning `EFFORT`: minimal, low, medium, high, xhigh")
 	fs.StringVar(&f.retryEffort, "retry-effort", "", "`LIST` of efforts for attempts 1, 2, 3…, the last repeating, e.g. minimal,low,medium (default off)")
 	fs.IntVar(&f.instructionsVersion, "instructions-version", realtime.InstructionsVersion, "instruction `VERSION` (regression comparison only)")

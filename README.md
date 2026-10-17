@@ -117,7 +117,7 @@ Voice and delivery:
 | `--voice VOICE` | `alloy`, `ash`, `ballad`, `coral`, `echo`, `sage`, `shimmer`, `verse`, `marin` or `cedar` (default `cedar`) |
 | `--model MODEL` | `gpt-realtime-2.1`, `gpt-realtime-2` or `gpt-realtime-2.1-mini` (default `gpt-realtime-2.1`) |
 | `--model-unchecked` | Accept any `--model` name |
-| `--speed SPEED` | 0.25 to 1.5 in steps of 0.01 (default 1.0) |
+| `--speed SPEED` | Playback rate, 0.25 to 1.5 in steps of 0.01 (default 1.0). It stretches the audio and does not change the phrasing, so `--speed 1.3` sounds sped up rather than brisk. For a brisker or slower delivery, add a direction such as `--style fast` or `--style slower` |
 | `--effort EFFORT` | Reasoning effort: `minimal`, `low`, `medium`, `high` or `xhigh` (default `minimal`) |
 | `--retry-effort LIST` | Efforts for attempts 1, 2, 3…, the last repeating, e.g. `minimal,low,medium` |
 | `--emotion PRESET` | `neutral`, `warm`, `calm`, `excited`, `serious`, `sad`, `whisper`, `newsreader` or `storyteller` |

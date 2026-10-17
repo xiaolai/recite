@@ -94,7 +94,7 @@ Flags:
   -session-chunks N
     	renders per speech session before it is replaced, N (default 50)
   -speed SPEED
-    	SPEED from 0.25 to 1.5 in steps of 0.01 (default "1.0")
+    	playback SPEED from 0.25 to 1.5 in steps of 0.01; it stretches the audio and does not change the phrasing (default "1.0")
   -split-sections
     	write one file per heading, NN-<slug>.<format>, into the -o directory
   -strict-output
