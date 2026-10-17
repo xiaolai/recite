@@ -42,15 +42,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          # The paths in setup-go's order, so its entries are compatible with this cache.
           path: |
             ${{ steps.go-env.outputs.gomodcache }}
             ${{ steps.go-env.outputs.gocache }}
           key: check-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-env.outputs.goversion }}-${{ hashFiles('go.sum') }}
-          # The setup-go line lets the first runs start from setup-go's last entries.
-          restore-keys: |
-            check-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-env.outputs.goversion }}-
-            setup-go-${{ runner.os }}-${{ runner.arch }}-
+          restore-keys: check-go-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-env.outputs.goversion }}-
       - run: make check
 
   # REL-01: every runner cross-builds all four binaries with `make release`, then runs the
